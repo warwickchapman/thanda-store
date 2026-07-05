@@ -283,7 +283,32 @@ async function fetchRenogyDetail(itemId) {
   return json.data?.data || {};
 }
 
-function firstImageUrl(detail) {
+function objectStorageKey(url) {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes('.objectstorage.')) return '';
+    const marker = '/o/';
+    const index = parsed.pathname.indexOf(marker);
+    if (index === -1) return '';
+    return decodeURIComponent(parsed.pathname.slice(index + marker.length));
+  } catch {
+    return '';
+  }
+}
+
+async function signedObjectStorageUrl(url) {
+  if (url.includes('/p/')) return url;
+  const fileName = objectStorageKey(url);
+  if (!fileName) return '';
+  const signedJson = await fetchJson(`${BASE_URL}/common/file/preSignedUrl?fileName=${encodeURIComponent(fileName)}`, {
+    method: 'GET',
+    headers: renogyHeaders(),
+  });
+  if (signedJson.code !== 200 || !signedJson.data?.url) return '';
+  return `${signedJson.data.url}${fileName}`;
+}
+
+async function firstImageUrl(detail) {
   const imageSets = [
     detail.item_view_image,
     detail.item_cover_image,
@@ -303,10 +328,13 @@ function firstImageUrl(detail) {
   const cleanUrls = urls
     .map((url) => (typeof url === 'string' ? url.trim() : ''))
     .filter((url) => /^https?:\/\//i.test(url));
-  return cleanUrls.find((url) => url.includes('.objectstorage.') && url.includes('/p/'))
-    || cleanUrls.find((url) => !url.includes('.objectstorage.') || url.includes('/p/'))
-    || cleanUrls[0]
-    || '';
+  const presigned = cleanUrls.find((url) => url.includes('.objectstorage.') && url.includes('/p/'));
+  if (presigned) return presigned;
+  for (const url of cleanUrls) {
+    const signedUrl = await signedObjectStorageUrl(url);
+    if (signedUrl) return signedUrl;
+  }
+  return cleanUrls.find((url) => !url.includes('.objectstorage.')) || cleanUrls[0] || '';
 }
 
 function numberOrNull(value) {
@@ -315,11 +343,12 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function buildProduct(row, wrapper, detail) {
+async function buildProduct(row, wrapper, detail) {
   const sku = row.SKU;
   const price = numberOrNull(detail.unitPrice) ?? numberOrNull(wrapper.data?.amount) ?? numberOrNull(detail.basic_price) ?? 0;
   const originalPrice = numberOrNull(detail.originalPrice);
   const stockOnHand = numberOrNull(detail.inventory) ?? numberOrNull(wrapper.data?.inventory) ?? numberOrNull(row.Stock) ?? 0;
+  const imageUrl = await firstImageUrl(detail);
 
   return {
     sku,
@@ -328,7 +357,7 @@ function buildProduct(row, wrapper, detail) {
     name: detail.item_view_title || detail.description || detail.name || row.Description || sku,
     category: detail.item_view_type || wrapper.data?.item_view_type || 'uncategorized',
     price,
-    image_url: firstImageUrl(detail),
+    image_url: imageUrl,
     stock_on_hand: stockOnHand,
     details: {
       originalPrice,
@@ -344,7 +373,7 @@ function buildProduct(row, wrapper, detail) {
       itemModel: detail.item_model,
       productUrl: `https://partner.renogy.com/product/item/${wrapper.id}`,
       lastRenogyModified: detail.lastModified,
-      hasImage: Boolean(firstImageUrl(detail)),
+      hasImage: Boolean(imageUrl),
     },
   };
 }
@@ -424,7 +453,7 @@ async function main() {
           continue;
         }
         const detail = await fetchRenogyDetail(wrapper.id);
-        const product = buildProduct(row, wrapper, detail);
+        const product = await buildProduct(row, wrapper, detail);
         await upsertProduct(client, product);
         stats.synced += 1;
         if (!product.image_url) stats.missingImages.push(sku);
