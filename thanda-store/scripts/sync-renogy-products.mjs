@@ -296,11 +296,13 @@ function firstImageUrl(detail) {
   for (const value of imageSets) {
     const images = Array.isArray(value) ? value : value ? [value] : [];
     for (const image of images) {
-      if (typeof image === 'string') urls.push(image);
+      if (typeof image === 'string') urls.push(...image.split(','));
       urls.push(image?.url, image?.originalUrl, image?.link);
     }
   }
-  const cleanUrls = urls.filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
+  const cleanUrls = urls
+    .map((url) => (typeof url === 'string' ? url.trim() : ''))
+    .filter((url) => /^https?:\/\//i.test(url));
   return cleanUrls.find((url) => url.includes('.objectstorage.') && url.includes('/p/'))
     || cleanUrls.find((url) => !url.includes('.objectstorage.') || url.includes('/p/'))
     || cleanUrls[0]
