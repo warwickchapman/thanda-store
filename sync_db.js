@@ -1,4 +1,4 @@
-const pool = require('./thanda-solar/src/lib/db').default;
+const pool = require('./thanda-store/src/lib/db').default;
 const fs = require('fs');
 const csv = require('csv-parse/sync');
 
