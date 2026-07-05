@@ -22,7 +22,7 @@ function configuredDiscountPercent() {
 
 export async function GET() {
   try {
-    const res = await pool.query("SELECT * FROM products ORDER BY category ASC, LOWER(name) DESC, name DESC");
+    const res = await pool.query("SELECT * FROM products");
     const discountPercent = configuredDiscountPercent();
     const products = res.rows.map((product) => {
       const details = product.details || {};
@@ -45,6 +45,10 @@ export async function GET() {
           maxB2bDiscountPercent: MAX_B2B_DISCOUNT_PERCENT,
         },
       };
+    }).sort((a, b) => {
+      const categoryOrder = a.category.localeCompare(b.category, undefined, { sensitivity: 'base' });
+      if (categoryOrder !== 0) return categoryOrder;
+      return b.name.localeCompare(a.name, undefined, { sensitivity: 'base' });
     });
 
     return NextResponse.json(products);
