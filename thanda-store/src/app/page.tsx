@@ -32,6 +32,7 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState('');
 
   useEffect(() => {
     fetch('/api/products')
@@ -61,7 +62,16 @@ export default function Home() {
     groups[category].push(product);
     return groups;
   }, {});
-  const categoryGroups = Object.entries(groupedProducts);
+  const allCategories = Array.from(new Set(products.map((product) => product.category || 'uncategorized')));
+  const categoryTabs = allCategories.map((category) => ({
+    category,
+    count: groupedProducts[category]?.length || 0,
+  }));
+  const visibleCategories = categoryTabs.filter((tab) => tab.count > 0);
+  const selectedCategory = activeCategory && groupedProducts[activeCategory]
+    ? activeCategory
+    : visibleCategories[0]?.category || '';
+  const selectedProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : [];
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
@@ -121,22 +131,48 @@ export default function Home() {
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             Loading products...
           </div>
-        ) : categoryGroups.length === 0 ? (
+        ) : visibleCategories.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             No products match your search.
           </div>
         ) : (
-          <div className="space-y-12">
-            {categoryGroups.map(([category, categoryProducts]) => (
-              <section key={category} className="space-y-4">
-                <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
-                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{categoryLabel(category)}</h2>
-                  <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
-                    {categoryProducts.length} {categoryProducts.length === 1 ? 'product' : 'products'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {categoryProducts.map((product) => (
+          <div className="space-y-6">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+              <div className="flex min-w-max gap-2 border-b border-zinc-200">
+                {visibleCategories.map(({ category, count }) => {
+                  const isActive = category === selectedCategory;
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setActiveCategory(category)}
+                      className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
+                        isActive
+                          ? 'border-amber-600 text-zinc-950'
+                          : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'
+                      }`}
+                    >
+                      <span>{categoryLabel(category)}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                        isActive ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <section className="space-y-4">
+              <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
+                <h2 className="text-xl font-bold tracking-tight text-zinc-900">{categoryLabel(selectedCategory)}</h2>
+                <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+                  {selectedProducts.length} {selectedProducts.length === 1 ? 'product' : 'products'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {selectedProducts.map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
                         {product.image_url ? (
@@ -196,10 +232,9 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </section>
-            ))}
+                ))}
+              </div>
+            </section>
           </div>
         )}
       </main>
