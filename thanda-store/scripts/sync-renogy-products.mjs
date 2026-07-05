@@ -19,12 +19,12 @@ const WAREHOUSE_CSV = process.env.WAREHOUSE_CSV || path.resolve(__dirname, '../.
 const PRODUCT_SOURCE = process.env.RENOGY_PRODUCT_SOURCE || 'export';
 const REQUEST_TIMEOUT_MS = Number(process.env.RENOGY_REQUEST_TIMEOUT_MS || 12000);
 
-if (!INITIAL_TOKEN && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) {
-  console.error('RENOGY_BEARER_TOKEN or RENOGY_EMAIL plus RENOGY_PASSWORD is required.');
+let authToken = normalizeToken(INITIAL_TOKEN) || readCachedToken();
+
+if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) {
+  console.error('RENOGY_BEARER_TOKEN, cached Renogy token, or RENOGY_EMAIL plus RENOGY_PASSWORD is required.');
   process.exit(1);
 }
-
-let authToken = normalizeToken(INITIAL_TOKEN) || readCachedToken();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
