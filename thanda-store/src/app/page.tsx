@@ -11,6 +11,9 @@ interface Product {
   name: string;
   category: string;
   price: string | number;
+  recommended_retail_ex_vat: number | null;
+  your_price_ex_vat: number | null;
+  b2b_discount_percent: number;
   sku: string;
   image_url: string;
   stock_on_hand: number;
@@ -44,6 +47,7 @@ export default function Home() {
       || product.name.toLowerCase().includes(search)
       || product.category.toLowerCase().includes(search);
   });
+  const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 font-sans text-zinc-900">
@@ -144,17 +148,17 @@ export default function Home() {
                 
                 <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail</span>
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail Excl. VAT</span>
                     <div className="text-xl font-black tracking-tight text-zinc-900">
-                      {formatCurrency(product.details?.originalPrice || product.price || 0)}
+                      {priceLabel(product.recommended_retail_ex_vat)}
                     </div>
                   </div>
                   
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Dealer Price</span>
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Your Price Excl. VAT</span>
                       <div className="text-sm font-bold text-amber-600">
-                        {formatCurrency(product.price || 0)}
+                        {priceLabel(product.your_price_ex_vat)}
                       </div>
                     </div>
                     <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">

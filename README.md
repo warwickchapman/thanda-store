@@ -31,12 +31,26 @@ RENOGY_EMAIL=warwick@example.com
 RENOGY_PASSWORD=...
 RENOGY_TOKEN_CACHE_FILE=/var/lib/thanda-store/renogy-token.json
 RENOGY_PRODUCT_SOURCE=export
+DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 ```
 
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
 `RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
 `RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
+`DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
+
+## Pricing rules
+
+The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That value must never be displayed as the buyer price.
+
+`GET /api/products` calculates buyer-facing prices from recommended retail:
+
+- `recommended_retail_ex_vat` = Renogy recommended retail price divided by 1.15.
+- `your_price_ex_vat` = `recommended_retail_ex_vat` less the configured B2B discount.
+- B2B discount is capped server-side at 40%, even if environment configuration or future user data asks for more.
+
+All customer-facing prices in the portal are displayed excluding VAT.
 
 ## Database
 
@@ -136,7 +150,7 @@ Stock levels, names, prices, and images are now fetched through SKU-driven Renog
 
 ### Storefront behaviour
 
-The portal is currently a read-only product catalogue. Search input, cart actions, dealer pricing rules, and support actions are visual placeholders and should either be implemented or simplified so the UI does not imply unavailable behaviour.
+The portal is currently a read-only product catalogue. Search input, cart actions, user-specific discount selection, and support actions are visual placeholders and should either be implemented or simplified so the UI does not imply unavailable behaviour.
 
 ## Suggested next steps
 
