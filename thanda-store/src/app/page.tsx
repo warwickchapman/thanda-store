@@ -1,7 +1,7 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
 import { Search, Package, ShoppingCart, Info } from "lucide-react";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
 // However, since we want to keep it simple, I'll move the data fetching to an API route and fetch it here.
@@ -33,6 +33,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch('/api/products')
@@ -47,6 +48,37 @@ export default function Home() {
         console.error('Fetch error:', err);
         setLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalSearch = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditable = target?.tagName === 'INPUT'
+        || target?.tagName === 'TEXTAREA'
+        || target?.isContentEditable;
+      if (isEditable || event.metaKey || event.ctrlKey || event.altKey) return;
+
+      if (event.key === 'Escape') {
+        setQuery('');
+        searchInputRef.current?.blur();
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        setQuery((current) => current.slice(0, -1));
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+      setQuery((current) => `${current}${event.key}`);
+    };
+
+    window.addEventListener('keydown', handleGlobalSearch);
+    return () => window.removeEventListener('keydown', handleGlobalSearch);
   }, []);
 
   const filteredProducts = products.filter((product) => {
@@ -78,7 +110,7 @@ export default function Home() {
     <div className="flex min-h-screen flex-col bg-zinc-50 font-sans text-zinc-900">
       {/* Top Bar - Minimal */}
       <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-0">
           <div className="flex items-center gap-4">
             <img 
               src="/logos/logo_icon_color.png" 
@@ -90,25 +122,28 @@ export default function Home() {
             </span>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="relative hidden sm:block">
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
+            <div className="relative w-full sm:w-64">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <input 
+                ref={searchInputRef}
                 type="text" 
                 placeholder="Search SKU or name..." 
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                className="h-9 w-64 rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
+                className="h-9 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
               />
             </div>
-            <button className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-4 text-sm font-medium transition-colors hover:bg-zinc-50">
-              <Info className="h-4 w-4" />
-              Support
-            </button>
-            <button className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
-              <ShoppingCart className="h-4 w-4" />
-              Cart (0)
-            </button>
+            <div className="flex gap-3">
+              <button className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-4 text-sm font-medium transition-colors hover:bg-zinc-50">
+                <Info className="h-4 w-4" />
+                Support
+              </button>
+              <button className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
+                <ShoppingCart className="h-4 w-4" />
+                Cart (0)
+              </button>
+            </div>
           </div>
         </div>
       </header>
