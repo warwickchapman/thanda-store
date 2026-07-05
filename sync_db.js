@@ -3,7 +3,7 @@ const fs = require('fs');
 const csv = require('csv-parse/sync');
 
 async function sync() {
-  const content = fs.readFileSync('renogy_final_import.csv', 'utf-8');
+  const content = fs.readFileSync('master_product_import.csv', 'utf-8');
   const records = csv.parse(content, { columns: true });
   
   console.log('Importing ' + records.length + ' products...');
