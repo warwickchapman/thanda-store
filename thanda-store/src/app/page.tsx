@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react';
 interface Product {
   id: number;
   name: string;
+  supplier: string;
   category: string;
   price: string | number;
   recommended_retail_ex_vat: number | null;
@@ -20,18 +21,27 @@ interface Product {
   details: Record<string, string | number | null>;
 }
 
-function categoryLabel(category: string) {
-  return category
+function displayLabel(value: string) {
+  return value
     .split(/[_\s-]+/)
     .filter(Boolean)
     .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
     .join(' ');
 }
 
+function supplierLabel(supplier: string) {
+  const labels: Record<string, string> = {
+    eiot: 'eIoT',
+    lora: 'LoRa',
+  };
+  return labels[supplier.toLowerCase()] || displayLabel(supplier);
+}
+
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [activeSupplier, setActiveSupplier] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,15 +96,32 @@ export default function Home() {
     if (!search) return true;
     return product.sku.toLowerCase().includes(search)
       || product.name.toLowerCase().includes(search)
+      || product.supplier.toLowerCase().includes(search)
       || product.category.toLowerCase().includes(search);
   });
-  const groupedProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
+  const supplierProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
+    const supplier = product.supplier || 'unknown';
+    groups[supplier] = groups[supplier] || [];
+    groups[supplier].push(product);
+    return groups;
+  }, {});
+  const allSuppliers = Array.from(new Set(products.map((product) => product.supplier || 'unknown')));
+  const supplierTabs = allSuppliers.map((supplier) => ({
+    supplier,
+    count: supplierProducts[supplier]?.length || 0,
+  }));
+  const visibleSuppliers = supplierTabs.filter((tab) => tab.count > 0);
+  const selectedSupplier = activeSupplier && supplierProducts[activeSupplier]
+    ? activeSupplier
+    : visibleSuppliers[0]?.supplier || '';
+  const productsInSupplier = selectedSupplier ? supplierProducts[selectedSupplier] || [] : [];
+  const groupedProducts = productsInSupplier.reduce<Record<string, Product[]>>((groups, product) => {
     const category = product.category || 'uncategorized';
     groups[category] = groups[category] || [];
     groups[category].push(product);
     return groups;
   }, {});
-  const allCategories = Array.from(new Set(products.map((product) => product.category || 'uncategorized')));
+  const allCategories = Array.from(new Set(productsInSupplier.map((product) => product.category || 'uncategorized')));
   const categoryTabs = allCategories.map((category) => ({
     category,
     count: groupedProducts[category]?.length || 0,
@@ -166,12 +193,42 @@ export default function Home() {
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             Loading products...
           </div>
-        ) : visibleCategories.length === 0 ? (
+        ) : visibleSuppliers.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             No products match your search.
           </div>
         ) : (
           <div className="space-y-6">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+              <div className="flex min-w-max gap-2 border-b border-zinc-200">
+                {visibleSuppliers.map(({ supplier, count }) => {
+                  const isActive = supplier === selectedSupplier;
+                  return (
+                    <button
+                      key={supplier}
+                      type="button"
+                      onClick={() => {
+                        setActiveSupplier(supplier);
+                        setActiveCategory('');
+                      }}
+                      className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
+                        isActive
+                          ? 'border-zinc-950 text-zinc-950'
+                          : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'
+                      }`}
+                    >
+                      <span>{supplierLabel(supplier)}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                        isActive ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
               <div className="flex min-w-max gap-2 border-b border-zinc-200">
                 {visibleCategories.map(({ category, count }) => {
@@ -187,7 +244,7 @@ export default function Home() {
                           : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'
                       }`}
                     >
-                      <span>{categoryLabel(category)}</span>
+                      <span>{displayLabel(category)}</span>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         isActive ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'
                       }`}>
@@ -201,7 +258,10 @@ export default function Home() {
 
             <section className="space-y-4">
               <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
-                <h2 className="text-xl font-bold tracking-tight text-zinc-900">{categoryLabel(selectedCategory)}</h2>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{supplierLabel(selectedSupplier)}</p>
+                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{displayLabel(selectedCategory)}</h2>
+                </div>
                 <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
                   {selectedProducts.length} {selectedProducts.length === 1 ? 'product' : 'products'}
                 </span>
