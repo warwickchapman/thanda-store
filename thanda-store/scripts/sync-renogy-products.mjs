@@ -288,15 +288,23 @@ function firstImageUrl(detail) {
     detail.item_view_image,
     detail.item_cover_image,
     detail.item_view_image_by_bc,
+    detail.item_cover_image_by_bc,
+    detail.images,
+    detail.image,
   ];
+  const urls = [];
   for (const value of imageSets) {
     const images = Array.isArray(value) ? value : value ? [value] : [];
     for (const image of images) {
-      const url = image?.link || image?.url || image?.originalUrl;
-      if (url) return url;
+      if (typeof image === 'string') urls.push(image);
+      urls.push(image?.url, image?.originalUrl, image?.link);
     }
   }
-  return '';
+  const cleanUrls = urls.filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
+  return cleanUrls.find((url) => url.includes('.objectstorage.') && url.includes('/p/'))
+    || cleanUrls.find((url) => !url.includes('.objectstorage.') || url.includes('/p/'))
+    || cleanUrls[0]
+    || '';
 }
 
 function numberOrNull(value) {
