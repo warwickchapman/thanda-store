@@ -20,6 +20,14 @@ interface Product {
   details: Record<string, string | number | null>;
 }
 
+function categoryLabel(category: string) {
+  return category
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(' ');
+}
+
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +55,13 @@ export default function Home() {
       || product.name.toLowerCase().includes(search)
       || product.category.toLowerCase().includes(search);
   });
+  const groupedProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
+    const category = product.category || 'uncategorized';
+    groups[category] = groups[category] || [];
+    groups[category].push(product);
+    return groups;
+  }, {});
+  const categoryGroups = Object.entries(groupedProducts);
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
@@ -106,70 +121,86 @@ export default function Home() {
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             Loading products...
           </div>
+        ) : categoryGroups.length === 0 ? (
+          <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
+            No products match your search.
+          </div>
         ) : (
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filteredProducts.map((product) => (
-            <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
-              <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
-                {product.image_url ? (
-                  <img 
-                    src={product.image_url} 
-                    alt={product.name}
-                    className="h-full w-full object-contain transition-all duration-700 group-hover:scale-105"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = ""; // Force fallback on error
-                    }}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-zinc-100 bg-zinc-50/30">
-                    <Package className="h-16 w-16 text-zinc-200" />
-                  </div>
-                )}
-                
-                {/* Category Badge - Subtle Glassmorphism */}
-                <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
-                  <span className="rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
-                    {product.category}
-                  </span>
-                  <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
-                    {product.stock_on_hand > 0 ? `${product.stock_on_hand} in stock` : 'Out of stock'}
+          <div className="space-y-12">
+            {categoryGroups.map(([category, categoryProducts]) => (
+              <section key={category} className="space-y-4">
+                <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
+                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{categoryLabel(category)}</h2>
+                  <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+                    {categoryProducts.length} {categoryProducts.length === 1 ? 'product' : 'products'}
                   </span>
                 </div>
-              </div>
-              
-              <div className="flex flex-1 flex-col p-5">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{product.sku}</div>
-                </div>
-                
-                <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
-                  {product.name}
-                </h3>
-                
-                <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail Excl. VAT</span>
-                    <div className="text-xl font-black tracking-tight text-zinc-900">
-                      {priceLabel(product.recommended_retail_ex_vat)}
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Your Price Excl. VAT</span>
-                      <div className="text-sm font-bold text-amber-600">
-                        {priceLabel(product.your_price_ex_vat)}
+                <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {categoryProducts.map((product) => (
+                    <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
+                      <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
+                        {product.image_url ? (
+                          <img 
+                            src={product.image_url} 
+                            alt={product.name}
+                            className="h-full w-full object-contain transition-all duration-700 group-hover:scale-105"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = ""; // Force fallback on error
+                            }}
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-zinc-100 bg-zinc-50/30">
+                            <Package className="h-16 w-16 text-zinc-200" />
+                          </div>
+                        )}
+                        
+                        {/* Category Badge - Subtle Glassmorphism */}
+                        <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
+                          <span className="rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
+                            {product.category}
+                          </span>
+                          <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
+                            {product.stock_on_hand > 0 ? `${product.stock_on_hand} in stock` : 'Out of stock'}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-1 flex-col p-5">
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{product.sku}</div>
+                        </div>
+                        
+                        <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
+                          {product.name}
+                        </h3>
+                        
+                        <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail Excl. VAT</span>
+                            <div className="text-xl font-black tracking-tight text-zinc-900">
+                              {priceLabel(product.recommended_retail_ex_vat)}
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase">Your Price Excl. VAT</span>
+                              <div className="text-sm font-bold text-amber-600">
+                                {priceLabel(product.your_price_ex_vat)}
+                              </div>
+                            </div>
+                            <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
+                              <ShoppingCart className="h-5 w-5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
-                      <ShoppingCart className="h-5 w-5" />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              </section>
+            ))}
+          </div>
         )}
       </main>
 
