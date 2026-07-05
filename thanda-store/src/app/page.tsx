@@ -10,15 +10,17 @@ interface Product {
   id: number;
   name: string;
   category: string;
-  price: string;
+  price: string | number;
   sku: string;
   image_url: string;
+  stock_on_hand: number;
   details: Record<string, string | number | null>;
 }
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     fetch('/api/products')
@@ -34,6 +36,14 @@ export default function Home() {
         setLoading(false);
       });
   }, []);
+
+  const filteredProducts = products.filter((product) => {
+    const search = query.trim().toLowerCase();
+    if (!search) return true;
+    return product.sku.toLowerCase().includes(search)
+      || product.name.toLowerCase().includes(search)
+      || product.category.toLowerCase().includes(search);
+  });
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 font-sans text-zinc-900">
@@ -57,6 +67,8 @@ export default function Home() {
               <input 
                 type="text" 
                 placeholder="Search SKU or name..." 
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
                 className="h-9 w-64 rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
               />
             </div>
@@ -92,7 +104,7 @@ export default function Home() {
           </div>
         ) : (
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {products.map((product) => (
+          {filteredProducts.map((product) => (
             <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
               <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
                 {product.image_url ? (
@@ -111,9 +123,12 @@ export default function Home() {
                 )}
                 
                 {/* Category Badge - Subtle Glassmorphism */}
-                <div className="absolute left-4 top-4">
+                <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
                   <span className="rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
                     {product.category}
+                  </span>
+                  <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
+                    {product.stock_on_hand > 0 ? `${product.stock_on_hand} in stock` : 'Out of stock'}
                   </span>
                 </div>
               </div>
@@ -129,17 +144,17 @@ export default function Home() {
                 
                 <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail (Excl. VAT)</span>
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail</span>
                     <div className="text-xl font-black tracking-tight text-zinc-900">
-                      {formatCurrency(product.details?.['Original Price'] || 0)}
+                      {formatCurrency(product.details?.originalPrice || product.price || 0)}
                     </div>
                   </div>
                   
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Dealer Price (30% Discount)</span>
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase">Dealer Price</span>
                       <div className="text-sm font-bold text-amber-600">
-                        {formatCurrency((Number(product.details?.['Original Price']) || 0) * 0.7)}
+                        {formatCurrency(product.price || 0)}
                       </div>
                     </div>
                     <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">

@@ -1,12 +1,10 @@
 import asyncio
 import json
-import os
 import sys
 from playwright.async_api import async_playwright
 
 # Configuration
 PORTAL_URL = "https://partner.renogy.com/product/solar-panel"
-SCRAPER_PATH = "/root/renogy-store/renogy_scraper.py"
 
 async def refresh_token():
     print("Starting headless browser to capture Renogy token...")
@@ -39,7 +37,8 @@ async def refresh_token():
 
             if token:
                 print("Successfully captured token!")
-                update_scraper_token(token)
+                print("Add this to your environment file:")
+                print(f"RENOGY_BEARER_TOKEN={token}")
                 return True
             else:
                 print("Failed to capture token. May need manual login/cookie injection.")
@@ -50,26 +49,6 @@ async def refresh_token():
             return False
         finally:
             await browser.close()
-
-def update_scraper_token(new_token):
-    if not os.path.exists(SCRAPER_PATH):
-        print(f"Scraper not found at {SCRAPER_PATH}")
-        return
-
-    with open(SCRAPER_PATH, 'r') as f:
-        content = f.read()
-
-    # Simple string replacement for the token variable
-    # Assuming the scraper has a line like: JWT_TOKEN = "..."
-    import re
-    new_content = re.sub(r'JWT_TOKEN\s*=\s*".*?"', f'JWT_TOKEN = "{new_token}"', content)
-    
-    if new_content != content:
-        with open(SCRAPER_PATH, 'w') as f:
-            f.write(new_content)
-        print("Scraper updated with fresh token.")
-    else:
-        print("Could not find TOKEN variable in scraper file.")
 
 if __name__ == "__main__":
     success = asyncio.run(refresh_token())

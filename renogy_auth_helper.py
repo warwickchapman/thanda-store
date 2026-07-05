@@ -1,14 +1,11 @@
 import asyncio
 import websockets
 import json
-import os
-import re
 
 # This script sniffs a running Chrome instance to extract the latest Renogy JWT token.
-# It then updates the renogy_scraper.py file with the new token.
+# It prints an export command so the token can be stored outside tracked source.
 
 WS_LIST_URL = "http://localhost:9222/json/list"
-SCRAPER_FILE = "/Users/warwick/Code/renogy-store/renogy_scraper.py"
 
 async def get_renogy_tab():
     import requests
@@ -52,21 +49,6 @@ async def capture_token(ws_url):
                     print(f"Found Token: {token[:20]}...")
                     return token
 
-def update_scraper(token):
-    if not os.path.exists(SCRAPER_FILE):
-        print(f"Scraper file not found: {SCRAPER_FILE}")
-        return
-
-    with open(SCRAPER_FILE, "r") as f:
-        content = f.read()
-
-    # Regex to replace JWT_TOKEN = "..."
-    new_content = re.sub(r'JWT_TOKEN = "[^"]+"', f'JWT_TOKEN = "{token}"', content)
-
-    with open(SCRAPER_FILE, "w") as f:
-        f.write(new_content)
-    print("renogy_scraper.py updated with new token.")
-
 async def main():
     ws_url = await get_renogy_tab()
     if not ws_url:
@@ -75,7 +57,8 @@ async def main():
 
     token = await capture_token(ws_url)
     if token:
-        update_scraper(token)
+        print("Add this to your environment file:")
+        print(f"RENOGY_BEARER_TOKEN={token}")
     else:
         print("Failed to capture token.")
 

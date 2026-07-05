@@ -5,7 +5,9 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 ## Repository layout
 
 - `thanda-store/` - Next.js application for the dealer portal.
-- `sync_db.js` - imports `master_product_import.csv` rows into PostgreSQL.
+- `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
+- `db/products.sql` - PostgreSQL table setup for product data.
+- `sync_db.js` - legacy CSV import helper.
 - `sync_renogy_inventory.py` - experimental Renogy enrichment script.
 - `renogy_*` scripts - supplier-specific authentication/API experiments.
 
@@ -21,30 +23,93 @@ npm run dev
 
 The app reads products from `GET /api/products`, which queries PostgreSQL through `src/lib/db.ts`.
 
+Required environment variables:
+
+```bash
+DATABASE_URL=postgres://user:password@localhost:5432/thanda_store
+RENOGY_BEARER_TOKEN=...
+RENOGY_PRODUCT_SOURCE=export
+WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
+```
+
+`DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
+`RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
+
 ## Database
 
-The current app expects a PostgreSQL database with a `products` table containing at least:
+The app expects a PostgreSQL database with a `products` table. Apply the setup SQL with:
 
-- `id`
-- `sku`
-- `name`
-- `price`
-- `image_url`
-- `category`
-- `details`
-- `last_updated`
+```bash
+psql "$DATABASE_URL" -f db/products.sql
+```
 
-The database connection is currently hard-coded in `thanda-store/src/lib/db.ts`. Before production hardening, move this to environment variables and document the required `.env` keys.
+The sync job also creates or extends the required table defensively before writing products.
 
-## Inventory import
+## Renogy sync
 
-The current import path is:
+Run a one-off sync from the repository root:
 
-1. Produce or obtain `master_product_import.csv`.
-2. Run `node sync_db.js` from the repository root.
-3. The storefront reads the imported rows from PostgreSQL.
+```bash
+cd thanda-store
+npm run sync:renogy
+```
 
-The import currently inserts rows directly and does not yet perform upserts or deletions. That is acceptable for a prototype, but the next version should make repeated imports idempotent.
+The sync is intentionally warehouse-driven:
+
+1. Request Renogy's all-products export with `POST /api/pp/report/item/export`.
+2. Download the signed CSV from the object-storage URL returned by `common/file/preSignedUrl`.
+3. Use the export as the master SKU and available-stock list.
+4. For each SKU, call Renogy `item/listPage` with `itemViewType: []` and `productSearch: <SKU>`.
+5. Use the returned Renogy wrapper `id` as the internal supplier item ID.
+6. Fetch `item/{id}` for current price, name, category, and image metadata.
+7. Upsert into PostgreSQL keyed by `sku`.
+
+This is more reliable than scanning hand-picked category batches. Direct testing found that all 95 warehouse SKUs resolve through SKU search, while the old category scan only found 22 products.
+The export itself contains SKU, description, available stock, in-transit quantity, and expected delivery date; it does not contain prices or image URLs.
+
+### Five-minute schedule
+
+On the VPS, prefer a systemd timer over a long-running loop. It gives you logs, restart behaviour, and avoids overlapping runs.
+
+`/etc/systemd/system/thanda-renogy-sync.service`:
+
+```ini
+[Unit]
+Description=Sync Thanda Store products from Renogy
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store.env
+ExecStart=/usr/bin/npm run sync:renogy
+```
+
+`/etc/systemd/system/thanda-renogy-sync.timer`:
+
+```ini
+[Unit]
+Description=Run Thanda Renogy sync every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=thanda-renogy-sync.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it with:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now thanda-renogy-sync.timer
+systemctl list-timers thanda-renogy-sync.timer
+journalctl -u thanda-renogy-sync.service -n 100 --no-pager
+```
+
+Five minutes is a reasonable starting point for a small catalogue. If Renogy throttles or the run time approaches the interval, move to ten or fifteen minutes and show `last_updated` in the admin view.
 
 ## Current technical issues
 
@@ -54,11 +119,7 @@ This repository previously contained a nested git repository for the app. That c
 
 ### Supplier enrichment
 
-Stock levels can be imported from the warehouse report, but richer product data such as supplier images, canonical descriptions, and recommended prices depends on matching warehouse SKUs to supplier product IDs.
-
-The Renogy API detail endpoint appears to require internal item IDs rather than plain warehouse SKUs. The current enrichment script only has a small set of known IDs, so it cannot enrich the full catalogue yet.
-
-Colin's useful next step is to identify a reliable SKU-to-supplier-ID mapping source. Once that exists, the enrichment script can fetch product details deterministically instead of probing manually.
+Stock levels, names, prices, and images are now fetched through SKU-driven Renogy API lookup. The important detail is that `itemViewType` must be empty when searching by SKU; fixed category batches miss valid products.
 
 ### Secrets
 
@@ -71,7 +132,7 @@ The portal is currently a read-only product catalogue. Search input, cart action
 ## Suggested next steps
 
 1. Rotate supplier/API credentials and move secrets to environment variables.
-2. Replace direct inserts in `sync_db.js` with idempotent upserts keyed by SKU.
-3. Add a small schema/setup script for the `products` table.
-4. Implement or remove placeholder storefront controls.
+2. Decide how the Renogy bearer token should be refreshed when it expires.
+3. Add alerting if a sync run fails or if products are missing from Renogy.
+4. Implement or remove placeholder cart/support controls.
 5. Add a short changelog once the first real deployment baseline is agreed.

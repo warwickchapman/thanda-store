@@ -6,8 +6,12 @@ import os
 import sys
 
 BASE_URL = "https://partner.renogy.com/prod-api/api/sc/portal"
+JWT_TOKEN = os.environ.get("RENOGY_BEARER_TOKEN")
+if not JWT_TOKEN:
+    raise RuntimeError("RENOGY_BEARER_TOKEN is required")
+
 HEADERS = {
-    "Authorization": "Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoyNDM3ODIsImNsaWVudF9lbmRwb2ludCI6IndlYiIsImF1dGhfdG9rZW5faWQiOiJjMTc5OGYxYi1hZWVlLTRiZmQtYjBmMC03OTIwMTU2ZDVhZjAifQ.2XPJU1zIPlXhtWxLD0Yn5vxDQE3HsCyu5Ou_fXtmPC3qgmMlIwtE2UsRgk-LLxmAFwBUmclX2k6VTgR3l0Yvfg",
+    "Authorization": f"Bearer {JWT_TOKEN}",
     "Content-Type": "application/json"
 }
 

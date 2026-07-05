@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:renogy": "node scripts/sync-renogy-products.mjs"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",
