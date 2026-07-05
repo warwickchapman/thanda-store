@@ -27,13 +27,16 @@ Required environment variables:
 
 ```bash
 DATABASE_URL=postgres://user:password@localhost:5432/thanda_store
-RENOGY_BEARER_TOKEN=...
+RENOGY_EMAIL=warwick@example.com
+RENOGY_PASSWORD=...
+RENOGY_TOKEN_CACHE_FILE=/var/lib/thanda-store/renogy-token.json
 RENOGY_PRODUCT_SOURCE=export
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 ```
 
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
 `RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
+`RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
 
 ## Database
 
@@ -111,6 +114,12 @@ journalctl -u thanda-renogy-sync.service -n 100 --no-pager
 
 Five minutes is a reasonable starting point for a small catalogue. If Renogy throttles or the run time approaches the interval, move to ten or fifteen minutes and show `last_updated` in the admin view.
 
+### Authentication
+
+The sync job authenticates directly against Renogy's portal API. On startup it uses a cached token when available, validates it with `GET /api/sc/portal/user/info`, and logs in again with `POST /api/sc/portal/user/prelogin` when the token is missing or expired. During a run, any `401` response triggers one token refresh and one retry of the failed request.
+
+The older browser-token helper scripts are for debugging only. Do not use browser token sniffing as the production refresh mechanism.
+
 ## Current technical issues
 
 ### Git repository shape
@@ -132,7 +141,7 @@ The portal is currently a read-only product catalogue. Search input, cart action
 ## Suggested next steps
 
 1. Rotate supplier/API credentials and move secrets to environment variables.
-2. Decide how the Renogy bearer token should be refreshed when it expires.
+2. Add alerting if API login starts failing.
 3. Add alerting if a sync run fails or if products are missing from Renogy.
 4. Implement or remove placeholder cart/support controls.
 5. Add a short changelog once the first real deployment baseline is agreed.

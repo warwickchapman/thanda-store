@@ -11,15 +11,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE_URL = process.env.RENOGY_BASE_URL || 'https://partner.renogy.com/prod-api/api/sc/portal';
 const API_ROOT = BASE_URL.replace(/\/api\/sc\/portal\/?$/, '');
-const TOKEN = process.env.RENOGY_BEARER_TOKEN;
+const INITIAL_TOKEN = process.env.RENOGY_BEARER_TOKEN;
+const RENOGY_EMAIL = process.env.RENOGY_EMAIL;
+const RENOGY_PASSWORD = process.env.RENOGY_PASSWORD;
+const TOKEN_CACHE_FILE = process.env.RENOGY_TOKEN_CACHE_FILE || path.resolve(__dirname, '../../.renogy-token.json');
 const WAREHOUSE_CSV = process.env.WAREHOUSE_CSV || path.resolve(__dirname, '../../warehouse_inventory.csv');
 const PRODUCT_SOURCE = process.env.RENOGY_PRODUCT_SOURCE || 'export';
 const REQUEST_TIMEOUT_MS = Number(process.env.RENOGY_REQUEST_TIMEOUT_MS || 12000);
 
-if (!TOKEN) {
-  console.error('RENOGY_BEARER_TOKEN is required.');
+if (!INITIAL_TOKEN && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) {
+  console.error('RENOGY_BEARER_TOKEN or RENOGY_EMAIL plus RENOGY_PASSWORD is required.');
   process.exit(1);
 }
+
+let authToken = normalizeToken(INITIAL_TOKEN) || readCachedToken();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -68,9 +73,33 @@ function readWarehouseRows() {
   return parseProductCsv(csv);
 }
 
+function normalizeToken(token) {
+  return token?.replace(/^Bearer\s+/i, '').trim() || '';
+}
+
+function readCachedToken() {
+  try {
+    const data = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf8'));
+    return normalizeToken(data.token);
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedToken(token) {
+  fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true });
+  fs.writeFileSync(TOKEN_CACHE_FILE, `${JSON.stringify({
+    token,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`, { mode: 0o600 });
+}
+
 function renogyHeaders(referer = 'https://partner.renogy.com/product') {
+  if (!authToken) {
+    throw new Error('No Renogy auth token is available');
+  }
   return {
-    Authorization: `Bearer ${TOKEN}`,
+    Authorization: authToken,
     'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*',
     Referer: referer,
@@ -78,7 +107,37 @@ function renogyHeaders(referer = 'https://partner.renogy.com/product') {
   };
 }
 
-async function fetchJson(url, options) {
+function isAuthFailure(body, status) {
+  return status === 401 || body?.code === 401;
+}
+
+async function loginRenogy() {
+  if (!RENOGY_EMAIL || !RENOGY_PASSWORD) {
+    throw new Error('Renogy token expired and RENOGY_EMAIL/RENOGY_PASSWORD are not configured');
+  }
+  const json = await fetchJson(`${BASE_URL}/user/prelogin`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      Referer: 'https://partner.renogy.com/login',
+      'User-Agent': 'ThandaStoreSync/1.0',
+    },
+    body: JSON.stringify({
+      email: RENOGY_EMAIL.replace(/\s/g, ''),
+      password: RENOGY_PASSWORD.replace(/\s/g, ''),
+    }),
+  }, { retryAuth: false });
+
+  if (json.code !== 200 || !json.data?.token) {
+    throw new Error(`Renogy login failed with code ${json.code}: ${json.msg || 'missing token'}`);
+  }
+  authToken = normalizeToken(json.data.token);
+  writeCachedToken(authToken);
+  return authToken;
+}
+
+async function fetchJson(url, options, behavior = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -89,6 +148,16 @@ async function fetchJson(url, options) {
       body = text ? JSON.parse(text) : null;
     } catch {
       body = { raw: text };
+    }
+    if (isAuthFailure(body, response.status) && behavior.retryAuth !== false) {
+      await loginRenogy();
+      return fetchJson(url, {
+        ...options,
+        headers: {
+          ...options.headers,
+          Authorization: authToken,
+        },
+      }, { retryAuth: false });
     }
     if (!response.ok) {
       const message = body?.msg || body?.message || text.slice(0, 200);
@@ -166,6 +235,19 @@ async function loadProductRows() {
     throw new Error(`Unknown RENOGY_PRODUCT_SOURCE "${PRODUCT_SOURCE}". Use "export" or "csv".`);
   }
   return fetchProductExportRows();
+}
+
+async function ensureAuthenticated() {
+  if (!authToken) {
+    await loginRenogy();
+    return;
+  }
+  try {
+    await fetchCurrentUser();
+  } catch (error) {
+    if (!String(error.message).includes('401')) throw error;
+    await loginRenogy();
+  }
 }
 
 async function findRenogyItemBySku(sku) {
@@ -310,6 +392,7 @@ async function upsertProduct(client, product) {
 }
 
 async function main() {
+  await ensureAuthenticated();
   const rows = await loadProductRows();
   const client = await pool.connect();
   const stats = {
