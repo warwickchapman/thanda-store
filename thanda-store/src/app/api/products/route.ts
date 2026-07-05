@@ -22,7 +22,7 @@ function configuredDiscountPercent() {
 
 export async function GET() {
   try {
-    const res = await pool.query("SELECT * FROM products ORDER BY category ASC, name DESC");
+    const res = await pool.query("SELECT * FROM products ORDER BY category ASC, LOWER(name) DESC, name DESC");
     const discountPercent = configuredDiscountPercent();
     const products = res.rows.map((product) => {
       const details = product.details || {};
