@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "extract:victron-allowlist": "node scripts/extract-victron-allowlist.mjs",
     "sync:renogy": "node scripts/sync-renogy-products.mjs",
     "sync:victron": "node scripts/sync-victron-products.mjs",
     "sync:victron:extended": "VICTRON_SYNC_EXTENDED=1 node scripts/sync-victron-products.mjs",

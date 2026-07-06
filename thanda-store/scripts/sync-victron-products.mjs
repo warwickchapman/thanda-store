@@ -17,6 +17,7 @@ const API_ROOT = process.env.VICTRON_EORDER_API_ROOT || 'https://eorder.victrone
 const API_KEY = process.env.VICTRON_EORDER_API_KEY;
 const REQUEST_TIMEOUT_MS = Number(process.env.VICTRON_REQUEST_TIMEOUT_MS || 20000);
 const PAGE_SIZE = Number(process.env.VICTRON_PAGE_SIZE || 250);
+const THANDA_DISCOUNT_FACTOR = Number(process.env.VICTRON_THANDA_DISCOUNT_FACTOR || 0.525);
 const FETCH_EXTENDED = process.env.VICTRON_SYNC_EXTENDED === '1';
 const ALLOWLIST_FILE = process.env.VICTRON_ALLOWLIST_FILE
   || path.resolve(__dirname, '../data/victron-zar-2026-q3-skus.json');
@@ -126,14 +127,21 @@ function selectImageUrl(product) {
 function buildProduct(product, extendedProduct) {
   const richProduct = extendedProduct || product;
   const productData = richProduct.product_data || {};
-  const recommendedRetailExVat = numberOrNull(product.enduser_price_zar?.price);
   const accountPrice = numberOrNull(product.price) ?? 0;
+  const apiRecommendedRetailExVat = numberOrNull(product.enduser_price_zar?.price);
+  const recommendedRetailExVat = THANDA_DISCOUNT_FACTOR > 0
+    ? Math.round((accountPrice / THANDA_DISCOUNT_FACTOR) * 100) / 100
+    : apiRecommendedRetailExVat;
   const category = normalizeText(product.category || product.subcategory || productData.category, 'uncategorized');
   const imageUrl = selectImageUrl(richProduct);
   const details = {
     originalPrice: recommendedRetailExVat,
     recommendedRetailExVat,
     recommendedRetailPriceVatMode: 'ex_vat',
+    recommendedRetailSource: 'eorder_price_divided_by_thanda_discount_factor',
+    apiRecommendedRetailExVat,
+    thandaDiscountFactor: THANDA_DISCOUNT_FACTOR,
+    thandaDiscountPercent: Math.round((1 - THANDA_DISCOUNT_FACTOR) * 10000) / 100,
     distributorPriceExVat: accountPrice,
     currency: product.currency || 'ZAR',
     gtin13: product.gtin13 || null,
