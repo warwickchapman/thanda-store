@@ -37,6 +37,11 @@ RENOGY_TOKEN_CACHE_FILE=/var/lib/thanda-store/renogy-token.json
 RENOGY_PRODUCT_SOURCE=export
 VICTRON_EORDER_API_KEY=...
 VICTRON_THANDA_DISCOUNT_FACTOR=0.525
+XERO_CLIENT_ID=...
+XERO_CLIENT_SECRET=...
+XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
+XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
+XERO_CONNECT_SECRET=...
 DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 ```
@@ -46,6 +51,7 @@ WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 `RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
 `VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
+`XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
 
 ## Pricing rules
@@ -85,6 +91,34 @@ Renogy products display `Availability: 4-7 working days` plus `n in stock at Ren
 Victron products display `Availability: 3-5 working days` plus `n in stock at Victron Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
+
+## Xero OAuth setup
+
+Xero uses OAuth 2.0 rather than a static API key. Create a Xero Web App with this redirect URI:
+
+```text
+https://oc.sensible.co.za/api/xero/callback
+```
+
+Configure these environment variables on the VPS:
+
+```bash
+XERO_CLIENT_ID=...
+XERO_CLIENT_SECRET=...
+XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
+XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
+XERO_CONNECT_SECRET=<random admin-only secret>
+```
+
+Then visit:
+
+```text
+https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
+```
+
+Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
+
+Initial scope is deliberately narrow: `offline_access accounting.settings.read`. That is enough to read Xero Items for KZN/local stock mapping. Broader accounting scopes should only be added when we actually need invoices, orders, or writes.
 
 ## Database
 
