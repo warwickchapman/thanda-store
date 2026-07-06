@@ -6,6 +6,8 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 
 - `thanda-store/` - Next.js application for the dealer portal.
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
+- `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
+- `thanda-store/data/victron-zar-2026-q3-skus.json` - generated Victron South Africa allow-list from the Q3 2026 ZAR price list.
 - `db/products.sql` - PostgreSQL table setup for product data.
 - `sync_db.js` - legacy CSV import helper.
 - `sync_renogy_inventory.py` - experimental Renogy enrichment script.
@@ -31,6 +33,7 @@ RENOGY_EMAIL=warwick@example.com
 RENOGY_PASSWORD=...
 RENOGY_TOKEN_CACHE_FILE=/var/lib/thanda-store/renogy-token.json
 RENOGY_PRODUCT_SOURCE=export
+VICTRON_EORDER_API_KEY=...
 DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 ```
@@ -38,6 +41,7 @@ WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
 `RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
 `RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
+`VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
 
 ## Pricing rules
@@ -46,7 +50,9 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 
 `GET /api/products` calculates buyer-facing prices from recommended retail:
 
-- `recommended_retail_ex_vat` = Renogy recommended retail price divided by 1.15.
+- `recommended_retail_ex_vat` = supplier recommended retail normalized to excluding VAT.
+  - Renogy recommended retail is treated as including VAT unless the sync marks it otherwise.
+  - Victron South Africa recommended retail is treated as excluding VAT, matching the ZAR price list conditions.
 - `your_price_ex_vat` = `recommended_retail_ex_vat` less the configured B2B discount.
 - B2B discount is capped server-side at 40%, even if environment configuration or future user data asks for more.
 
@@ -60,7 +66,7 @@ The app expects a PostgreSQL database with a `products` table. Apply the setup S
 psql "$DATABASE_URL" -f db/products.sql
 ```
 
-The sync job also creates or extends the required table defensively before writing products.
+The sync job also creates or extends the required table defensively before writing products. Products are keyed by `(supplier, sku)` so multiple supplier lines can safely share the catalogue.
 
 ## Renogy sync
 
@@ -133,6 +139,40 @@ Five minutes is a reasonable starting point for a small catalogue. If Renogy thr
 The sync job authenticates directly against Renogy's portal API. On startup it uses a cached token when available, validates it with `GET /api/sc/portal/user/info`, and logs in again with `POST /api/sc/portal/user/prelogin` when the token is missing or expired. During a run, any `401` response triggers one token refresh and one retry of the failed request.
 
 The older browser-token helper scripts are for debugging only. Do not use browser token sniffing as the production refresh mechanism.
+
+## Victron sync
+
+Run a lightweight Victron price/stock sync:
+
+```bash
+cd thanda-store
+npm run sync:victron
+```
+
+The Victron sync:
+
+1. Reads `data/victron-zar-2026-q3-skus.json`.
+2. Fetches `/api/v1/products/?format=json` from the Victron E-Order API.
+3. Filters the API result to only SKUs present in the South Africa ZAR price list.
+4. Uses `all_stock_by_warehouse.af_sa_inzuzo` when available for South Africa warehouse stock.
+5. Stores the Victron account price as distributor cost and `enduser_price_zar.price` as recommended retail excluding VAT.
+6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`.
+
+Images and documents come from the heavier `/api/v1/products-extended/` endpoint. Run this intentionally, not every five minutes:
+
+```bash
+cd thanda-store
+npm run sync:victron:extended
+```
+
+For scheduled syncs, use:
+
+```bash
+cd thanda-store
+npm run sync:all
+```
+
+This runs Renogy and the lightweight Victron sync. A separate daily timer can run `sync:victron:extended` if product images and documents need routine refreshes.
 
 ## Current technical issues
 

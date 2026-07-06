@@ -4,9 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
-import pg from 'pg';
+import {
+  createPool,
+  ensureProductSchema,
+  numberOrNull,
+  upsertProduct,
+} from './product-sync-lib.mjs';
 
-const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE_URL = process.env.RENOGY_BASE_URL || 'https://partner.renogy.com/prod-api/api/sc/portal';
@@ -26,14 +30,7 @@ if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) {
   process.exit(1);
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  user: process.env.POSTGRES_USER,
-  host: process.env.POSTGRES_HOST || 'localhost',
-  database: process.env.POSTGRES_DATABASE,
-  password: process.env.POSTGRES_PASSWORD,
-  port: Number(process.env.POSTGRES_PORT || 5432),
-});
+const pool = createPool();
 
 function normalizeExportRow(row) {
   return {
@@ -337,12 +334,6 @@ async function firstImageUrl(detail) {
   return cleanUrls.find((url) => !url.includes('.objectstorage.')) || cleanUrls[0] || '';
 }
 
-function numberOrNull(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 async function buildProduct(row, wrapper, detail) {
   const sku = row.SKU;
   const price = numberOrNull(detail.unitPrice) ?? numberOrNull(wrapper.data?.amount) ?? numberOrNull(detail.basic_price) ?? 0;
@@ -378,58 +369,6 @@ async function buildProduct(row, wrapper, detail) {
   };
 }
 
-async function ensureSchema(client) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS products (
-      id BIGSERIAL PRIMARY KEY,
-      sku TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      image_url TEXT NOT NULL DEFAULT '',
-      category TEXT NOT NULL DEFAULT 'uncategorized',
-      details JSONB NOT NULL DEFAULT '{}'::jsonb,
-      last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT 'renogy'");
-  await client.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_item_id TEXT');
-  await client.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_on_hand INTEGER NOT NULL DEFAULT 0');
-  await client.query('CREATE INDEX IF NOT EXISTS products_supplier_item_id_idx ON products (supplier, supplier_item_id)');
-}
-
-async function upsertProduct(client, product) {
-  await client.query(
-    `
-      INSERT INTO products (
-        sku, supplier, supplier_item_id, name, price, image_url, category,
-        stock_on_hand, details, last_updated
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
-      ON CONFLICT (sku) DO UPDATE SET
-        supplier = EXCLUDED.supplier,
-        supplier_item_id = EXCLUDED.supplier_item_id,
-        name = EXCLUDED.name,
-        price = EXCLUDED.price,
-        image_url = EXCLUDED.image_url,
-        category = EXCLUDED.category,
-        stock_on_hand = EXCLUDED.stock_on_hand,
-        details = EXCLUDED.details,
-        last_updated = NOW()
-    `,
-    [
-      product.sku,
-      product.supplier,
-      product.supplier_item_id,
-      product.name,
-      product.price,
-      product.image_url,
-      product.category,
-      product.stock_on_hand,
-      JSON.stringify(product.details),
-    ],
-  );
-}
-
 async function main() {
   await ensureAuthenticated();
   const rows = await loadProductRows();
@@ -443,7 +382,7 @@ async function main() {
   };
 
   try {
-    await ensureSchema(client);
+    await ensureProductSchema(client);
     for (const row of rows) {
       const sku = row.SKU;
       try {
