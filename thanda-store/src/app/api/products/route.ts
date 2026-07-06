@@ -38,7 +38,7 @@ function configuredDiscountPercent() {
 
 export async function GET() {
   try {
-    const res = await pool.query("SELECT * FROM products");
+    const res = await pool.query("SELECT * FROM products WHERE COALESCE((details->>'hidden')::boolean, false) = false");
     const discountPercent = configuredDiscountPercent();
     const products = res.rows.map((product) => {
       const details = product.details || {};

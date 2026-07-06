@@ -8,6 +8,7 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
+- `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
 - `thanda-store/data/victron-zar-2026-q3-skus.json` - generated Victron South Africa allow-list from the Q3 2026 ZAR price list.
 - `db/products.sql` - PostgreSQL table setup for product data.
 - `sync_db.js` - legacy CSV import helper.
@@ -60,6 +61,30 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 - B2B discount is capped server-side at 40%, even if environment configuration or future user data asks for more.
 
 All customer-facing prices in the portal are displayed excluding VAT.
+
+## Product display rules
+
+Category labels are normalized in the storefront:
+
+- `And` displays as `&`.
+- `Dc` displays as `DC`.
+- `Smartshunt` displays as `SmartShunt`.
+- `(ev)` displays as `(EV)`.
+
+Products with `details.hidden = true` are not returned by `GET /api/products`. Victron `Solar Home System` products are marked hidden because that category should not be displayed in the dealer portal.
+
+Products with `details.is120vAc = true` display a USA flag and `Note: 120V AC`. The current automated rule only marks Victron product names that explicitly contain `120V`; ambiguous voltage cases should be reviewed manually.
+
+Stock display has two concepts:
+
+- `localStockOnHand` in `details` is Thanda/KZN stock. This will eventually come from Xero.
+- `stock_on_hand` is supplier stock from the supplier API.
+
+Renogy products display `Availability: 4-7 working days` plus `n in stock at Renogy Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
+
+Victron products display `Availability: 3-5 working days` plus `n in stock at Victron Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
+
+LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
 
 ## Database
 

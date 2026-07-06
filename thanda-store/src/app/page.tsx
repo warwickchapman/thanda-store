@@ -18,23 +18,75 @@ interface Product {
   sku: string;
   image_url: string;
   stock_on_hand: number;
-  details: Record<string, string | number | null>;
+  details: Record<string, string | number | boolean | string[] | null>;
 }
 
 function displayLabel(value: string) {
-  return value
-    .split(/[_\s-]+/)
+  const label = value
+    .replace(/_/g, ' ')
+    .split(/\s+/)
     .filter(Boolean)
     .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
     .join(' ');
+  return label
+    .replace(/\bAnd\b/g, '&')
+    .replace(/\bDc\b/gi, 'DC')
+    .replace(/\bSmartshunt\b/gi, 'SmartShunt')
+    .replace(/\(ev\)/gi, '(EV)');
 }
 
 function supplierLabel(supplier: string) {
   const labels: Record<string, string> = {
+    hubble: 'Hubble',
     eiot: 'eIoT',
     lora: 'LoRa',
   };
   return labels[supplier.toLowerCase()] || displayLabel(supplier);
+}
+
+function numberDetail(value: Product['details'][string]) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function supplierStockLabel(product: Product) {
+  if (typeof product.details.supplierStockLabel === 'string') return product.details.supplierStockLabel;
+  if (product.supplier === 'renogy') return 'Renogy Warehouse ZA';
+  if (product.supplier === 'victron') return 'Victron Warehouse ZA';
+  return '';
+}
+
+function stockLines(product: Product) {
+  const supplier = product.supplier.toLowerCase();
+  const localStock = numberDetail(product.details.localStockOnHand);
+  const supplierLabelText = supplierStockLabel(product);
+
+  if (supplier === 'lora') {
+    return [`${localStock ?? 0} in stock (KZN)`];
+  }
+
+  if (supplier === 'hubble') {
+    return [typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Out of stock'];
+  }
+
+  const lines: string[] = [];
+  if (localStock !== null && localStock > 0) lines.push(`${localStock} in stock (KZN)`);
+  if (supplier === 'renogy') lines.push('Availability: 4-7 working days');
+  if (supplier === 'victron') lines.push('Availability: 3-5 working days');
+  if (supplierLabelText) lines.push(`${product.stock_on_hand} in stock at ${supplierLabelText}`);
+  return lines;
+}
+
+function primaryStockBadge(product: Product) {
+  const localStock = numberDetail(product.details.localStockOnHand);
+  if (localStock !== null && localStock > 0) return `${localStock} in stock (KZN)`;
+  if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Out of stock';
+  if (product.supplier === 'lora') return `${localStock ?? 0} in stock (KZN)`;
+  return product.supplier === 'renogy' ? '4-7 days' : product.supplier === 'victron' ? '3-5 days' : 'Check stock';
 }
 
 export default function Home() {
@@ -288,11 +340,16 @@ export default function Home() {
                         {/* Category Badge - Subtle Glassmorphism */}
                         <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
                           <span className="rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
-                            {product.category}
+                            {displayLabel(product.category)}
                           </span>
                           <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
-                            {product.stock_on_hand > 0 ? `${product.stock_on_hand} in stock` : 'Out of stock'}
+                            {primaryStockBadge(product)}
                           </span>
+                          {product.details.is120vAc === true && (
+                            <span className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
+                              🇺🇸 120V AC
+                            </span>
+                          )}
                         </div>
                       </div>
                       
@@ -304,6 +361,14 @@ export default function Home() {
                         <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
                           {product.name}
                         </h3>
+                        <div className="mb-4 space-y-1 text-xs font-medium text-zinc-500">
+                          {stockLines(product).map((line) => (
+                            <div key={line}>{line}</div>
+                          ))}
+                          {product.details.is120vAc === true && (
+                            <div className="font-semibold text-amber-700">🇺🇸 Note: 120V AC</div>
+                          )}
+                        </div>
                         
                         <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
                           <div className="flex flex-col">

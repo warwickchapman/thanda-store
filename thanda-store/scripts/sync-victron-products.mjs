@@ -138,7 +138,10 @@ function buildProduct(product, extendedProduct) {
     ? Math.round((accountPrice / THANDA_DISCOUNT_FACTOR) * 100) / 100
     : apiRecommendedRetailExVat;
   const category = normalizeText(product.category || product.subcategory || productData.category, 'uncategorized');
+  const name = normalizeText(product.description || productData.name, product.sku);
   const imageUrl = selectImageUrl(richProduct);
+  const is120vAc = /(^|[^0-9])120V([^0-9]|$)/i.test(name);
+  const hidden = category.toLowerCase() === 'solar home system';
   const details = {
     originalPrice: recommendedRetailExVat,
     recommendedRetailExVat,
@@ -160,6 +163,11 @@ function buildProduct(product, extendedProduct) {
     priceBreakPrice: numberOrNull(product.price_break_price),
     minimumOrderQuantity: numberOrNull(product.minimum_order_quantity),
     productUrl: `https://eorder.victronenergy.com/api/v1/products/${encodeURIComponent(product.sku)}/`,
+    hidden,
+    is120vAc,
+    productNotes: is120vAc ? ['Note: 120V AC'] : [],
+    supplierStockLabel: 'Victron Warehouse ZA',
+    supplierAvailability: 'Availability: 3-5 working days',
   };
 
   if (extendedProduct) {
@@ -172,7 +180,7 @@ function buildProduct(product, extendedProduct) {
     sku: normalizeText(product.sku).toUpperCase(),
     supplier: 'victron',
     supplier_item_id: normalizeText(product.sku).toUpperCase(),
-    name: normalizeText(product.description || productData.name, product.sku),
+    name,
     category,
     price: accountPrice,
     image_url: imageUrl,
