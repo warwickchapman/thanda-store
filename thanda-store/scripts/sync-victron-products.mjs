@@ -18,6 +18,7 @@ const API_KEY = process.env.VICTRON_EORDER_API_KEY;
 const REQUEST_TIMEOUT_MS = Number(process.env.VICTRON_REQUEST_TIMEOUT_MS || 20000);
 const PAGE_SIZE = Number(process.env.VICTRON_PAGE_SIZE || 250);
 const THANDA_DISCOUNT_FACTOR = Number(process.env.VICTRON_THANDA_DISCOUNT_FACTOR || 0.525);
+const EXTENDED_REQUEST_DELAY_MS = Number(process.env.VICTRON_EXTENDED_REQUEST_DELAY_MS || 500);
 const FETCH_EXTENDED = process.env.VICTRON_SYNC_EXTENDED === '1';
 const ALLOWLIST_FILE = process.env.VICTRON_ALLOWLIST_FILE
   || path.resolve(__dirname, '../data/victron-zar-2026-q3-skus.json');
@@ -112,6 +113,10 @@ async function fetchExtendedProduct(sku) {
   return fetchJson(`${API_ROOT.replace(/\/$/, '')}/products-extended/${encodeURIComponent(sku)}/?format=json`);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function selectWarehouseStock(product) {
   const warehouseStock = numberOrNull(product.all_stock_by_warehouse?.af_sa_inzuzo);
   if (warehouseStock !== null) return warehouseStock;
@@ -192,7 +197,9 @@ async function main() {
         extendedBySku.set(sku, await fetchExtendedProduct(sku));
       } catch (error) {
         extendedFailures.push({ sku, error: error.message });
+        if (String(error.message).includes('Victron HTTP 429')) break;
       }
+      if (EXTENDED_REQUEST_DELAY_MS > 0) await sleep(EXTENDED_REQUEST_DELAY_MS);
     }
   }
 
