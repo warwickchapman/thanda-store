@@ -36,9 +36,26 @@ function configuredDiscountPercent() {
   return Math.max(0, Math.min(requested, MAX_B2B_DISCOUNT_PERCENT));
 }
 
+function displayDetails(details: Record<string, unknown>, product: { price?: unknown }) {
+  return {
+    localStockOnHand: numberOrNull(details.localStockOnHand),
+    supplierStockLabel: typeof details.supplierStockLabel === 'string' ? details.supplierStockLabel : null,
+    supplierAvailability: typeof details.supplierAvailability === 'string' ? details.supplierAvailability : null,
+    manualAvailability: typeof details.manualAvailability === 'string' ? details.manualAvailability : null,
+    is120vAc: details.is120vAc === true,
+    productNotes: Array.isArray(details.productNotes) ? details.productNotes.filter((note) => typeof note === 'string') : [],
+    distributorPrice: numberOrNull(product.price),
+    maxB2bDiscountPercent: MAX_B2B_DISCOUNT_PERCENT,
+  };
+}
+
 export async function GET() {
   try {
-    const res = await pool.query("SELECT * FROM products WHERE COALESCE((details->>'hidden')::boolean, false) = false");
+    const res = await pool.query(`
+      SELECT id, name, supplier, category, price, sku, image_url, stock_on_hand, details
+      FROM products
+      WHERE COALESCE((details->>'hidden')::boolean, false) = false
+    `);
     const discountPercent = configuredDiscountPercent();
     const products = res.rows.map((product) => {
       const details = product.details || {};
@@ -52,11 +69,7 @@ export async function GET() {
         recommended_retail_ex_vat: retailExVat,
         your_price_ex_vat: yourPriceExVat,
         b2b_discount_percent: discountPercent,
-        details: {
-          ...details,
-          distributorPrice: numberOrNull(product.price),
-          maxB2bDiscountPercent: MAX_B2B_DISCOUNT_PERCENT,
-        },
+        details: displayDetails(details, product),
       };
     }).sort((a, b) => {
       const categoryOrder = a.category.localeCompare(b.category, undefined, { sensitivity: 'base' });
