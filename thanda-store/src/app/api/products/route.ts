@@ -36,6 +36,12 @@ function configuredDiscountPercent() {
   return Math.max(0, Math.min(requested, MAX_B2B_DISCOUNT_PERCENT));
 }
 
+function buyerPriceExVat(product: { supplier?: string; details?: Record<string, unknown> }, retailExVat: number | null, discountPercent: number) {
+  if (retailExVat === null) return null;
+  if (product.supplier === 'lora') return retailExVat;
+  return roundMoney(retailExVat * (1 - discountPercent / 100));
+}
+
 function displayDetails(details: Record<string, unknown>, product: { price?: unknown }) {
   return {
     localStockOnHand: numberOrNull(details.localStockOnHand),
@@ -60,15 +66,13 @@ export async function GET() {
     const products = res.rows.map((product) => {
       const details = product.details || {};
       const retailExVat = recommendedRetailExVat(product);
-      const yourPriceExVat = retailExVat === null
-        ? null
-        : roundMoney(retailExVat * (1 - discountPercent / 100));
+      const yourPriceExVat = buyerPriceExVat(product, retailExVat, discountPercent);
 
       return {
         ...product,
         recommended_retail_ex_vat: retailExVat,
         your_price_ex_vat: yourPriceExVat,
-        b2b_discount_percent: discountPercent,
+        b2b_discount_percent: product.supplier === 'lora' ? 0 : discountPercent,
         details: displayDetails(details, product),
       };
     }).sort((a, b) => {
