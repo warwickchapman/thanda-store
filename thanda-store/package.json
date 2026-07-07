@@ -12,6 +12,7 @@
     "sync:renogy": "node scripts/sync-renogy-products.mjs",
     "sync:victron": "node scripts/sync-victron-products.mjs",
     "sync:victron:extended": "VICTRON_SYNC_EXTENDED=1 node scripts/sync-victron-products.mjs",
+    "sync:xero-stock": "node scripts/sync-xero-stock.mjs",
     "sync:all": "npm run sync:renogy && npm run sync:victron"
   },
   "dependencies": {

@@ -7,6 +7,7 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 - `thanda-store/` - Next.js application for the dealer portal.
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
+- `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
 - `thanda-store/data/victron-zar-2026-q3-skus.json` - generated Victron South Africa allow-list from the Q3 2026 ZAR price list.
@@ -91,6 +92,35 @@ Renogy products display `Availability: 4-7 working days` plus `n in stock at Ren
 Victron products display `Availability: 3-5 working days` plus `n in stock at Victron Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
+
+## Xero stock sync
+
+Xero is the source of truth for Thanda/KZN stock, not supplier warehouse stock. Supplier warehouse quantities still come from Renogy and Victron.
+
+Run a one-off Xero stock sync:
+
+```bash
+cd thanda-store
+npm run sync:xero-stock
+```
+
+The sync:
+
+1. Reads and refreshes the OAuth token in `XERO_TOKEN_FILE` when needed.
+2. Fetches Xero Items.
+3. Matches exact SKU codes against products where `supplier = 'victron'`, plus the Thanda LoRa placeholder `LORA-RS-00120`.
+4. Writes Xero `QuantityOnHand` into `details.localStockOnHand`.
+5. Treats missing or untracked Xero items as local stock `0`.
+
+For supplier-backed products, the storefront hides the KZN stock line when `localStockOnHand` is zero, then continues to show the supplier warehouse line. For example, a Victron product with 4 units in Xero and 648 units at Victron displays:
+
+```text
+4 in stock (KZN)
+Availability: 3-5 working days
+648 in stock at Victron Warehouse ZA
+```
+
+Do not run this every five minutes. Xero has daily request limits, and local stock does not need supplier-style refresh frequency. Use a 30-60 minute timer for local stock, with a future admin "Sync now" action if operators need an immediate refresh.
 
 ## Xero OAuth setup
 
