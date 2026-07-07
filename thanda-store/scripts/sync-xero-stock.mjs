@@ -34,6 +34,13 @@ function quantityOnHand(item) {
   return Math.floor(quantity);
 }
 
+function moneyOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 100) / 100;
+}
+
 async function readToken(tokenFile) {
   const raw = await fs.readFile(tokenFile, 'utf8');
   return JSON.parse(raw);
@@ -125,13 +132,36 @@ async function targetProducts(client) {
 }
 
 async function updateLocalStock(client, product, localStock, xeroItem) {
+  const xeroSalesPrice = moneyOrNull(xeroItem?.SalesDetails?.UnitPrice);
+  const xeroPurchasePrice = moneyOrNull(xeroItem?.PurchaseDetails?.UnitPrice);
+  const shouldSyncXeroPrice = product.supplier === 'lora';
+
   await client.query(
     `
       UPDATE products
-      SET details = jsonb_set(
+      SET name = CASE
+            WHEN $5::boolean AND NULLIF($6::text, '') IS NOT NULL THEN $6::text
+            ELSE name
+          END,
+          price = CASE
+            WHEN $5::boolean AND $7::numeric IS NOT NULL THEN $7::numeric
+            ELSE price
+          END,
+          details = jsonb_set(
             jsonb_set(
               jsonb_set(
-                details,
+                CASE
+                  WHEN $5::boolean AND $8::numeric IS NOT NULL THEN
+                    details
+                    || jsonb_build_object(
+                      'originalPrice', $8::numeric,
+                      'recommendedRetailExVat', $8::numeric,
+                      'recommendedRetailPriceVatMode', 'ex_vat',
+                      'xeroSalesUnitPrice', $8::numeric,
+                      'xeroPurchaseUnitPrice', $7::numeric
+                    )
+                  ELSE details
+                END,
                 '{localStockOnHand}',
                 to_jsonb($3::int),
                 true
@@ -154,6 +184,10 @@ async function updateLocalStock(client, product, localStock, xeroItem) {
       xeroItem
         ? (xeroItem.IsTrackedAsInventory === true ? 'tracked' : 'untracked')
         : 'missing',
+      shouldSyncXeroPrice,
+      xeroItem?.Name || '',
+      xeroPurchasePrice,
+      xeroSalesPrice,
     ],
   );
 }
