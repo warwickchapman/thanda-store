@@ -144,7 +144,7 @@ async function updateLocalStock(client, product, localStock, xeroItem) {
             ELSE name
           END,
           price = CASE
-            WHEN $5::boolean AND $7::numeric IS NOT NULL THEN $7::numeric
+            WHEN $5::boolean AND $7::numeric IS NOT NULL THEN $7::numeric::text
             ELSE price
           END,
           details = jsonb_set(
