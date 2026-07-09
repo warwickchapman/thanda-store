@@ -54,6 +54,7 @@ WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
+`RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <login@thanda.solar>`.
 
 ## Pricing rules
 
@@ -68,6 +69,35 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 - B2B discount is capped server-side at 40%, even if environment configuration or future user data asks for more.
 
 All customer-facing prices in the portal are displayed excluding VAT.
+
+Authenticated users can have supplier-specific discounts in `user_supplier_discounts`. Victron and Renogy discounts are capped at 40%. LoRa products do not receive a B2B discount; the Xero sales price is the buyer price.
+
+## Portal users and OTP login
+
+The storefront uses internal portal users with email OTP verification. Passwords are hashed in PostgreSQL and OTPs are stored as hashes with a short expiry.
+
+Run the first-user seed with passwords supplied through environment variables:
+
+```bash
+cd thanda-store
+BRANDON_PASSWORD='...' THANDA_PASSWORD='...' npm run seed:auth-users
+```
+
+Seeded users:
+
+- `thanda` is an admin user with 40% Victron and 40% Renogy discount.
+- `brandon_lgl` belongs to `Let's Get Lost` with 35% Victron and 35% Renogy discount.
+
+Non-admin users cannot complete login until their organisation has a Xero contact link. Admin users can manage that manual link at `/admin/users`.
+
+For email OTP, configure Resend:
+
+```bash
+RESEND_API_KEY=re_...
+OTP_FROM_EMAIL='Thanda Store <login@thanda.solar>'
+```
+
+Keep the Resend key in environment only. Do not commit it.
 
 ## Product display rules
 
@@ -148,7 +178,7 @@ https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Initial scope is deliberately narrow: `offline_access accounting.settings.read`. That is enough to read Xero Items for KZN/local stock mapping. Broader accounting scopes should only be added when we actually need invoices, orders, or writes.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.transactions`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts, and transaction access is needed for the next phase: creating draft Xero quotes. If scopes change, reconnect Xero through `/api/xero/connect` so the stored refresh token receives the new grant.
 
 ## Database
 

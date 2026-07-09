@@ -1,6 +1,6 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
-import { Search, Package, ShoppingCart, Info } from "lucide-react";
+import { Search, Package, ShoppingCart, Info, LogOut } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 
 // Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
@@ -19,6 +19,12 @@ interface Product {
   image_url: string;
   stock_on_hand: number;
   details: Record<string, string | number | boolean | string[] | null>;
+}
+
+interface SessionUser {
+  username: string;
+  role: string;
+  organisationName: string;
 }
 
 function displayLabel(value: string) {
@@ -95,11 +101,25 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [activeSupplier, setActiveSupplier] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    fetch('/api/session')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.user) setSessionUser(data.user);
+      })
+      .catch(() => {});
+
     fetch('/api/products')
-      .then(res => res.json())
+      .then(res => {
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        return res.json();
+      })
       .then(data => {
         if (Array.isArray(data)) {
           setProducts(data);
@@ -111,6 +131,11 @@ export default function Home() {
         setLoading(false);
       });
   }, []);
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  }
 
   useEffect(() => {
     const handleGlobalSearch = (event: KeyboardEvent) => {
@@ -213,14 +238,25 @@ export default function Home() {
                 className="h-9 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
               />
             </div>
-            <div className="flex gap-3">
-              <button className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-4 text-sm font-medium transition-colors hover:bg-zinc-50">
-                <Info className="h-4 w-4" />
-                Support
-              </button>
+            <div className="flex flex-wrap gap-2">
+              {sessionUser && (
+                <div className="flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
+                  {sessionUser.organisationName}
+                </div>
+              )}
+              {sessionUser?.role === 'admin' && (
+                <a href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                  <Info className="h-4 w-4" />
+                  Admin
+                </a>
+              )}
               <button className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
                 <ShoppingCart className="h-4 w-4" />
                 Cart (0)
+              </button>
+              <button onClick={logout} className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                <LogOut className="h-4 w-4" />
+                Logout
               </button>
             </div>
           </div>

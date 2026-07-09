@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { currentUser } from '@/lib/auth/server';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -31,8 +32,10 @@ function recommendedRetailExVat(product: { supplier?: string; details?: Record<s
     : roundMoney(originalPrice / (1 + VAT_RATE));
 }
 
-function configuredDiscountPercent() {
-  const requested = numberOrNull(process.env.DEFAULT_B2B_DISCOUNT_PERCENT) ?? DEFAULT_B2B_DISCOUNT_PERCENT;
+function configuredDiscountPercent(supplier: string, userDiscounts: Record<string, number>) {
+  const requested = userDiscounts[supplier.toLowerCase()]
+    ?? numberOrNull(process.env.DEFAULT_B2B_DISCOUNT_PERCENT)
+    ?? DEFAULT_B2B_DISCOUNT_PERCENT;
   return Math.max(0, Math.min(requested, MAX_B2B_DISCOUNT_PERCENT));
 }
 
@@ -57,15 +60,18 @@ function displayDetails(details: Record<string, unknown>, product: { price?: unk
 
 export async function GET() {
   try {
+    const user = await currentUser();
+    if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+
     const res = await pool.query(`
       SELECT id, name, supplier, category, price, sku, image_url, stock_on_hand, details
       FROM products
       WHERE COALESCE((details->>'hidden')::boolean, false) = false
     `);
-    const discountPercent = configuredDiscountPercent();
     const products = res.rows.map((product) => {
       const details = product.details || {};
       const retailExVat = recommendedRetailExVat(product);
+      const discountPercent = configuredDiscountPercent(product.supplier, user.discounts);
       const yourPriceExVat = buyerPriceExVat(product, retailExVat, discountPercent);
 
       return {

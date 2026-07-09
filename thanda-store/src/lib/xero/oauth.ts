@@ -9,6 +9,8 @@ const CONNECTIONS_URL = 'https://api.xero.com/connections';
 export const XERO_SCOPES = [
   'offline_access',
   'accounting.settings.read',
+  'accounting.contacts.read',
+  'accounting.transactions',
 ].join(' ');
 
 export function xeroConfig() {
