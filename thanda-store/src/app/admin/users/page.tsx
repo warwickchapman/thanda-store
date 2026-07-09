@@ -15,8 +15,16 @@ type AdminUser = {
   discounts: Record<string, number>;
 };
 
+type XeroStatus = {
+  connected: boolean;
+  tenantName: string | null;
+  missingScopes: string[];
+  reconnectRequired: boolean;
+};
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -31,10 +39,18 @@ export default function AdminUsersPage() {
     let active = true;
     async function run() {
       try {
-        const response = await fetch('/api/admin/users');
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Failed to load users');
-        if (active) setUsers(data.users || []);
+        const [usersResponse, xeroResponse] = await Promise.all([
+          fetch('/api/admin/users'),
+          fetch('/api/admin/xero/status'),
+        ]);
+        const usersData = await usersResponse.json();
+        const xeroData = await xeroResponse.json();
+        if (!usersResponse.ok) throw new Error(usersData.error || 'Failed to load users');
+        if (!xeroResponse.ok) throw new Error(xeroData.error || 'Failed to load Xero status');
+        if (active) {
+          setUsers(usersData.users || []);
+          setXeroStatus(xeroData);
+        }
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : 'Failed to load users');
       }
@@ -78,6 +94,33 @@ export default function AdminUsersPage() {
 
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+
+      {xeroStatus && (
+        <div className={`mb-4 rounded-lg border p-4 text-sm ${
+          xeroStatus.connected && !xeroStatus.reconnectRequired
+            ? 'border-green-200 bg-green-50 text-green-900'
+            : 'border-amber-200 bg-amber-50 text-amber-950'
+        }`}>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div>
+              <p className="font-bold">
+                Xero: {xeroStatus.connected ? xeroStatus.tenantName || 'Connected' : 'Not connected'}
+              </p>
+              {xeroStatus.reconnectRequired && (
+                <p className="mt-1">
+                  Reconnect is required{ xeroStatus.missingScopes.length ? ` for: ${xeroStatus.missingScopes.join(', ')}` : '' }.
+                </p>
+              )}
+            </div>
+            <a
+              href="/api/admin/xero/connect"
+              className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white"
+            >
+              Reconnect Xero
+            </a>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {users.map((user) => (

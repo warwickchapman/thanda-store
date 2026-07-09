@@ -178,7 +178,9 @@ https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.transactions`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts, and transaction access is needed for the next phase: creating draft Xero quotes. If scopes change, reconnect Xero through `/api/xero/connect` so the stored refresh token receives the new grant.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
+
+Draft quote creation will need a write-capable Xero scope. Do not add that scope back blindly if Xero returns `invalid_scope`; verify the accepted scope against the current Xero app configuration before deploying quote creation.
 
 ## Database
 
