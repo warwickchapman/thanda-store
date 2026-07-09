@@ -54,7 +54,7 @@ WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
-`RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <login@thanda.solar>`.
+`RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <sales@thanda.solar>`.
 
 ## Pricing rules
 
@@ -94,7 +94,7 @@ For email OTP, configure Resend:
 
 ```bash
 RESEND_API_KEY=re_...
-OTP_FROM_EMAIL='Thanda Store <login@thanda.solar>'
+OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
 ```
 
 Keep the Resend key in environment only. Do not commit it.

@@ -11,7 +11,7 @@ export async function sendOtpEmail({ to, username, otp }: SendOtpEmailInput) {
     return { skipped: true };
   }
 
-  const from = process.env.OTP_FROM_EMAIL || 'Thanda Store <login@thanda.solar>';
+  const from = process.env.OTP_FROM_EMAIL || 'Thanda Store <sales@thanda.solar>';
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
