@@ -3,10 +3,22 @@ import fs from 'node:fs/promises';
 import { currentUser } from '@/lib/auth/server';
 import { XERO_SCOPES, xeroConfig } from '@/lib/xero/oauth';
 
+export const dynamic = 'force-dynamic';
+
+function xeroStatusResponse(body: Record<string, unknown>, init?: ResponseInit) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      ...init?.headers,
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 export async function GET() {
   const user = await currentUser();
   if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    return xeroStatusResponse({ error: 'Admin access required' }, { status: 403 });
   }
 
   try {
@@ -17,7 +29,7 @@ export async function GET() {
     const requiredScopes = XERO_SCOPES.split(/\s+/).filter(Boolean);
     const missingScopes = requiredScopes.filter((scope) => !grantedScopes.includes(scope));
 
-    return NextResponse.json({
+    return xeroStatusResponse({
       connected: Boolean(token.tenant_id && token.refresh_token),
       tenantName: token.tenant_name || null,
       tenantId: token.tenant_id || null,
@@ -28,7 +40,7 @@ export async function GET() {
       reconnectRequired: missingScopes.length > 0,
     });
   } catch {
-    return NextResponse.json({
+    return xeroStatusResponse({
       connected: false,
       tenantName: null,
       tenantId: null,
