@@ -81,10 +81,13 @@ function stockLines(product: Product) {
   }
 
   const lines: string[] = [];
-  if (localStock !== null && localStock > 0) lines.push(`${localStock} in stock (KZN)`);
-  if (supplier === 'renogy') lines.push('Availability: 4-7 working days');
-  if (supplier === 'victron') lines.push('Availability: 3-5 working days');
-  if (supplierLabelText) lines.push(`${product.stock_on_hand} in stock at ${supplierLabelText}`);
+  if (localStock !== null && localStock > 0) lines.push(`Available now: ${localStock} in stock (KZN)`);
+  const supplierLeadTime = supplier === 'renogy' ? '4-7 working days' : supplier === 'victron' ? '3-5 working days' : null;
+  if (supplierLabelText && supplierLeadTime) {
+    lines.push(`${supplierLabelText}: ${product.stock_on_hand} in stock (${supplierLeadTime})`);
+  } else if (supplierLabelText) {
+    lines.push(`${supplierLabelText}: ${product.stock_on_hand} in stock`);
+  }
   return lines;
 }
 
@@ -423,17 +426,17 @@ export default function Home() {
                         
                         <div className="mt-auto flex flex-col gap-4 pt-5 border-t border-zinc-100/50">
                           <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Recommended Retail Excl. VAT</span>
-                            <div className="text-xl font-black tracking-tight text-zinc-900">
-                              {priceLabel(product.recommended_retail_ex_vat)}
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase">Your Price Excl. VAT</span>
+                            <div className="text-2xl font-black tracking-tight text-amber-600">
+                              {priceLabel(product.your_price_ex_vat)}
                             </div>
                           </div>
                           
                           <div className="flex items-center justify-between">
                             <div className="flex flex-col">
-                              <span className="text-[10px] font-bold text-zinc-400 uppercase">Your Price Excl. VAT</span>
-                              <div className="text-sm font-bold text-amber-600">
-                                {priceLabel(product.your_price_ex_vat)}
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase">List Price Excl. VAT</span>
+                              <div className="text-sm font-bold text-zinc-900">
+                                {priceLabel(product.recommended_retail_ex_vat)}
                               </div>
                             </div>
                             <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
