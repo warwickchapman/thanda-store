@@ -2,9 +2,17 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 
 export default function SetPasswordPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-zinc-50" />}>
+      <SetPasswordForm />
+    </Suspense>
+  );
+}
+
+function SetPasswordForm() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token') || '';
   const [password, setPassword] = useState('');
