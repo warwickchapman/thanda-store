@@ -66,11 +66,6 @@ async function fetchImage(url) {
     throw new Error(`HTTP ${response.status}`);
   }
 
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType && !contentType.toLowerCase().includes('image')) {
-    throw new Error(`Unexpected content type: ${contentType}`);
-  }
-
   return Buffer.from(await response.arrayBuffer());
 }
 
