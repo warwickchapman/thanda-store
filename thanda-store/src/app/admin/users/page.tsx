@@ -32,14 +32,23 @@ type XeroContact = {
   email: string;
 };
 
+async function fetchXeroContacts(email: string): Promise<XeroContact[]> {
+  const response = await fetch(`/api/admin/xero/contacts?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Unable to search Xero contacts.');
+  return data.contacts as XeroContact[];
+}
+
 function XeroContactFields({
   email,
   initialContactId = '',
   initialContactName = '',
+  autoLookup = false,
 }: {
   email: string;
   initialContactId?: string;
   initialContactName?: string;
+  autoLookup?: boolean;
 }) {
   const [contactId, setContactId] = useState(initialContactId);
   const [contactName, setContactName] = useState(initialContactName);
@@ -61,10 +70,7 @@ function XeroContactFields({
     setLookupMessage('');
     setContacts([]);
     try {
-      const response = await fetch(`/api/admin/xero/contacts?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to search Xero contacts.');
-      const matches = data.contacts as XeroContact[];
+      const matches = await fetchXeroContacts(email);
       setContacts(matches);
       if (matches.length === 1) {
         selectContact(matches[0]);
@@ -80,6 +86,38 @@ function XeroContactFields({
       setLookingUp(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoLookup || !email || initialContactId) return;
+    let active = true;
+
+    async function lookupAutomatically() {
+      setLookingUp(true);
+      setLookupMessage('');
+      try {
+        const matches = await fetchXeroContacts(email);
+        if (!active) return;
+        setContacts(matches);
+        if (matches.length === 1) {
+          selectContact(matches[0]);
+          setLookupMessage(`Matched ${matches[0].name}.`);
+        } else if (matches.length === 0) {
+          setLookupMessage('No exact Xero contact match. Enter the contact manually.');
+        } else {
+          setLookupMessage(`${matches.length} Xero contacts match this email. Select the correct contact.`);
+        }
+      } catch (err) {
+        if (active) setLookupMessage(err instanceof Error ? err.message : 'Unable to search Xero contacts.');
+      } finally {
+        if (active) setLookingUp(false);
+      }
+    }
+
+    void lookupAutomatically();
+    return () => {
+      active = false;
+    };
+  }, [autoLookup, email, initialContactId]);
 
   return (
     <div className="grid gap-3 lg:col-span-6">
@@ -330,7 +368,7 @@ export default function AdminUsersPage() {
                   }}
                   className="grid gap-3"
                 >
-                  <XeroContactFields key={`${user.id}-${user.xero_contact_id || ''}`} email={user.email} initialContactId={user.xero_contact_id || ''} initialContactName={user.xero_contact_name || ''} />
+                  <XeroContactFields key={`${user.id}-${user.xero_contact_id || ''}`} email={user.email} initialContactId={user.xero_contact_id || ''} initialContactName={user.xero_contact_name || ''} autoLookup={!user.xero_contact_id} />
                   <div><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button></div>
                 </form>
 
