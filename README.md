@@ -122,6 +122,8 @@ Administrators manage users at `/admin/users`:
 
 The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Disable an account to block future session checks without deleting its audit trail.
 
+When an admin enters or reviews a user email, **Find in Xero** performs an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
+
 Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 
 For email OTP, configure Resend:

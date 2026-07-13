@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 type AdminUser = {
@@ -25,12 +26,95 @@ type XeroStatus = {
   reconnectRequired: boolean;
 };
 
+type XeroContact = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+function XeroContactFields({
+  email,
+  initialContactId = '',
+  initialContactName = '',
+}: {
+  email: string;
+  initialContactId?: string;
+  initialContactName?: string;
+}) {
+  const [contactId, setContactId] = useState(initialContactId);
+  const [contactName, setContactName] = useState(initialContactName);
+  const [contacts, setContacts] = useState<XeroContact[]>([]);
+  const [lookupMessage, setLookupMessage] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
+
+  function selectContact(contact: XeroContact) {
+    setContactId(contact.id);
+    setContactName(contact.name);
+  }
+
+  async function findContacts() {
+    if (!email) {
+      setLookupMessage('Enter an email address first.');
+      return;
+    }
+    setLookingUp(true);
+    setLookupMessage('');
+    setContacts([]);
+    try {
+      const response = await fetch(`/api/admin/xero/contacts?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to search Xero contacts.');
+      const matches = data.contacts as XeroContact[];
+      setContacts(matches);
+      if (matches.length === 1) {
+        selectContact(matches[0]);
+        setLookupMessage(`Matched ${matches[0].name}.`);
+      } else if (matches.length === 0) {
+        setLookupMessage('No exact Xero contact match. Enter the contact manually.');
+      } else {
+        setLookupMessage(`${matches.length} Xero contacts match this email. Select the correct contact.`);
+      }
+    } catch (err) {
+      setLookupMessage(err instanceof Error ? err.message : 'Unable to search Xero contacts.');
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-3 lg:col-span-6">
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => setContactId(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+        <label className="grid gap-1 text-sm font-semibold">Xero Contact Name<input name="xeroContactName" value={contactName} onChange={(event) => setContactName(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
+      </div>
+      {contacts.length > 1 && (
+        <label className="grid gap-1 text-sm font-semibold">Matching Xero contacts
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const contact = contacts.find((candidate) => candidate.id === event.target.value);
+              if (contact) selectContact(contact);
+            }}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 font-normal"
+          >
+            <option value="" disabled>Select a contact</option>
+            {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name} ({contact.email})</option>)}
+          </select>
+        </label>
+      )}
+      {lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
+    </div>
+  );
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busyUserId, setBusyUserId] = useState<number | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -205,9 +289,8 @@ export default function AdminUsersPage() {
           <form action={createUser} className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6">
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Company<input name="organisationName" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Username<input name="username" required pattern="[A-Za-z0-9._-]{3,64}" className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Email<input name="email" type="email" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-3">Xero Contact ID<input name="xeroContactId" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-3">Xero Contact Name<input name="xeroContactName" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+            <XeroContactFields key={inviteEmail} email={inviteEmail} />
             <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <div className="flex items-end lg:col-span-4"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
@@ -234,10 +317,9 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                <form action={(formData) => saveLink(user, formData)} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                  <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" defaultValue={user.xero_contact_id || ''} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-                  <label className="grid gap-1 text-sm font-semibold">Xero Contact Name<input name="xeroContactName" defaultValue={user.xero_contact_name || ''} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-                  <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button>
+                <form action={(formData) => saveLink(user, formData)} className="grid gap-3">
+                  <XeroContactFields key={`${user.id}-${user.xero_contact_id || ''}`} email={user.email} initialContactId={user.xero_contact_id || ''} initialContactName={user.xero_contact_name || ''} />
+                  <div><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button></div>
                 </form>
 
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">

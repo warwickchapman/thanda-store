@@ -5,6 +5,7 @@ import path from 'node:path';
 const AUTHORIZE_URL = 'https://login.xero.com/identity/connect/authorize';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const CONNECTIONS_URL = 'https://api.xero.com/connections';
+const CONTACTS_URL = 'https://api.xero.com/api.xro/2.0/Contacts';
 
 export const XERO_SCOPES = [
   'offline_access',
@@ -104,4 +105,89 @@ export async function saveXeroToken(data: unknown) {
   const config = xeroConfig();
   await fs.mkdir(path.dirname(config.tokenFile), { recursive: true });
   await fs.writeFile(config.tokenFile, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+}
+
+type XeroToken = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: string;
+  expires_in?: number;
+  tenant_id?: string;
+  [key: string]: unknown;
+};
+
+export type XeroContactMatch = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+type XeroContactsResponse = {
+  Contacts?: Array<{
+    ContactID?: string;
+    ContactStatus?: string;
+    Name?: string;
+    EmailAddress?: string;
+  }>;
+};
+
+async function accessTokenForRequest() {
+  const config = xeroConfig();
+  const token = JSON.parse(await fs.readFile(config.tokenFile, 'utf8')) as XeroToken;
+  const expiresAt = token.expires_at ? Date.parse(token.expires_at) : 0;
+  if (token.access_token && token.tenant_id && expiresAt > Date.now() + 60_000) return token;
+  if (!token.refresh_token) throw new Error('Xero token file does not contain a refresh token');
+
+  const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+  const response = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token.refresh_token }),
+  });
+  const refreshed = await response.json();
+  if (!response.ok) throw new Error(`Xero token refresh failed: ${refreshed.error || response.status}`);
+
+  const updated = {
+    ...token,
+    ...refreshed,
+    expires_at: new Date(Date.now() + Number(refreshed.expires_in || 0) * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  await saveXeroToken(updated);
+  return updated as XeroToken;
+}
+
+export async function findXeroContactsByEmail(email: string): Promise<XeroContactMatch[]> {
+  const token = await accessTokenForRequest();
+  if (!token.access_token || !token.tenant_id) throw new Error('Xero connection is incomplete');
+
+  const query = new URLSearchParams({
+    where: `EmailAddress=="${email}"`,
+    summaryOnly: 'true',
+    page: '1',
+    pageSize: '100',
+  });
+  const response = await fetch(`${CONTACTS_URL}?${query.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token.access_token}`,
+      'xero-tenant-id': token.tenant_id,
+      Accept: 'application/json',
+    },
+  });
+  const payload = await response.json() as XeroContactsResponse;
+  if (!response.ok) throw new Error(`Xero contact lookup failed: ${response.status}`);
+
+  return (Array.isArray(payload.Contacts) ? payload.Contacts : [])
+    .filter((contact) => String(contact.ContactStatus || '').toUpperCase() !== 'ARCHIVED')
+    .filter((contact) => String(contact.EmailAddress || '').trim().toLowerCase() === email.toLowerCase())
+    .map((contact) => ({
+      id: String(contact.ContactID),
+      name: String(contact.Name || ''),
+      email: String(contact.EmailAddress || ''),
+    }))
+    .filter((contact) => contact.id && contact.name);
 }
