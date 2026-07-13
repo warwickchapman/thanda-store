@@ -8,6 +8,7 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
+- `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
 - `thanda-store/data/victron-zar-2026-q3-skus.json` - generated Victron South Africa allow-list from the Q3 2026 ZAR price list.
@@ -122,6 +123,34 @@ Renogy products display `Availability: 4-7 working days` plus `n in stock at Ren
 Victron products display `Availability: 3-5 working days` plus `n in stock at Victron Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
+
+## Product image thumbnails
+
+The storefront should not render supplier originals directly when a local thumbnail exists. Supplier images can be very large, inconsistently framed, or temporarily unavailable.
+
+Generate local thumbnails after product syncs:
+
+```bash
+cd thanda-store
+npm run images:thumbnails
+```
+
+The thumbnail job:
+
+1. Reads products with `image_url` from PostgreSQL.
+2. Downloads supplier originals only when the local thumbnail is missing, unless `--force` is passed.
+3. Writes normalized WebP files to `public/product-images/<supplier>/<sku>.webp`.
+4. Uses a white square canvas with padding so product cards have stable, mobile-friendly framing.
+
+Useful targeted runs:
+
+```bash
+npm run images:thumbnails -- --supplier victron
+npm run images:thumbnails -- --sku PMP482505012 --force
+npm run images:thumbnails -- --limit 25
+```
+
+`GET /api/products` exposes `thumbnail_url` only when the local file exists. The storefront renders `thumbnail_url` first, falls back to the supplier `image_url`, then falls back to the placeholder icon. This keeps browsing resilient even if thumbnail generation misses a product.
 
 ## Xero stock sync
 

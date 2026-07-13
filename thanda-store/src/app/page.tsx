@@ -17,6 +17,7 @@ interface Product {
   b2b_discount_percent: number;
   sku: string;
   image_url: string;
+  thumbnail_url: string;
   stock_on_hand: number;
   details: Record<string, string | number | boolean | string[] | null>;
 }
@@ -93,6 +94,33 @@ function primaryStockBadge(product: Product) {
   if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Out of stock';
   if (product.supplier === 'lora') return `${localStock ?? 0} in stock (KZN)`;
   return product.supplier === 'renogy' ? '4-7 days' : product.supplier === 'victron' ? '3-5 days' : 'Check stock';
+}
+
+function ProductImage({ product }: { product: Product }) {
+  const [imageIndex, setImageIndex] = useState(0);
+  const sources = [product.thumbnail_url, product.image_url].filter(Boolean);
+  const src = sources[imageIndex];
+
+  if (!src) {
+    return (
+      <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-zinc-100 bg-zinc-50/30">
+        <Package className="h-16 w-16 text-zinc-200" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={product.name}
+      className="h-full w-full object-contain transition-all duration-700 group-hover:scale-105"
+      loading="lazy"
+      decoding="async"
+      onError={() => {
+        setImageIndex(imageIndex < sources.length - 1 ? imageIndex + 1 : sources.length);
+      }}
+    />
+  );
 }
 
 export default function Home() {
@@ -358,20 +386,7 @@ export default function Home() {
                 {selectedProducts.map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
-                        {product.image_url ? (
-                          <img 
-                            src={product.image_url} 
-                            alt={product.name}
-                            className="h-full w-full object-contain transition-all duration-700 group-hover:scale-105"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = ""; // Force fallback on error
-                            }}
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-zinc-100 bg-zinc-50/30">
-                            <Package className="h-16 w-16 text-zinc-200" />
-                          </div>
-                        )}
+                        <ProductImage product={product} />
                         
                         {/* Category Badge - Subtle Glassmorphism */}
                         <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">

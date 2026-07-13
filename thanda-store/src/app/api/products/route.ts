@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import fs from 'node:fs';
+import path from 'node:path';
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 
@@ -58,6 +60,21 @@ function displayDetails(details: Record<string, unknown>, product: { price?: unk
   };
 }
 
+function safePathPart(value: unknown) {
+  return String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function productThumbnailUrl(product: { id: unknown; supplier?: string; sku?: string }) {
+  const supplier = safePathPart(product.supplier?.toLowerCase()) || 'unknown';
+  const sku = safePathPart(product.sku) || String(product.id);
+  const url = `/product-images/${supplier}/${sku}.webp`;
+  const filePath = path.join(process.cwd(), 'public', url.replace(/^\//, ''));
+  return fs.existsSync(filePath) ? url : '';
+}
+
 export async function GET() {
   try {
     const user = await currentUser();
@@ -76,6 +93,7 @@ export async function GET() {
 
       return {
         ...product,
+        thumbnail_url: productThumbnailUrl(product),
         recommended_retail_ex_vat: retailExVat,
         your_price_ex_vat: yourPriceExVat,
         b2b_discount_percent: product.supplier === 'lora' ? 0 : discountPercent,
