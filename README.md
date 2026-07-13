@@ -53,7 +53,6 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
 | `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
-| `npm run seed:auth-users` | Create/update the two current seed users and their discounts. | Initial setup or a deliberate password reset. Requires both password environment variables. |
 | `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
 | `npm run start` | Start the production Next.js server. | PM2 owns this in production; use `npm run dev` locally instead. |
 | `npm run lint` | Run ESLint. | Before committing frontend or API changes. |
@@ -78,6 +77,7 @@ DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 RESEND_API_KEY=re_...
 OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
+PORTAL_BASE_URL=https://oc.sensible.co.za
 PRODUCT_THUMBNAIL_SIZE=600
 PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE=520
 PRODUCT_THUMBNAIL_QUALITY=80
@@ -91,6 +91,7 @@ PRODUCT_THUMBNAIL_QUALITY=80
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the fallback discount when a user has no supplier-specific discount. The API clamps it to a maximum of 40% off list price.
 `RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <sales@thanda.solar>`.
+`PORTAL_BASE_URL` is the public portal URL used in account setup and password-reset emails. It defaults to `https://oc.sensible.co.za`.
 `PRODUCT_THUMBNAIL_SIZE`, `PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE`, and `PRODUCT_THUMBNAIL_QUALITY` control generated WebP framing. The defaults are appropriate for the current product cards; change them only when redesigning the image treatment.
 
 ## Pricing rules
@@ -113,25 +114,22 @@ Authenticated users can have supplier-specific discounts in `user_supplier_disco
 
 The storefront uses internal portal users with email OTP verification. Passwords are hashed in PostgreSQL and OTPs are stored as hashes with a short expiry.
 
-Run the first-user seed with both passwords supplied through environment variables. The command updates the seeded users, so treat it as a deliberate password-reset operation:
+Administrators manage users at `/admin/users`:
 
-```bash
-cd thanda-store
-THANDA_PASSWORD='...' BRANDON_PASSWORD='...' npm run seed:auth-users
-```
+1. Create the buyer company, username, email, supplier discounts, and Xero contact link.
+2. The portal emails a single-use account setup link that expires after seven days.
+3. The buyer chooses their own password, then signs in with that password plus a short-lived email OTP.
 
-Seeded users:
+The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Disable an account to block future session checks without deleting its audit trail.
 
-- `thanda` is an admin user with 40% Victron and 40% Renogy discount.
-- `brandon_lgl` belongs to `Let's Get Lost` with 35% Victron and 35% Renogy discount.
-
-Non-admin users cannot complete login until their organisation has a Xero contact link. Admin users can manage that manual link at `/admin/users`.
+Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 
 For email OTP, configure Resend:
 
 ```bash
 RESEND_API_KEY=re_...
 OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
+PORTAL_BASE_URL=https://oc.sensible.co.za
 ```
 
 Keep the Resend key in environment only. Do not commit it.

@@ -8,6 +8,7 @@ export const SESSION_COOKIE = 'thanda_session';
 const OTP_TTL_MINUTES = 10;
 const SESSION_TTL_DAYS = 14;
 const MAX_OTP_ATTEMPTS = 5;
+const ACCOUNT_SETUP_TTL_DAYS = 7;
 
 export type PortalUser = {
   id: number;
@@ -23,6 +24,10 @@ export type PortalUser = {
 
 function sha256(value: string) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+export async function hashPassword(password: string) {
+  return bcrypt.hash(password, 12);
 }
 
 function numericCode(length = 6) {
@@ -52,6 +57,68 @@ export async function findLoginUser(username: string) {
 
 export async function verifyPassword(password: string, passwordHash: string) {
   return bcrypt.compare(password, passwordHash);
+}
+
+export async function createAccountSetupToken(userId: number) {
+  await ensureAuthSchema();
+  const token = crypto.randomBytes(32).toString('hex');
+  await pool.query(
+    `
+      UPDATE account_setup_tokens
+      SET consumed_at = NOW()
+      WHERE user_id = $1 AND consumed_at IS NULL
+    `,
+    [userId],
+  );
+  await pool.query(
+    `
+      INSERT INTO account_setup_tokens (user_id, token_hash, expires_at)
+      VALUES ($1, $2, NOW() + ($3::text || ' days')::interval)
+    `,
+    [userId, sha256(token), ACCOUNT_SETUP_TTL_DAYS],
+  );
+  return token;
+}
+
+export async function completeAccountSetup(token: string, password: string) {
+  await ensureAuthSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const tokenResult = await client.query(
+      `
+        SELECT user_id
+        FROM account_setup_tokens
+        WHERE token_hash = $1
+          AND consumed_at IS NULL
+          AND expires_at > NOW()
+        FOR UPDATE
+      `,
+      [sha256(token)],
+    );
+    const row = tokenResult.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    const passwordHash = await hashPassword(password);
+    await client.query(
+      'UPDATE portal_users SET password_hash = $2, updated_at = NOW() WHERE id = $1',
+      [row.user_id, passwordHash],
+    );
+    await client.query(
+      'UPDATE account_setup_tokens SET consumed_at = NOW() WHERE token_hash = $1',
+      [sha256(token)],
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createLoginOtp(userId: number) {

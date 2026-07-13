@@ -8,6 +8,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 - Dealer portal authentication with password plus Resend email OTP.
 - Internal user administration for linking buyer organisations to Xero contacts.
+- Admin-managed buyer invitations: buyers set their own passwords from a one-use email link, then use email OTP at sign-in.
 - Renogy and Victron supplier catalogue synchronization, with a quarterly Victron South Africa SKU allow-list process.
 - Xero local/KZN stock synchronization for Victron and LoRa products.
 - Category and supplier navigation, progressive product search, product-line support for Renogy, Victron, Hubble and LoRa.
@@ -23,7 +24,7 @@ All notable production-facing changes are recorded here. This project does not y
 ### Security
 
 - Buyer discounts are capped server-side at 40% off the list price.
-- Seed-user passwords must be explicitly supplied through environment variables; the seed command no longer falls back to a default admin password.
+- The fixed user/password seed command has been removed. User passwords are no longer part of the environment-based operational workflow.
 
 ### Known limitations
 
