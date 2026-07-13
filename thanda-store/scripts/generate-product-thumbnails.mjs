@@ -55,6 +55,15 @@ async function fileExists(filePath) {
 }
 
 async function fetchImage(url) {
+  if (url.startsWith('/')) {
+    const localPath = path.normalize(path.join(process.cwd(), 'public', url));
+    const publicRoot = path.normalize(path.join(process.cwd(), 'public'));
+    if (!localPath.startsWith(publicRoot + path.sep)) {
+      throw new Error(`Local image path escapes public directory: ${url}`);
+    }
+    return fs.readFile(localPath);
+  }
+
   const response = await fetch(url, {
     headers: {
       'User-Agent': USER_AGENT,
