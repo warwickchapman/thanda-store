@@ -12,6 +12,7 @@ function parseArgs(argv) {
   const args = {
     force: false,
     limit: null,
+    ids: [],
     supplier: null,
     sku: null,
   };
@@ -20,6 +21,11 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === '--force') args.force = true;
     else if (arg === '--limit') args.limit = Number(argv[++index]);
+    else if (arg === '--id') {
+      const id = Number(argv[++index]);
+      if (!Number.isInteger(id) || id < 1) throw new Error('--id must be a positive integer');
+      args.ids.push(id);
+    }
     else if (arg === '--supplier') args.supplier = String(argv[++index] || '').toLowerCase();
     else if (arg === '--sku') args.sku = String(argv[++index] || '');
     else throw new Error(`Unknown argument: ${arg}`);
@@ -121,6 +127,11 @@ async function loadProducts(client, args) {
   if (args.sku) {
     params.push(args.sku);
     where.push(`sku = $${params.length}`);
+  }
+
+  if (args.ids.length > 0) {
+    params.push(args.ids);
+    where.push(`id = ANY($${params.length}::bigint[])`);
   }
 
   const limitClause = args.limit ? `LIMIT ${args.limit}` : '';

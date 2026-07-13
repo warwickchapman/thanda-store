@@ -128,7 +128,9 @@ LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble
 
 The storefront should not render supplier originals directly when a local thumbnail exists. Supplier images can be very large, inconsistently framed, or temporarily unavailable.
 
-Generate local thumbnails after product syncs:
+The catalogue lazily queues thumbnail generation when it first encounters a product without one. That request still uses the supplier image immediately, so browsing never waits for image processing; a later request uses the local WebP. Missing thumbnails are retried at most once every five minutes per app process.
+
+The batch command remains useful after a large import or when regenerating a changed source image:
 
 ```bash
 cd thanda-store
@@ -137,9 +139,9 @@ npm run images:thumbnails
 
 The thumbnail job:
 
-1. Reads products with `image_url` from PostgreSQL.
+1. Reads products with `image_url` from PostgreSQL, or specific products selected with `--id`.
 2. Downloads supplier originals only when the local thumbnail is missing, unless `--force` is passed.
-3. Writes normalized WebP files to `public/product-images/<supplier>/<sku>.webp`.
+3. Writes normalized WebP files to `public/product-images/<supplier>/<sku>.webp`, served by the cached `/api/product-images/<supplier>/<sku>` media route.
 4. Uses a white square canvas with padding so product cards have stable, mobile-friendly framing.
 
 Useful targeted runs:
@@ -147,6 +149,7 @@ Useful targeted runs:
 ```bash
 npm run images:thumbnails -- --supplier victron
 npm run images:thumbnails -- --sku PMP482505012 --force
+npm run images:thumbnails -- --id 123 --force
 npm run images:thumbnails -- --limit 25
 ```
 
