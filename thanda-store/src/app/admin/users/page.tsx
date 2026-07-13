@@ -286,7 +286,13 @@ export default function AdminUsersPage() {
             <h2 className="text-lg font-bold">Invite a buyer</h2>
             <p className="text-sm text-zinc-500">The buyer chooses their own password from a one-time email link, then signs in with email OTP.</p>
           </div>
-          <form action={createUser} className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createUser(new FormData(event.currentTarget));
+            }}
+            className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6"
+          >
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Company<input name="organisationName" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Username<input name="username" required pattern="[A-Za-z0-9._-]{3,64}" className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
@@ -317,7 +323,13 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                <form action={(formData) => saveLink(user, formData)} className="grid gap-3">
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveLink(user, new FormData(event.currentTarget));
+                  }}
+                  className="grid gap-3"
+                >
                   <XeroContactFields key={`${user.id}-${user.xero_contact_id || ''}`} email={user.email} initialContactId={user.xero_contact_id || ''} initialContactName={user.xero_contact_name || ''} />
                   <div><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button></div>
                 </form>
