@@ -153,6 +153,66 @@ export async function PATCH(request: Request) {
   const body = await request.json();
   const action = text(body.action) || 'linkXero';
 
+  if (action === 'updateEmail') {
+    const userId = Number(body.userId);
+    const email = text(body.email).toLowerCase();
+    if (!Number.isInteger(userId) || !/^\S+@\S+\.\S+$/.test(email)) {
+      return NextResponse.json({ error: 'A valid user and email address are required.' }, { status: 400 });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const user = await client.query(
+        'SELECT organisation_id, email FROM portal_users WHERE id = $1 FOR UPDATE',
+        [userId],
+      );
+      const row = user.rows[0];
+      if (!row) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+      }
+      if (row.email.toLowerCase() === email) {
+        await client.query('COMMIT');
+        return NextResponse.json({ ok: true, unchanged: true, signedOut: false });
+      }
+
+      const duplicate = await client.query(
+        'SELECT id FROM portal_users WHERE LOWER(email) = $1 AND id <> $2 LIMIT 1',
+        [email, userId],
+      );
+      if (duplicate.rowCount) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'That email address is already assigned to another portal user.' }, { status: 409 });
+      }
+
+      await client.query(
+        'UPDATE portal_users SET email = $2, updated_at = NOW() WHERE id = $1',
+        [userId, email],
+      );
+      await client.query(
+        `
+          UPDATE organisations
+          SET xero_contact_id = NULL,
+              xero_contact_name = NULL,
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [row.organisation_id],
+      );
+      await client.query('DELETE FROM portal_sessions WHERE user_id = $1', [userId]);
+      await client.query('UPDATE login_otps SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [userId]);
+      await client.query('UPDATE account_setup_tokens SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [userId]);
+      await client.query('COMMIT');
+      return NextResponse.json({ ok: true, signedOut: userId === admin.id });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   if (action === 'setActive') {
     const userId = Number(body.userId);
     const isActive = body.isActive === true;

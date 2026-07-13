@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -147,6 +148,7 @@ function XeroContactFields({
 }
 
 export default function AdminUsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [message, setMessage] = useState('');
@@ -237,6 +239,31 @@ export default function AdminUsersPage() {
       return;
     }
     setMessage('Xero contact link saved.');
+    await loadUsers();
+  }
+
+  async function updateEmail(user: AdminUser, formData: FormData) {
+    setError('');
+    setMessage('');
+    const response = await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'updateEmail', userId: user.id, email: formData.get('email') }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setError(data.error || 'Failed to update email address');
+      return;
+    }
+    if (data.signedOut) {
+      router.replace('/login');
+      return;
+    }
+    if (data.unchanged) {
+      setMessage('Email address is unchanged. The Xero link was left in place.');
+      return;
+    }
+    setMessage('Email updated. The Xero link was cleared; review the automatic match and save the new link.');
     await loadUsers();
   }
 
@@ -360,6 +387,20 @@ export default function AdminUsersPage() {
                     {user.setup_expires_at && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Setup pending</span>}
                   </div>
                 </div>
+
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void updateEmail(user, new FormData(event.currentTarget));
+                  }}
+                  className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[1fr_auto] sm:items-end"
+                >
+                  <label className="grid gap-1 text-sm font-semibold">Portal email
+                    <input name="email" type="email" defaultValue={user.email} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" />
+                  </label>
+                  <button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Update email</button>
+                  <p className="text-xs text-zinc-500 sm:col-span-2">Changing this email clears the organisation Xero link and signs this user out.</p>
+                </form>
 
                 <form
                   onSubmit={(event) => {

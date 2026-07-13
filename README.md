@@ -124,6 +124,8 @@ The admin never sets, stores, or communicates the buyer password. **Send setup e
 
 When an admin opens User Admin, each unlinked user is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
 
+Changing a portal user email clears the organisation's Xero link, revokes that user's active sessions and outstanding codes, then reruns the automatic match against the new email. Because the Xero link belongs to the organisation, this affects every portal user in that organisation.
+
 Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 
 For email OTP, configure Resend:
