@@ -109,8 +109,9 @@ async function upsertUser(client, { organisationId, username, email, password, r
 }
 
 async function main() {
-  const thandaPassword = process.env.THANDA_PASSWORD || 'solar2026';
+  const thandaPassword = process.env.THANDA_PASSWORD;
   const brandonPassword = process.env.BRANDON_PASSWORD;
+  if (!thandaPassword) throw new Error('THANDA_PASSWORD is required');
   if (!brandonPassword) throw new Error('BRANDON_PASSWORD is required');
 
   const client = await pool.connect();

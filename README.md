@@ -1,6 +1,8 @@
 # Thanda Store
 
-Dealer inventory portal for Thanda Store. The repository currently contains a Next.js storefront plus helper scripts used to import and enrich product data from warehouse and supplier sources.
+Dealer inventory portal for Thanda Store. The repository contains a Next.js B2B storefront, PostgreSQL-backed catalogue, supplier/Xero synchronization jobs, and a small internal user administration area.
+
+The root README is the operational source of truth. [`thanda-store/README.md`](thanda-store/README.md) is intentionally brief and points here.
 
 ## Repository layout
 
@@ -17,6 +19,15 @@ Dealer inventory portal for Thanda Store. The repository currently contains a Ne
 - `sync_renogy_inventory.py` - experimental Renogy enrichment script.
 - `renogy_*` scripts - supplier-specific authentication/API experiments.
 
+## Architecture
+
+- **Storefront:** Next.js application in `thanda-store/`, served by PM2 behind Nginx at `https://oc.sensible.co.za`.
+- **Catalogue:** PostgreSQL `products` records keyed by `(supplier, sku)`. Product details that do not belong in first-class columns are stored in the JSONB `details` field.
+- **Supplier stock and pricing:** Renogy and Victron scripts refresh supplier information. The store never derives a buyer price from a supplier/distributor cost.
+- **Local KZN stock:** Xero Items refresh `details.localStockOnHand` for Victron products and the LoRa placeholder.
+- **Authentication:** Portal usernames/passwords plus a Resend-delivered email OTP. Each buyer organisation must be manually linked to a Xero contact before it can log in.
+- **Images:** Original supplier image URLs remain in PostgreSQL. The first catalogue response that finds a missing thumbnail starts background WebP generation; the current response falls back to the supplier original.
+
 Generated local data files such as CSV exports, Excel reports, `node_modules`, and Next.js build output are intentionally ignored.
 
 ## Local development
@@ -28,6 +39,25 @@ npm run dev
 ```
 
 The app reads products from `GET /api/products`, which queries PostgreSQL through `src/lib/db.ts`.
+
+## Command reference
+
+Run commands from `thanda-store/`. Scheduled commands should not normally be run by hand; the intended use is noted below.
+
+| Command | Purpose | When to run it |
+| --- | --- | --- |
+| `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | Manual troubleshooting only; `sync:all` runs it every five minutes on the VPS. |
+| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | After a new Victron allow-list, or manual troubleshooting; scheduled through `sync:all`. |
+| `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
+| `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | The VPS supplier-sync timer runs this every five minutes. |
+| `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
+| `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
+| `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
+| `npm run seed:auth-users` | Create/update the two current seed users and their discounts. | Initial setup or a deliberate password reset. Requires both password environment variables. |
+| `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
+| `npm run start` | Start the production Next.js server. | PM2 owns this in production; use `npm run dev` locally instead. |
+| `npm run lint` | Run ESLint. | Before committing frontend or API changes. |
+| `npm run build` | Produce a production build. | Before deployment; the VPS build is the authoritative check. |
 
 Required environment variables:
 
@@ -46,6 +76,11 @@ XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
 XERO_CONNECT_SECRET=...
 DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
+RESEND_API_KEY=re_...
+OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
+PRODUCT_THUMBNAIL_SIZE=600
+PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE=520
+PRODUCT_THUMBNAIL_QUALITY=80
 ```
 
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
@@ -54,20 +89,21 @@ WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 `VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
-`DEFAULT_B2B_DISCOUNT_PERCENT` is the temporary buyer discount until user-specific pricing exists. The API clamps it to a maximum of 40% off recommended retail.
+`DEFAULT_B2B_DISCOUNT_PERCENT` is the fallback discount when a user has no supplier-specific discount. The API clamps it to a maximum of 40% off list price.
 `RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <sales@thanda.solar>`.
+`PRODUCT_THUMBNAIL_SIZE`, `PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE`, and `PRODUCT_THUMBNAIL_QUALITY` control generated WebP framing. The defaults are appropriate for the current product cards; change them only when redesigning the image treatment.
 
 ## Pricing rules
 
 The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That value must never be displayed as the buyer price.
 
-`GET /api/products` calculates buyer-facing prices from recommended retail:
+`GET /api/products` calculates buyer-facing prices from the supplier list price:
 
-- `recommended_retail_ex_vat` = supplier recommended retail normalized to excluding VAT.
-  - Renogy recommended retail is treated as including VAT unless the sync marks it otherwise.
-  - Victron South Africa recommended retail is derived from the E-Order account price: `eorder_price / 0.525`. The PDF price list is used as the South Africa SKU allow-list, not as the pricing source. The raw Victron API retail field is kept in product details for comparison only.
-- `your_price_ex_vat` = `recommended_retail_ex_vat` less the configured B2B discount.
-- B2B discount is capped server-side at 40%, even if environment configuration or future user data asks for more.
+- `recommended_retail_ex_vat` is the internal field name for the supplier list price normalized to excluding VAT. The storefront labels it **List Price Excl. VAT**.
+  - Renogy list price is treated as including VAT unless the sync marks it otherwise.
+  - Victron South Africa list price is derived from the E-Order account price: `eorder_price / 0.525`. The PDF price list is used as the South Africa SKU allow-list, not as the pricing source. The raw Victron API retail field is kept in product details for comparison only.
+- `your_price_ex_vat` = the list price less the configured B2B discount.
+- B2B discount is capped server-side at 40%, even if environment configuration or user data asks for more.
 
 All customer-facing prices in the portal are displayed excluding VAT.
 
@@ -77,11 +113,11 @@ Authenticated users can have supplier-specific discounts in `user_supplier_disco
 
 The storefront uses internal portal users with email OTP verification. Passwords are hashed in PostgreSQL and OTPs are stored as hashes with a short expiry.
 
-Run the first-user seed with passwords supplied through environment variables:
+Run the first-user seed with both passwords supplied through environment variables. The command updates the seeded users, so treat it as a deliberate password-reset operation:
 
 ```bash
 cd thanda-store
-BRANDON_PASSWORD='...' THANDA_PASSWORD='...' npm run seed:auth-users
+THANDA_PASSWORD='...' BRANDON_PASSWORD='...' npm run seed:auth-users
 ```
 
 Seeded users:
@@ -118,9 +154,19 @@ Stock display has two concepts:
 - `localStockOnHand` in `details` is Thanda/KZN stock. This will eventually come from Xero.
 - `stock_on_hand` is supplier stock from the supplier API.
 
-Renogy products display `Availability: 4-7 working days` plus `n in stock at Renogy Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
+Renogy products use two independently labelled fulfilment lines when both are available:
 
-Victron products display `Availability: 3-5 working days` plus `n in stock at Victron Warehouse ZA`. If KZN stock is later present, it is shown first as `n in stock (KZN)`.
+```text
+Available now: n in stock (KZN)
+Renogy Warehouse ZA: n in stock (4-7 working days)
+```
+
+Victron products use the equivalent wording with a 3-5 working day supplier lead time:
+
+```text
+Available now: n in stock (KZN)
+Victron Warehouse ZA: n in stock (3-5 working days)
+```
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
 
@@ -128,7 +174,9 @@ LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble
 
 The storefront should not render supplier originals directly when a local thumbnail exists. Supplier images can be very large, inconsistently framed, or temporarily unavailable.
 
-The catalogue lazily queues thumbnail generation when it first encounters a product without one. That request still uses the supplier image immediately, so browsing never waits for image processing; a later request uses the local WebP. Missing thumbnails are retried at most once every five minutes per app process.
+The authenticated catalogue API lazily queues thumbnail generation when it first encounters a product with an `image_url` but no local WebP. That request still uses the supplier image immediately, so browsing never waits for image processing; a later request uses the local WebP. The worker is detached from the request and retries a missing thumbnail at most once every five minutes per app process.
+
+This is self-maintaining for normal product imports. No thumbnail timer or post-sync batch action is required. A newly imported product receives a thumbnail after the first authenticated catalogue load that includes it.
 
 The batch command remains useful after a large import or when regenerating a changed source image:
 
@@ -153,7 +201,9 @@ npm run images:thumbnails -- --id 123 --force
 npm run images:thumbnails -- --limit 25
 ```
 
-`GET /api/products` exposes `thumbnail_url` only when the local file exists. The storefront renders `thumbnail_url` first, falls back to the supplier `image_url`, then falls back to the placeholder icon. This keeps browsing resilient even if thumbnail generation misses a product.
+Use `--force` only after deliberately changing a source image or thumbnail settings. It overwrites the existing local WebP.
+
+`GET /api/products` exposes `thumbnail_url` only when the local file exists. The storefront renders `thumbnail_url` first, falls back to the supplier `image_url`, then falls back to the placeholder icon. Local files are served through the cached public media route `/api/product-images/<supplier>/<sku>`. This keeps browsing resilient even if thumbnail generation misses a product.
 
 ## Xero stock sync
 
@@ -174,12 +224,11 @@ The sync:
 4. Writes Xero `QuantityOnHand` into `details.localStockOnHand`.
 5. Treats missing or untracked Xero items as local stock `0`.
 
-For supplier-backed products, the storefront hides the KZN stock line when `localStockOnHand` is zero, then continues to show the supplier warehouse line. For example, a Victron product with 4 units in Xero and 648 units at Victron displays:
+For supplier-backed products, the storefront hides the KZN line when `localStockOnHand` is zero and continues to show the supplier warehouse line. For example, a Victron product with 4 units in Xero and 648 units at Victron displays:
 
 ```text
-4 in stock (KZN)
-Availability: 3-5 working days
-648 in stock at Victron Warehouse ZA
+Available now: 4 in stock (KZN)
+Victron Warehouse ZA: 648 in stock (3-5 working days)
 ```
 
 Do not run this every five minutes. Xero has daily request limits, and local stock does not need supplier-style refresh frequency. Use a 30-60 minute timer for local stock, with a future admin "Sync now" action if operators need an immediate refresh.
@@ -246,11 +295,13 @@ The sync is intentionally warehouse-driven:
 This is more reliable than scanning hand-picked category batches. Direct testing found that all 95 warehouse SKUs resolve through SKU search, while the old category scan only found 22 products.
 The export itself contains SKU, description, available stock, in-transit quantity, and expected delivery date; it does not contain prices or image URLs.
 
-### Five-minute schedule
+### VPS supplier schedule
 
-On the VPS, prefer a systemd timer over a long-running loop. It gives you logs, restart behaviour, and avoids overlapping runs.
+The production supplier timer runs both the Renogy and lightweight Victron sync every five minutes. It is already enabled on the VPS; use the following unit names and paths when inspecting or rebuilding it.
 
-`/etc/systemd/system/thanda-renogy-sync.service`:
+The current supplier unit keeps its credentials in root-managed systemd environment values. Do not copy those values into documentation, shell history, or source control. Moving them into a root-readable `EnvironmentFile` is a worthwhile hardening task, but must be done as a coordinated server change.
+
+`/etc/systemd/system/thanda-store-sync.service`:
 
 ```ini
 [Unit]
@@ -258,22 +309,22 @@ Description=Sync Thanda Store products from Renogy
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/thanda-store/thanda-store
-EnvironmentFile=/etc/thanda-store.env
-ExecStart=/usr/bin/npm run sync:renogy
+WorkingDirectory=/root/thanda-store/thanda-store
+# Configure DATABASE_URL and supplier credentials as root-readable environment values.
+ExecStart=/usr/bin/npm run sync:all
 ```
 
-`/etc/systemd/system/thanda-renogy-sync.timer`:
+`/etc/systemd/system/thanda-store-sync.timer`:
 
 ```ini
 [Unit]
-Description=Run Thanda Renogy sync every five minutes
+Description=Run Thanda Store supplier sync every five minutes
 
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=5min
 AccuracySec=30s
-Unit=thanda-renogy-sync.service
+Unit=thanda-store-sync.service
 
 [Install]
 WantedBy=timers.target
@@ -283,12 +334,56 @@ Enable it with:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now thanda-renogy-sync.timer
-systemctl list-timers thanda-renogy-sync.timer
-journalctl -u thanda-renogy-sync.service -n 100 --no-pager
+sudo systemctl enable --now thanda-store-sync.timer
+systemctl list-timers thanda-store-sync.timer
+journalctl -u thanda-store-sync.service -n 100 --no-pager
 ```
 
-Five minutes is a reasonable starting point for a small catalogue. If Renogy throttles or the run time approaches the interval, move to ten or fifteen minutes and show `last_updated` in the admin view.
+Five minutes is a reasonable starting point for supplier availability. If a supplier throttles or the run time approaches the interval, move to ten or fifteen minutes and add `last_updated` to the admin view.
+
+### VPS Xero stock schedule
+
+The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits.
+
+```bash
+systemctl list-timers thanda-store-xero-stock.timer
+journalctl -u thanda-store-xero-stock.service -n 100 --no-pager
+systemctl start thanda-store-xero-stock.service
+```
+
+## Deployment and operations
+
+Production is hosted at `https://oc.sensible.co.za`.
+
+- **Application checkout:** `/root/thanda-store`
+- **Next.js working directory:** `/root/thanda-store/thanda-store`
+- **Process manager:** PM2 process `thanda-store` (currently process id `0`)
+- **Reverse proxy and TLS:** Nginx with the Certbot-managed `oc.sensible.co.za` certificate
+- **Supplier timer:** `thanda-store-sync.timer`, every five minutes
+- **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
+
+Deploy a committed change from the VPS:
+
+```bash
+cd /root/thanda-store
+git pull --rebase origin main
+cd thanda-store
+npm install
+npm run build
+pm2 restart thanda-store
+pm2 save
+```
+
+Verify after deployment:
+
+```bash
+pm2 status thanda-store
+curl -I https://oc.sensible.co.za/login
+journalctl -u thanda-store-sync.service -n 50 --no-pager
+journalctl -u thanda-store-xero-stock.service -n 50 --no-pager
+```
+
+Do not commit generated thumbnails, token files, credentials, `node_modules`, or Next.js build output. Product thumbnails are server-generated runtime data under `thanda-store/public/product-images/`.
 
 ### Authentication
 
@@ -350,28 +445,12 @@ PYTHON=/Users/warwick/.cache/codex-runtimes/codex-primary-runtime/dependencies/p
 5. Run `npm run sync:victron` to import the new active SKU set, then run `npm run sync:victron:extended` only if images/documents need refresh.
 6. Commit the new allow-list and README/changelog note with the quarter and SKU count.
 
-## Current technical issues
+## Known limitations and next operational work
 
-### Git repository shape
+- Cart handling and draft Xero quote creation are not implemented. The cart button must not be treated as an ordering workflow yet.
+- Hubble availability is still a manually seeded string; there is no administrator control for changing it.
+- Supplier and Xero job failures are available in systemd logs, but no external alerting or admin sync-health view exists yet.
+- A product thumbnail is generated after its first authenticated catalogue load. Use the batch thumbnail command after a bulk import when every thumbnail must be prepared before users browse.
+- Credentials must stay in root-readable environment configuration and token files must remain mode `0600`. Rotate any secret that has ever been committed or shared outside its intended operational boundary.
 
-This repository previously contained a nested git repository for the app. That caused GitHub to receive a gitlink pointer instead of normal application files. The app should be tracked as ordinary files under `thanda-store/`.
-
-### Supplier enrichment
-
-Stock levels, names, prices, and images are now fetched through SKU-driven Renogy API lookup. The important detail is that `itemViewType` must be empty when searching by SKU; fixed category batches miss valid products.
-
-### Secrets
-
-`sync_renogy_inventory.py` currently contains a bearer token from the supplier API work. Treat that token as exposed because it has been committed before. Rotate or revoke it, then replace hard-coded credentials with environment variables.
-
-### Storefront behaviour
-
-The portal is currently a read-only product catalogue. Search input, cart actions, user-specific discount selection, and support actions are visual placeholders and should either be implemented or simplified so the UI does not imply unavailable behaviour.
-
-## Suggested next steps
-
-1. Rotate supplier/API credentials and move secrets to environment variables.
-2. Add alerting if API login starts failing.
-3. Add alerting if a sync run fails or if products are missing from Renogy.
-4. Implement or remove placeholder cart/support controls.
-5. Add a short changelog once the first real deployment baseline is agreed.
+See [CHANGELOG.md](CHANGELOG.md) for the production-facing change history.
