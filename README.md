@@ -281,6 +281,8 @@ Current scopes are `offline_access accounting.settings.read accounting.contacts.
 
 After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in User Admin. The connection status identifies any missing permission. Do not run sales-history sync or create quotes until `accounting.invoices` has been approved.
 
+User Admin also shows the latest Xero API allowance observed by the sales-history sync: remaining daily and minute calls, when it was observed, and any recorded `Retry-After` deadline. Opening that page does not make an extra Xero request. If the daily allowance is exhausted, the timer records the reset deadline and later runs exit without calling Xero until then.
+
 ## Database
 
 The app expects a PostgreSQL database with a `products` table. Apply the setup SQL with:
