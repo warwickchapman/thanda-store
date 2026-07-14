@@ -27,8 +27,14 @@ async function usableToken(config, token) {
 function headers(token, extra = {}) { return { Authorization: `Bearer ${token.access_token}`, 'xero-tenant-id': token.tenant_id, Accept: 'application/json', ...extra }; }
 async function xeroJson(url, token, extraHeaders = {}) {
   const response = await fetch(url, { headers: headers(token, extraHeaders) });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(`Xero invoices request failed: ${response.status} ${JSON.stringify(payload)}`);
+  const body = await response.text();
+  let payload = {};
+  if (body.trim()) {
+    try { payload = JSON.parse(body); }
+    catch { throw new Error(`Xero invoices returned non-JSON: ${response.status} ${response.statusText} ${body.slice(0, 300)}`); }
+  }
+  if (!response.ok) throw new Error(`Xero invoices request failed: ${response.status} ${response.statusText} ${body.slice(0, 500)}`);
+  if (!body.trim()) throw new Error(`Xero invoices returned an empty successful response: ${response.status} ${response.statusText}`);
   return payload;
 }
 async function ensureSchema(client) {
