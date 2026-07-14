@@ -69,6 +69,17 @@ async function xeroEmails(token, contactId) {
   ].map((email) => String(email || '').trim().toLowerCase()).filter(Boolean));
 }
 
+async function ensurePortalUserSchema(client) {
+  // The timer may run before any authenticated web request has applied the
+  // application migration after deployment.
+  await client.query('ALTER TABLE portal_users DROP COLUMN IF EXISTS username');
+  await client.query("ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_kind TEXT NOT NULL DEFAULT 'manual'");
+  await client.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_email TEXT');
+  await client.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
+  await client.query('CREATE UNIQUE INDEX IF NOT EXISTS portal_users_email_lower_unique ON portal_users (LOWER(email))');
+  await client.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
+}
+
 async function main() {
   const settings = config();
   const token = await refreshTokenIfNeeded(settings, JSON.parse(await fs.readFile(settings.tokenFile, 'utf8')));
@@ -77,6 +88,7 @@ async function main() {
   const stats = { contacts: 0, checkedUsers: 0, archivedUsers: 0 };
 
   try {
+    await ensurePortalUserSchema(client);
     const result = await client.query(`
       SELECT u.id, u.xero_person_email, o.xero_contact_id
       FROM portal_users u
