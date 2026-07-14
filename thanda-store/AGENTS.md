@@ -3,3 +3,16 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## External API budget discipline
+
+External API calls are a constrained production resource. Minimise them by default.
+
+- Never make an external API request from a storefront render, client polling loop, or administrative page load unless the user explicitly requested a live action.
+- Read from PostgreSQL-backed derived data in normal portal flows. Sync external data in scheduled jobs and record when it was last observed.
+- Use provider-native incremental mechanisms first: `If-Modified-Since`, cursor/page tokens, date windows, webhooks, and batch endpoints. Do not fetch one record per request when a batch request exists.
+- Before adding or changing an integration, state the expected calls per run, calls per day, and the provider limit. Keep a safety margin for existing jobs and interactive admin actions.
+- Persist the latest available quota/rate-limit headers where the provider supplies them. Surface the cached allowance and retry deadline in Admin; do not spend a request merely to refresh a dashboard number.
+- Honour `429` and `Retry-After` exactly. When a daily allowance is exhausted, record the next permitted attempt and make scheduled runs skip locally until then.
+- Initial backfills must be resumable, bounded, and safe to pause. They must not retry indefinitely or exhaust a daily budget in one run.
+- New API code must have request timeouts, bounded retries, useful error logs without secrets, and a test or manual verification plan for rate-limit behaviour.

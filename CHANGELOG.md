@@ -33,6 +33,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Cart prices and discounts are recalculated from the current catalogue when read and again when a draft quote is created. A successful checkout creates an exclusive-VAT Xero draft quote and clears the cart; a rejected request retains it.
 - The customer-facing cart command is labelled **Quote me!**; it creates only a draft quote at this stage.
 - User Admin now displays the latest observed Xero API allowance and the sales-history timer pauses cleanly through a Xero daily-limit `Retry-After` window.
+- Developer and operational documentation now require API-budget estimates, batch/incremental reads, cached portal data, bounded backfills, and strict `429`/`Retry-After` handling for all external integrations.
 
 ### Security
 

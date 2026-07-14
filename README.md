@@ -32,6 +32,14 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 
 Generated local data files such as CSV exports, Excel reports, `node_modules`, and Next.js build output are intentionally ignored.
 
+## External API discipline
+
+Supplier, accounting, and messaging APIs are finite operational resources. The portal must serve normal user requests from PostgreSQL-derived data, never by calling a supplier or Xero during page rendering. Scheduled syncs must use provider batching, pagination, conditional/modified-since reads, and webhooks where appropriate.
+
+Before changing an integration, document the expected calls per run and per day, the provider allowance, and the safety margin left for existing jobs and interactive administration. Respect `429` and `Retry-After`; persist rate-limit headers when available and pause locally through a daily-limit reset instead of repeatedly making rejected calls. Initial backfills must be resumable and bounded, not an unbounded one-request-per-record loop.
+
+For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. The sales-history sync uses 100-invoice pages and 20-invoice detail batches, records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display.
+
 ## Local development
 
 ```bash
