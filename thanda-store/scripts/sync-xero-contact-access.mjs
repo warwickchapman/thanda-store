@@ -7,6 +7,7 @@ import pg from 'pg';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const CONTACTS_URL = 'https://api.xero.com/api.xro/2.0/Contacts';
 const DEFAULT_TOKEN_FILE = '/var/lib/thanda-store/xero-token.json';
+const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -63,10 +64,11 @@ async function xeroEmails(token, contactId) {
   if (!response.ok) throw new Error(`Xero contact ${contactId} fetch failed: ${response.status}`);
   const contact = payload.Contacts?.[0];
   if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') return new Set();
-  return new Set([
-    contact.EmailAddress,
-    ...(contact.ContactPersons || []).map((person) => person.EmailAddress),
-  ].map((email) => String(email || '').trim().toLowerCase()).filter(Boolean));
+  const primaryEmail = String(contact.EmailAddress || '').trim().toLowerCase();
+  const additionalEmails = (contact.ContactPersons || [])
+    .map((person) => String(person.EmailAddress || '').trim().toLowerCase())
+    .filter((email) => email && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(email));
+  return new Set([primaryEmail, ...additionalEmails].filter(Boolean));
 }
 
 async function ensurePortalUserSchema(client) {

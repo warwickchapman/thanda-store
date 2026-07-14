@@ -6,6 +6,7 @@ const AUTHORIZE_URL = 'https://login.xero.com/identity/connect/authorize';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const CONNECTIONS_URL = 'https://api.xero.com/connections';
 const CONTACTS_URL = 'https://api.xero.com/api.xro/2.0/Contacts';
+const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 
 export const XERO_SCOPES = [
   'offline_access',
@@ -185,7 +186,7 @@ export async function getXeroContactPeople(contactId: string): Promise<XeroConta
         includeInEmails: person.IncludeInEmails === true,
       };
     })
-    .filter((person) => person.email && person.email !== primaryEmail);
+    .filter((person) => person.email && person.email !== primaryEmail && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(person.email));
   return [...primary, ...additional];
 }
 
