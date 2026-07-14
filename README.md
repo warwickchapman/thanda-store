@@ -126,6 +126,8 @@ The admin never sets, stores, or communicates the buyer password. **Send setup e
 
 When an admin opens User Admin, each unlinked user is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
 
+After a Xero link is saved, User Admin shows a compact locked contact summary. Use **Edit Xero link** to deliberately reopen the linking fields; an unchanged saved link is not exposed as an editable form.
+
 Changing a portal user email clears the organisation's Xero link, revokes that user's active sessions and outstanding codes, then reruns the automatic match against the new email. Because the Xero link belongs to the organisation, this affects every portal user in that organisation.
 
 Xero is the source of truth for eligible people at a linked customer. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. The contact-access sync fetches every linked Xero contact every 30 minutes. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.

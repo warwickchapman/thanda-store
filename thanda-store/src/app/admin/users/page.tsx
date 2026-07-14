@@ -238,6 +238,53 @@ function XeroPeopleAccess({
   );
 }
 
+function XeroLinkEditor({
+  user,
+  onSave,
+}: {
+  user: AdminUser;
+  onSave: (formData: FormData) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(!user.xero_contact_id);
+
+  if (!editing && user.xero_contact_id) {
+    return (
+      <div className="flex flex-col justify-between gap-3 border-y border-zinc-100 py-4 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Xero contact linked</p>
+          <p className="font-semibold text-zinc-900">{user.xero_contact_name}</p>
+          <p className="text-xs text-zinc-500">{user.xero_contact_id}</p>
+        </div>
+        <button type="button" onClick={() => setEditing(true)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit Xero link</button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave(new FormData(event.currentTarget)).then((saved) => {
+          if (saved) setEditing(false);
+        });
+      }}
+      className="grid gap-3 border-y border-zinc-100 py-4"
+    >
+      <XeroContactFields
+        key={`${user.id}-${user.xero_contact_id || ''}`}
+        email={user.email}
+        initialContactId={user.xero_contact_id || ''}
+        initialContactName={user.xero_contact_name || ''}
+        autoLookup={!user.xero_contact_id}
+      />
+      <div className="flex flex-wrap gap-2">
+        <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button>
+        {user.xero_contact_id && <button type="button" onClick={() => setEditing(false)} className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-900">Cancel</button>}
+      </div>
+    </form>
+  );
+}
+
 export default function AdminUsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -311,7 +358,7 @@ export default function AdminUsersPage() {
     await loadUsers();
   }
 
-  async function saveLink(user: AdminUser, formData: FormData) {
+  async function saveLink(user: AdminUser, formData: FormData): Promise<boolean> {
     setError('');
     setMessage('');
     const response = await fetch('/api/admin/users', {
@@ -326,10 +373,11 @@ export default function AdminUsersPage() {
     const data = await response.json();
     if (!response.ok) {
       setError(data.error || 'Failed to save Xero link');
-      return;
+      return false;
     }
     setMessage('Xero contact link saved.');
     await loadUsers();
+    return true;
   }
 
   async function updateEmail(user: AdminUser, formData: FormData) {
@@ -493,16 +541,7 @@ export default function AdminUsersPage() {
                   <p className="text-xs text-zinc-500 sm:col-span-2">Changing this email clears the organisation Xero link and signs this user out.</p>
                 </form>
 
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void saveLink(user, new FormData(event.currentTarget));
-                  }}
-                  className="grid gap-3"
-                >
-                  <XeroContactFields key={`${user.id}-${user.xero_contact_id || ''}`} email={user.email} initialContactId={user.xero_contact_id || ''} initialContactName={user.xero_contact_name || ''} autoLookup={!user.xero_contact_id} />
-                  <div><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button></div>
-                </form>
+                <XeroLinkEditor user={user} onSave={(formData) => saveLink(user, formData)} />
 
                 {user.xero_contact_id && users.find((candidate) => candidate.organisation_id === user.organisation_id)?.id === user.id && (
                   <XeroPeopleAccess
