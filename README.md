@@ -221,7 +221,7 @@ Home is the first catalogue tab. **My favourites** ranks current visible catalog
 
 Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read and again immediately before Xero quote creation.
 
-**Create draft quote** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
+**Quote me!** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
 
 ## Xero stock sync
 

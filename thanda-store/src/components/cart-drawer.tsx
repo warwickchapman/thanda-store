@@ -72,7 +72,7 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
           <div className="flex items-center justify-between text-sm"><span className="font-semibold">Subtotal excl. VAT</span><span className="text-lg font-black text-amber-600">{formatCurrency(cart.subtotalExVat)}</span></div>
           {quoteMessage && <p className="mt-3 text-xs font-medium text-zinc-700">{quoteMessage}</p>}
           <button disabled={cart.lines.length === 0 || creatingQuote} onClick={createQuote} className="mt-4 h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">
-            {creatingQuote ? 'Creating draft quote...' : 'Create draft quote'}
+            {creatingQuote ? 'Creating draft quote...' : 'Quote me!'}
           </button>
           <p className="mt-2 text-xs text-zinc-500">This creates a draft quote in Xero. Your cart is kept if Xero rejects the request.</p>
         </div>
