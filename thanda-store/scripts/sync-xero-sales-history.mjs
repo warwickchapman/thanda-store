@@ -9,7 +9,9 @@ import pg from 'pg';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const INVOICES_URL = 'https://api.xero.com/api.xro/2.0/Invoices';
 const INITIAL_WINDOW_DAYS = 365;
-const REQUEST_INTERVAL_MS = 1_100;
+// Keep room below Xero's 60 requests/minute tenant limit for stock and contact
+// jobs that share the same connection.
+const REQUEST_INTERVAL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DETAIL_BATCH_SIZE = 20;
 let lastRequestAt = 0;
