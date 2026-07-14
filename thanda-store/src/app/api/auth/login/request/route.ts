@@ -5,16 +5,16 @@ import { sendOtpEmail } from '@/lib/email/resend';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const username = String(body.username || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
 
-    if (!username || !password) {
-      return NextResponse.json({ error: 'Username and password are required' }, { status: 400 });
+    if (!email || !password) {
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const user = await findLoginUser(username);
+    const user = await findLoginUser(email);
     if (!user || !(await verifyPassword(password, user.password_hash))) {
-      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
     }
 
     if (!canLogin(user)) {
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     }
 
     const otp = await createLoginOtp(Number(user.id));
-    await sendOtpEmail({ to: user.email, username: user.username, otp });
+    await sendOtpEmail({ to: user.email, otp });
 
     return NextResponse.json({ ok: true, email: user.email.replace(/(^.).*(@.*$)/, '$1***$2') });
   } catch (error) {

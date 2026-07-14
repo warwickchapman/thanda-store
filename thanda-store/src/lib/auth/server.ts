@@ -12,7 +12,6 @@ const ACCOUNT_SETUP_TTL_DAYS = 7;
 
 export type PortalUser = {
   id: number;
-  username: string;
   email: string;
   role: string;
   organisationId: number;
@@ -40,17 +39,17 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export async function findLoginUser(username: string) {
+export async function findLoginUser(email: string) {
   await ensureAuthSchema();
   const result = await pool.query(
     `
       SELECT u.*, o.name AS organisation_name, o.xero_contact_id, o.xero_contact_name
       FROM portal_users u
       JOIN organisations o ON o.id = u.organisation_id
-      WHERE lower(u.username) = lower($1) AND u.is_active = true
+      WHERE lower(u.email) = lower($1) AND u.is_active = true
       LIMIT 1
     `,
-    [username.trim()],
+    [email.trim()],
   );
   return result.rows[0] || null;
 }
@@ -186,7 +185,6 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
     `
       SELECT
         u.id,
-        u.username,
         u.email,
         u.role,
         o.id AS organisation_id,
@@ -219,7 +217,6 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
 
   return {
     id: Number(row.id),
-    username: row.username,
     email: row.email,
     role: row.role,
     organisationId: Number(row.organisation_id),

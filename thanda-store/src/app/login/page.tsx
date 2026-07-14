@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'password' | 'otp'>('password');
@@ -20,7 +20,7 @@ export default function LoginPage() {
       const response = await fetch('/api/auth/login/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not request login code');
@@ -41,7 +41,7 @@ export default function LoginPage() {
       const response = await fetch('/api/auth/login/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, otp }),
+        body: JSON.stringify({ email, otp }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Invalid login code');
@@ -66,13 +66,14 @@ export default function LoginPage() {
 
         <form onSubmit={step === 'password' ? requestOtp : verifyOtp} className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div>
-            <label className="mb-1 block text-sm font-semibold" htmlFor="username">Username</label>
+            <label className="mb-1 block text-sm font-semibold" htmlFor="email">Email</label>
             <input
-              id="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               disabled={step === 'otp'}
-              autoComplete="username"
+              autoComplete="email"
               className="h-11 w-full rounded-md border border-zinc-300 px-3 text-base outline-none focus:border-zinc-950"
             />
           </div>

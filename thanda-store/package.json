@@ -13,6 +13,7 @@
     "sync:victron": "node scripts/sync-victron-products.mjs",
     "sync:victron:extended": "VICTRON_SYNC_EXTENDED=1 node scripts/sync-victron-products.mjs",
     "sync:xero-stock": "node scripts/sync-xero-stock.mjs",
+    "sync:xero-contact-access": "node scripts/sync-xero-contact-access.mjs",
     "images:thumbnails": "node scripts/generate-product-thumbnails.mjs",
     "sync:all": "npm run sync:renogy && npm run sync:victron"
   },

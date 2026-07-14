@@ -1,24 +1,12 @@
 type SendOtpEmailInput = {
   to: string;
-  username: string;
   otp: string;
 };
 
 type SendAccountSetupEmailInput = {
   to: string;
-  username: string;
   token: string;
 };
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;',
-  }[character] || character));
-}
 
 function resendConfig() {
   const apiKey = process.env.RESEND_API_KEY;
@@ -48,12 +36,12 @@ async function sendEmail(payload: { to: string; subject: string; html: string; t
   return response.json();
 }
 
-export async function sendOtpEmail({ to, username, otp }: SendOtpEmailInput) {
+export async function sendOtpEmail({ to, otp }: SendOtpEmailInput) {
   return sendEmail({
     to,
     subject: 'Your Thanda Store login code',
     html: `
-      <p>Hello ${escapeHtml(username)},</p>
+      <p>Hello,</p>
       <p>Your Thanda Store login code is:</p>
       <p style="font-size:24px;font-weight:700;letter-spacing:4px">${otp}</p>
       <p>This code expires in 10 minutes.</p>
@@ -62,14 +50,14 @@ export async function sendOtpEmail({ to, username, otp }: SendOtpEmailInput) {
   });
 }
 
-export async function sendAccountSetupEmail({ to, username, token }: SendAccountSetupEmailInput) {
+export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmailInput) {
   const baseUrl = (process.env.PORTAL_BASE_URL || 'https://oc.sensible.co.za').replace(/\/$/, '');
   const setupUrl = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
     subject: 'Set up your Thanda Store account',
     html: `
-      <p>Hello ${escapeHtml(username)},</p>
+      <p>Hello,</p>
       <p>Your Thanda Store account is ready. Set your password to finish setup.</p>
       <p><a href="${setupUrl}">Set your password</a></p>
       <p>This link expires in 7 days and can be used once.</p>

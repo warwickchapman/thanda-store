@@ -11,6 +11,8 @@ All notable production-facing changes are recorded here. This project does not y
 - Admin-managed buyer invitations: buyers set their own passwords from a one-use email link, then use email OTP at sign-in.
 - Xero contact email lookup in User Admin, with automatic selection for one exact match and an explicit dropdown for multiple matches.
 - Admin editing of a portal email clears the organisation Xero link and revokes the changed user's active sessions before rematching.
+- Email-only portal authentication: usernames have been removed before launch.
+- Xero-backed company access: the primary contact is the first login, additional people can be explicitly enabled, and a scheduled reconciliation archives enabled people removed from Xero.
 - Renogy and Victron supplier catalogue synchronization, with a quarterly Victron South Africa SKU allow-list process.
 - Xero local/KZN stock synchronization for Victron and LoRa products.
 - Category and supplier navigation, progressive product search, product-line support for Renogy, Victron, Hubble and LoRa.

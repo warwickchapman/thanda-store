@@ -16,15 +16,25 @@ export async function ensureAuthSchema() {
     CREATE TABLE IF NOT EXISTS portal_users (
       id BIGSERIAL PRIMARY KEY,
       organisation_id BIGINT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-      username TEXT NOT NULL UNIQUE,
       email TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'buyer',
       is_active BOOLEAN NOT NULL DEFAULT true,
+      xero_person_kind TEXT NOT NULL DEFAULT 'manual',
+      xero_person_email TEXT,
+      archived_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // Pre-launch migration: email is the only login identifier. Keep the Xero
+  // person source locally so a reconciliation can revoke removed access.
+  await pool.query('ALTER TABLE portal_users DROP COLUMN IF EXISTS username');
+  await pool.query("ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_kind TEXT NOT NULL DEFAULT 'manual'");
+  await pool.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_email TEXT');
+  await pool.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS portal_users_email_lower_unique ON portal_users (LOWER(email))');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_supplier_discounts (
@@ -71,6 +81,7 @@ export async function ensureAuthSchema() {
   `);
 
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS login_otps_user_idx ON login_otps (user_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS account_setup_tokens_user_idx ON account_setup_tokens (user_id)');

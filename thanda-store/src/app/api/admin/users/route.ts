@@ -8,8 +8,7 @@ import {
 } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import { sendAccountSetupEmail } from '@/lib/email/resend';
-
-const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,64}$/;
+import { getXeroContactPeople } from '@/lib/xero/oauth';
 
 async function requireAdmin() {
   const user = await currentUser();
@@ -26,9 +25,9 @@ function discount(value: unknown) {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 40 ? parsed : null;
 }
 
-async function sendSetupEmail(user: { id: number; username: string; email: string }) {
+async function sendSetupEmail(user: { id: number; email: string }) {
   const token = await createAccountSetupToken(user.id);
-  await sendAccountSetupEmail({ to: user.email, username: user.username, token });
+  await sendAccountSetupEmail({ to: user.email, token });
 }
 
 export async function GET() {
@@ -39,10 +38,11 @@ export async function GET() {
   const result = await pool.query(`
     SELECT
       u.id,
-      u.username,
       u.email,
       u.role,
       u.is_active,
+      u.xero_person_kind,
+      u.archived_at,
       o.id AS organisation_id,
       o.name AS organisation_name,
       o.xero_contact_id,
@@ -62,7 +62,7 @@ export async function GET() {
       LIMIT 1
     ) invite ON true
     GROUP BY u.id, o.id, invite.expires_at
-    ORDER BY o.name, u.username
+    ORDER BY o.name, u.email
   `);
 
   return NextResponse.json({ users: result.rows });
@@ -75,15 +75,14 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const organisationName = text(body.organisationName);
-  const username = text(body.username);
   const email = text(body.email).toLowerCase();
   const xeroContactId = text(body.xeroContactId);
   const xeroContactName = text(body.xeroContactName);
   const victronDiscount = discount(body.victronDiscount);
   const renogyDiscount = discount(body.renogyDiscount);
 
-  if (!organisationName || !USERNAME_PATTERN.test(username) || !/^\S+@\S+\.\S+$/.test(email)) {
-    return NextResponse.json({ error: 'Provide a company, a valid username, and an email address.' }, { status: 400 });
+  if (!organisationName || !/^\S+@\S+\.\S+$/.test(email)) {
+    return NextResponse.json({ error: 'Provide a company and a valid email address.' }, { status: 400 });
   }
   if (!xeroContactId || !xeroContactName) {
     return NextResponse.json({ error: 'Link the company to a Xero contact before inviting a user.' }, { status: 400 });
@@ -91,9 +90,15 @@ export async function POST(request: Request) {
   if (victronDiscount === null || renogyDiscount === null) {
     return NextResponse.json({ error: 'Victron and Renogy discounts must be between 0% and 40%.' }, { status: 400 });
   }
+  const xeroPrimary = (await getXeroContactPeople(xeroContactId)).find(
+    (person) => person.kind === 'primary' && person.email === email,
+  );
+  if (!xeroPrimary) {
+    return NextResponse.json({ error: 'The portal email must match the selected Xero contact primary email address.' }, { status: 400 });
+  }
 
   const client = await pool.connect();
-  let user: { id: number; username: string; email: string };
+  let user: { id: number; email: string };
   try {
     await client.query('BEGIN');
     const organisation = await client.query(
@@ -111,11 +116,11 @@ export async function POST(request: Request) {
     const unusablePassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
     const insertedUser = await client.query(
       `
-        INSERT INTO portal_users (organisation_id, username, email, password_hash, role, is_active)
-        VALUES ($1, $2, $3, $4, 'buyer', true)
-        RETURNING id, username, email
+        INSERT INTO portal_users (organisation_id, email, password_hash, role, is_active, xero_person_kind, xero_person_email)
+        VALUES ($1, $2, $3, 'buyer', true, 'primary', $2)
+        RETURNING id, email
       `,
-      [organisation.rows[0].id, username, email, unusablePassword],
+      [organisation.rows[0].id, email, unusablePassword],
     );
     user = insertedUser.rows[0];
     await client.query(
@@ -129,7 +134,7 @@ export async function POST(request: Request) {
   } catch (error) {
     await client.query('ROLLBACK');
     if ((error as { code?: string }).code === '23505') {
-      return NextResponse.json({ error: 'That username already exists.' }, { status: 409 });
+      return NextResponse.json({ error: 'That email address already exists.' }, { status: 409 });
     }
     throw error;
   } finally {
@@ -220,8 +225,104 @@ export async function PATCH(request: Request) {
     if (userId === admin.id && !isActive) {
       return NextResponse.json({ error: 'You cannot disable your own administrator account.' }, { status: 400 });
     }
-    await pool.query('UPDATE portal_users SET is_active = $2, updated_at = NOW() WHERE id = $1', [userId, isActive]);
+    const target = await pool.query('SELECT xero_person_kind FROM portal_users WHERE id = $1', [userId]);
+    if (!target.rows[0]) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    if (isActive && target.rows[0].xero_person_kind !== 'manual') {
+      return NextResponse.json({ error: 'Re-enable Xero-managed users from the Xero people list so their eligibility is verified.' }, { status: 400 });
+    }
+    await pool.query('UPDATE portal_users SET is_active = $2, archived_at = CASE WHEN $2 THEN NULL ELSE archived_at END, updated_at = NOW() WHERE id = $1', [userId, isActive]);
     return NextResponse.json({ ok: true });
+  }
+
+  if (action === 'enableXeroPerson') {
+    const organisationId = Number(body.organisationId);
+    const email = text(body.email).toLowerCase();
+    if (!Number.isInteger(organisationId) || !/^\S+@\S+\.\S+$/.test(email)) {
+      return NextResponse.json({ error: 'An organisation and valid Xero person email are required.' }, { status: 400 });
+    }
+
+    const organisation = await pool.query(
+      'SELECT xero_contact_id FROM organisations WHERE id = $1 LIMIT 1',
+      [organisationId],
+    );
+    const contactId = organisation.rows[0]?.xero_contact_id;
+    if (!contactId) return NextResponse.json({ error: 'Link the organisation to Xero first.' }, { status: 400 });
+
+    const xeroPerson = (await getXeroContactPeople(contactId)).find((person) => person.email === email);
+    if (!xeroPerson) {
+      return NextResponse.json({ error: 'That person is no longer present on the linked Xero contact.' }, { status: 400 });
+    }
+
+    const client = await pool.connect();
+    let portalUser: { id: number; email: string };
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        'SELECT id, organisation_id FROM portal_users WHERE LOWER(email) = $1 FOR UPDATE',
+        [email],
+      );
+      const existingUser = existing.rows[0];
+      if (existingUser && Number(existingUser.organisation_id) !== organisationId) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'This email already belongs to another portal organisation.' }, { status: 409 });
+      }
+
+      if (existingUser) {
+        const resetPassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
+        const updated = await client.query(
+          `
+            UPDATE portal_users
+            SET password_hash = $2,
+                is_active = true,
+                archived_at = NULL,
+                xero_person_kind = $3,
+                xero_person_email = $4,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, email
+          `,
+          [existingUser.id, resetPassword, xeroPerson.kind, xeroPerson.email],
+        );
+        portalUser = updated.rows[0];
+      } else {
+        const resetPassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
+        const inserted = await client.query(
+          `
+            INSERT INTO portal_users (organisation_id, email, password_hash, role, is_active, xero_person_kind, xero_person_email)
+            VALUES ($1, $2, $3, 'buyer', true, $4, $5)
+            RETURNING id, email
+          `,
+          [organisationId, xeroPerson.email, resetPassword, xeroPerson.kind, xeroPerson.email],
+        );
+        portalUser = inserted.rows[0];
+        await client.query(
+          `
+            INSERT INTO user_supplier_discounts (user_id, supplier, discount_percent)
+            SELECT $1, supplier, discount_percent
+            FROM user_supplier_discounts
+            WHERE user_id = (SELECT id FROM portal_users WHERE organisation_id = $2 ORDER BY id LIMIT 1)
+            ON CONFLICT (user_id, supplier) DO NOTHING
+          `,
+          [portalUser.id, organisationId],
+        );
+      }
+      await client.query('DELETE FROM portal_sessions WHERE user_id = $1', [portalUser.id]);
+      await client.query('UPDATE login_otps SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [portalUser.id]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    try {
+      await sendSetupEmail(portalUser!);
+      return NextResponse.json({ ok: true, inviteSent: true });
+    } catch (error) {
+      console.error('Enabled Xero person but could not send setup email:', error);
+      return NextResponse.json({ ok: true, inviteSent: false });
+    }
   }
 
   const organisationId = Number(body.organisationId);
@@ -231,6 +332,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Organisation, Xero contact ID, and name are required.' }, { status: 400 });
   }
 
+  const people = await getXeroContactPeople(xeroContactId);
   await pool.query(
     `
       UPDATE organisations
@@ -241,6 +343,20 @@ export async function PATCH(request: Request) {
     `,
     [organisationId, xeroContactId, xeroContactName],
   );
+  for (const person of people) {
+    await pool.query(
+      `
+        UPDATE portal_users
+        SET xero_person_kind = $3,
+            xero_person_email = $2,
+            archived_at = NULL,
+            updated_at = NOW()
+        WHERE organisation_id = $1
+          AND LOWER(email) = $2
+      `,
+      [organisationId, person.email, person.kind],
+    );
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -255,7 +371,7 @@ export async function PUT(request: Request) {
 
   const result = await pool.query(
     `
-      SELECT u.id, u.username, u.email, o.xero_contact_id
+      SELECT u.id, u.email, o.xero_contact_id
       FROM portal_users u
       JOIN organisations o ON o.id = u.organisation_id
       WHERE u.id = $1

@@ -23,7 +23,6 @@ interface Product {
 }
 
 interface SessionUser {
-  username: string;
   role: string;
   organisationName: string;
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Thanda Store Xero contact access sync every 30 minutes
+
+[Timer]
+OnBootSec=7min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Unit=thanda-store-xero-contact-access.service
+
+[Install]
+WantedBy=timers.target

@@ -3,14 +3,15 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 type AdminUser = {
   id: number;
-  username: string;
   email: string;
   role: string;
   is_active: boolean;
+  xero_person_kind: 'manual' | 'primary' | 'additional';
+  archived_at: string | null;
   organisation_id: number;
   organisation_name: string;
   xero_contact_id: string | null;
@@ -33,6 +34,13 @@ type XeroContact = {
   email: string;
 };
 
+type XeroContactPerson = {
+  email: string;
+  name: string;
+  kind: 'primary' | 'additional';
+  includeInEmails: boolean;
+};
+
 async function fetchXeroContacts(email: string): Promise<XeroContact[]> {
   const response = await fetch(`/api/admin/xero/contacts?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
   const data = await response.json();
@@ -45,11 +53,13 @@ function XeroContactFields({
   initialContactId = '',
   initialContactName = '',
   autoLookup = false,
+  emailInput,
 }: {
   email: string;
   initialContactId?: string;
   initialContactName?: string;
   autoLookup?: boolean;
+  emailInput?: ReactNode;
 }) {
   const [contactId, setContactId] = useState(initialContactId);
   const [contactName, setContactName] = useState(initialContactName);
@@ -122,10 +132,14 @@ function XeroContactFields({
 
   return (
     <div className="grid gap-3 lg:col-span-6">
+      {emailInput && <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+        {emailInput}
+        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
+      </div>}
       <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => setContactId(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
         <label className="grid gap-1 text-sm font-semibold">Xero Contact Name<input name="xeroContactName" value={contactName} onChange={(event) => setContactName(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
+        {!emailInput && <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>}
       </div>
       {contacts.length > 1 && (
         <label className="grid gap-1 text-sm font-semibold">Matching Xero contacts
@@ -143,6 +157,83 @@ function XeroContactFields({
         </label>
       )}
       {lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
+    </div>
+  );
+}
+
+function XeroPeopleAccess({
+  organisationId,
+  contactId,
+  portalUsers,
+  onEnabled,
+}: {
+  organisationId: number;
+  contactId: string;
+  portalUsers: AdminUser[];
+  onEnabled: () => Promise<void>;
+}) {
+  const [people, setPeople] = useState<XeroContactPerson[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busyEmail, setBusyEmail] = useState('');
+  const [message, setMessage] = useState('');
+
+  async function loadPeople() {
+    setLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/admin/xero/contact-people?contactId=${encodeURIComponent(contactId)}`, { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to load people from Xero.');
+      setPeople(data.people || []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to load people from Xero.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function enablePerson(person: XeroContactPerson) {
+    setBusyEmail(person.email);
+    setMessage('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'enableXeroPerson', organisationId, email: person.email }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to enable this person.');
+      setMessage(data.inviteSent ? `Setup email sent to ${person.email}.` : `Access enabled for ${person.email}; send setup email once Resend is available.`);
+      await onEnabled();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to enable this person.');
+    } finally {
+      setBusyEmail('');
+    }
+  }
+
+  const userByEmail = new Map(portalUsers.map((user) => [user.email.toLowerCase(), user]));
+  return (
+    <div className="mt-4 border-t border-zinc-100 pt-4">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+        <div>
+          <h4 className="text-sm font-bold">Xero people</h4>
+          <p className="text-xs text-zinc-500">Primary contact and additional people eligible for this company.</p>
+        </div>
+        <button type="button" onClick={loadPeople} disabled={loading} className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold disabled:opacity-60">{loading ? 'Refreshing' : 'Refresh people'}</button>
+      </div>
+      {people.length > 0 && <div className="mt-3 grid gap-2">
+        {people.map((person) => {
+          const portalUser = userByEmail.get(person.email);
+          return <div key={person.email} className="flex flex-col justify-between gap-2 rounded-md border border-zinc-200 p-3 sm:flex-row sm:items-center">
+            <div className="min-w-0"><p className="text-sm font-semibold">{person.name}</p><p className="truncate text-xs text-zinc-500">{person.email} · {person.kind === 'primary' ? 'Primary contact' : 'Additional person'}</p></div>
+            {portalUser?.is_active
+              ? <span className="text-xs font-semibold text-green-700">Portal access enabled</span>
+              : <button type="button" onClick={() => void enablePerson(person)} disabled={busyEmail === person.email} className="h-9 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60">{busyEmail === person.email ? 'Enabling' : portalUser ? 'Re-enable access' : 'Enable access'}</button>}
+          </div>;
+        })}
+      </div>}
+      {message && <p className="mt-2 text-xs text-zinc-600">{message}</p>}
     </div>
   );
 }
@@ -204,7 +295,6 @@ export default function AdminUsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         organisationName: formData.get('organisationName'),
-        username: formData.get('username'),
         email: formData.get('email'),
         xeroContactId: formData.get('xeroContactId'),
         xeroContactName: formData.get('xeroContactName'),
@@ -358,13 +448,14 @@ export default function AdminUsersPage() {
             }}
             className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6"
           >
+            <XeroContactFields
+              email={inviteEmail}
+              emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
+            />
             <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Company<input name="organisationName" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Username<input name="username" required pattern="[A-Za-z0-9._-]{3,64}" className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <XeroContactFields key={inviteEmail} email={inviteEmail} />
             <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
             <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <div className="flex items-end lg:col-span-4"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
+            <div className="flex items-end lg:col-span-2"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
           </form>
         </section>
 
@@ -379,7 +470,7 @@ export default function AdminUsersPage() {
                 <div className="mb-4 flex flex-col justify-between gap-2 sm:flex-row">
                   <div>
                     <h3 className="font-bold">{user.organisation_name}</h3>
-                    <p className="text-sm text-zinc-500">{user.username} · {user.email} · {user.role}</p>
+                    <p className="text-sm text-zinc-500">{user.email} · {user.role}</p>
                     <p className="mt-1 text-sm text-zinc-500">Discounts: Victron {user.discounts?.victron ?? 0}% · Renogy {user.discounts?.renogy ?? 0}%</p>
                   </div>
                   <div className="flex flex-wrap items-start gap-2">
@@ -413,9 +504,18 @@ export default function AdminUsersPage() {
                   <div><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button></div>
                 </form>
 
+                {user.xero_contact_id && users.find((candidate) => candidate.organisation_id === user.organisation_id)?.id === user.id && (
+                  <XeroPeopleAccess
+                    organisationId={user.organisation_id}
+                    contactId={user.xero_contact_id}
+                    portalUsers={users.filter((candidate) => candidate.organisation_id === user.organisation_id)}
+                    onEnabled={loadUsers}
+                  />
+                )}
+
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
                   <button type="button" disabled={busyUserId === user.id} onClick={() => sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">Send setup email</button>
-                  <button type="button" disabled={busyUserId === user.id} onClick={() => setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>
+                  {(user.is_active || user.xero_person_kind === 'manual') && <button type="button" disabled={busyUserId === user.id} onClick={() => setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>}
                 </div>
               </div>
             ))}

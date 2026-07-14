@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile Thanda Store Xero contact access
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store-xero.env
+ExecStart=/usr/bin/npm run sync:xero-contact-access

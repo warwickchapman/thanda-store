@@ -10,6 +10,7 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
+- `thanda-store/scripts/sync-xero-contact-access.mjs` - Reconciles enabled Xero primary/additional people and archives portal access removed in Xero.
 - `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
@@ -25,7 +26,7 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 - **Catalogue:** PostgreSQL `products` records keyed by `(supplier, sku)`. Product details that do not belong in first-class columns are stored in the JSONB `details` field.
 - **Supplier stock and pricing:** Renogy and Victron scripts refresh supplier information. The store never derives a buyer price from a supplier/distributor cost.
 - **Local KZN stock:** Xero Items refresh `details.localStockOnHand` for Victron products and the LoRa placeholder.
-- **Authentication:** Portal usernames/passwords plus a Resend-delivered email OTP. Each buyer organisation must be manually linked to a Xero contact before it can log in.
+- **Authentication:** Email/password plus a Resend-delivered email OTP. Email is the sole portal login identifier. Each buyer organisation must be linked to a Xero contact before a buyer can log in.
 - **Images:** Original supplier image URLs remain in PostgreSQL. The first catalogue response that finds a missing thumbnail starts background WebP generation; the current response falls back to the supplier original.
 
 Generated local data files such as CSV exports, Excel reports, `node_modules`, and Next.js build output are intentionally ignored.
@@ -51,6 +52,7 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | The VPS supplier-sync timer runs this every five minutes. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
+| `npm run sync:xero-contact-access` | Disable enabled Xero-backed users removed from their linked Xero contact. | VPS runs it every 30 minutes. |
 | `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
 | `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
@@ -116,15 +118,17 @@ The storefront uses internal portal users with email OTP verification. Passwords
 
 Administrators manage users at `/admin/users`:
 
-1. Create the buyer company, username, email, supplier discounts, and Xero contact link.
+1. Search Xero by the buyer primary contact email, select the customer contact, then enter the company and supplier discounts.
 2. The portal emails a single-use account setup link that expires after seven days.
-3. The buyer chooses their own password, then signs in with that password plus a short-lived email OTP.
+3. The buyer chooses their own password, then signs in with their email, password, and a short-lived email OTP.
 
 The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Disable an account to block future session checks without deleting its audit trail.
 
 When an admin opens User Admin, each unlinked user is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
 
 Changing a portal user email clears the organisation's Xero link, revokes that user's active sessions and outstanding codes, then reruns the automatic match against the new email. Because the Xero link belongs to the organisation, this affects every portal user in that organisation.
+
+Xero is the source of truth for eligible people at a linked customer. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. The contact-access sync fetches every linked Xero contact every 30 minutes. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.
 
 Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 
@@ -261,7 +265,7 @@ https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Current scopes are `offline_access accounting.settings.read accounting.contacts.read`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
 
 Draft quote creation will need a write-capable Xero scope. Do not add that scope back blindly if Xero returns `invalid_scope`; verify the accepted scope against the current Xero app configuration before deploying quote creation.
 
@@ -343,14 +347,25 @@ journalctl -u thanda-store-sync.service -n 100 --no-pager
 
 Five minutes is a reasonable starting point for supplier availability. If a supplier throttles or the run time approaches the interval, move to ten or fifteen minutes and add `last_updated` to the admin view.
 
-### VPS Xero stock schedule
+### VPS Xero schedules
 
-The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits.
+The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list.
 
 ```bash
 systemctl list-timers thanda-store-xero-stock.timer
+systemctl list-timers thanda-store-xero-contact-access.timer
 journalctl -u thanda-store-xero-stock.service -n 100 --no-pager
 systemctl start thanda-store-xero-stock.service
+systemctl start thanda-store-xero-contact-access.service
+```
+
+The tracked unit templates are in `deploy/systemd/`. Install the contact-access timer with:
+
+```bash
+sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now thanda-store-xero-contact-access.timer
 ```
 
 ## Deployment and operations
@@ -363,6 +378,7 @@ Production is hosted at `https://oc.sensible.co.za`.
 - **Reverse proxy and TLS:** Nginx with the Certbot-managed `oc.sensible.co.za` certificate
 - **Supplier timer:** `thanda-store-sync.timer`, every five minutes
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
+- **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, every 30 minutes
 
 Deploy a committed change from the VPS:
 

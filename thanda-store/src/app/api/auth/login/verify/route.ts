@@ -4,14 +4,14 @@ import { canLogin, consumeLoginOtp, createSession, findLoginUser, SESSION_COOKIE
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const username = String(body.username || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
     const otp = String(body.otp || '').trim();
 
-    if (!username || !otp) {
-      return NextResponse.json({ error: 'Username and code are required' }, { status: 400 });
+    if (!email || !otp) {
+      return NextResponse.json({ error: 'Email and code are required' }, { status: 400 });
     }
 
-    const user = await findLoginUser(username);
+    const user = await findLoginUser(email);
     if (!user || !canLogin(user)) {
       return NextResponse.json({ error: 'Login is not available for this account' }, { status: 403 });
     }
