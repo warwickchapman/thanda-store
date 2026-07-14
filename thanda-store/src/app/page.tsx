@@ -2,6 +2,7 @@
 import { formatCurrency } from "@/lib/utils";
 import { Search, Package, ShoppingCart, Info, LogOut } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
+import { CartDrawer } from '@/components/cart-drawer';
 
 // Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
 // However, since we want to keep it simple, I'll move the data fetching to an API route and fetch it here.
@@ -26,6 +27,9 @@ interface SessionUser {
   role: string;
   organisationName: string;
 }
+
+type Cart = { lines: Array<{ quantity: number; product: { id: number; name: string; sku: string; your_price_ex_vat: number | null } }>; itemCount: number; subtotalExVat: number };
+const emptyCart: Cart = { lines: [], itemCount: 0, subtotalExVat: 0 };
 
 function displayLabel(value: string) {
   const label = value
@@ -129,8 +133,12 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [activeSupplier, setActiveSupplier] = useState('');
+  const [activeSupplier, setActiveSupplier] = useState('home');
   const [activeCategory, setActiveCategory] = useState('');
+  const [homeTab, setHomeTab] = useState<'mine' | 'thanda'>('mine');
+  const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[] }>({ mine: [], thanda: [] });
+  const [cart, setCart] = useState<Cart>(emptyCart);
+  const [cartOpen, setCartOpen] = useState(false);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -160,11 +168,27 @@ export default function Home() {
         console.error('Fetch error:', err);
         setLoading(false);
       });
+    fetch('/api/favourites').then((res) => res.ok ? res.json() : null).then((data) => {
+      if (data && Array.isArray(data.mine) && Array.isArray(data.thanda)) setFavourites(data);
+    }).catch(() => {});
+    fetch('/api/cart').then((res) => res.ok ? res.json() : null).then((data) => {
+      if (data) setCart(data);
+    }).catch(() => {});
   }, []);
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
+  }
+
+  async function addToCart(productId: number) {
+    const response = await fetch('/api/cart', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId }),
+    });
+    if (response.ok) {
+      setCart(await response.json());
+      setCartOpen(true);
+    }
   }
 
   useEffect(() => {
@@ -218,10 +242,12 @@ export default function Home() {
     count: supplierProducts[supplier]?.length || 0,
   }));
   const visibleSuppliers = supplierTabs.filter((tab) => tab.count > 0);
-  const selectedSupplier = activeSupplier && supplierProducts[activeSupplier]
+  const selectedSupplier = query.trim()
+    ? (activeSupplier !== 'home' && supplierProducts[activeSupplier] ? activeSupplier : visibleSuppliers[0]?.supplier || '')
+    : (activeSupplier === 'home' || (activeSupplier && supplierProducts[activeSupplier])
     ? activeSupplier
-    : visibleSuppliers[0]?.supplier || '';
-  const productsInSupplier = selectedSupplier ? supplierProducts[selectedSupplier] || [] : [];
+    : visibleSuppliers[0]?.supplier || '');
+  const productsInSupplier = selectedSupplier && selectedSupplier !== 'home' ? supplierProducts[selectedSupplier] || [] : [];
   const groupedProducts = productsInSupplier.reduce<Record<string, Product[]>>((groups, product) => {
     const category = product.category || 'uncategorized';
     groups[category] = groups[category] || [];
@@ -238,6 +264,7 @@ export default function Home() {
     ? activeCategory
     : visibleCategories[0]?.category || '';
   const selectedProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : [];
+  const selectedHomeProducts = homeTab === 'mine' ? favourites.mine : favourites.thanda;
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
@@ -280,9 +307,9 @@ export default function Home() {
                   Admin
                 </a>
               )}
-              <button className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
+              <button onClick={() => setCartOpen(true)} className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
                 <ShoppingCart className="h-4 w-4" />
-                Cart (0)
+                Cart ({cart.itemCount})
               </button>
               <button onClick={logout} className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                 <LogOut className="h-4 w-4" />
@@ -319,6 +346,9 @@ export default function Home() {
           <div className="space-y-6">
             <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
               <div className="flex min-w-max gap-2 border-b border-zinc-200">
+                <button type="button" onClick={() => { setActiveSupplier('home'); setActiveCategory(''); }} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'home' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
+                  <span>Home</span>
+                </button>
                 {visibleSuppliers.map(({ supplier, count }) => {
                   const isActive = supplier === selectedSupplier;
                   return (
@@ -347,7 +377,14 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+            {selectedSupplier === 'home' ? (
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                <div className="flex min-w-max gap-2 border-b border-zinc-200">
+                  <button type="button" onClick={() => setHomeTab('mine')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'mine' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>My favourites</button>
+                  <button type="button" onClick={() => setHomeTab('thanda')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'thanda' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>Thanda favourites</button>
+                </div>
+              </div>
+            ) : <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
               <div className="flex min-w-max gap-2 border-b border-zinc-200">
                 {visibleCategories.map(({ category, count }) => {
                   const isActive = category === selectedCategory;
@@ -372,20 +409,20 @@ export default function Home() {
                   );
                 })}
               </div>
-            </div>
+            </div>}
 
             <section className="space-y-4">
               <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{supplierLabel(selectedSupplier)}</p>
-                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{displayLabel(selectedCategory)}</h2>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
+                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Thanda favourites') : displayLabel(selectedCategory)}</h2>
                 </div>
                 <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
-                  {selectedProducts.length} {selectedProducts.length === 1 ? 'product' : 'products'}
+                  {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {selectedProducts.map((product) => (
+                {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
                         <ProductImage product={product} />
@@ -438,7 +475,7 @@ export default function Home() {
                                 {priceLabel(product.recommended_retail_ex_vat)}
                               </div>
                             </div>
-                            <button className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
+                            <button onClick={() => addToCart(product.id)} aria-label={`Add ${product.name} to cart`} className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
                               <ShoppingCart className="h-5 w-5" />
                             </button>
                           </div>
@@ -447,10 +484,16 @@ export default function Home() {
                     </div>
                 ))}
               </div>
+              {selectedSupplier === 'home' && selectedHomeProducts.length === 0 && (
+                <p className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+                  {homeTab === 'mine' ? 'No qualifying sales in the last 12 months yet. Browse Thanda favourites for common products.' : 'No sales history has been synced yet.'}
+                </p>
+              )}
             </section>
           </div>
         )}
       </main>
+      <CartDrawer cart={cart} open={cartOpen} onClose={() => setCartOpen(false)} onChange={setCart} />
 
       <footer className="mt-12 bg-white">
         <div className="w-full h-24 overflow-hidden opacity-50 grayscale hover:grayscale-0 transition-all duration-700">

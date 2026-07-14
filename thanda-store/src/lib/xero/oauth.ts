@@ -6,12 +6,14 @@ const AUTHORIZE_URL = 'https://login.xero.com/identity/connect/authorize';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const CONNECTIONS_URL = 'https://api.xero.com/connections';
 const CONTACTS_URL = 'https://api.xero.com/api.xro/2.0/Contacts';
+const ACCOUNTING_URL = 'https://api.xero.com/api.xro/2.0';
 const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 
 export const XERO_SCOPES = [
   'offline_access',
   'accounting.settings.read',
   'accounting.contacts.read',
+  'accounting.invoices',
 ].join(' ');
 
 export function xeroConfig() {
@@ -231,6 +233,21 @@ async function accessTokenForRequest() {
   };
   await saveXeroToken(updated);
   return updated as XeroToken;
+}
+
+export async function xeroAccountingFetch(pathname: string, init: RequestInit = {}) {
+  const token = await accessTokenForRequest();
+  if (!token.access_token || !token.tenant_id) throw new Error('Xero connection is incomplete');
+  const response = await fetch(`${ACCOUNTING_URL}${pathname}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token.access_token}`,
+      'xero-tenant-id': token.tenant_id,
+      Accept: 'application/json',
+      ...init.headers,
+    },
+  });
+  return response;
 }
 
 export async function findXeroContactsByEmail(email: string): Promise<XeroContactMatch[]> {

@@ -85,9 +85,45 @@ export async function ensureAuthSchema() {
     )
   `);
 
+  // A cart deliberately stores product identity and quantity only. Prices and
+  // discounts are always recalculated from the current catalogue at read and
+  // quote creation time.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS portal_cart_lines (
+      user_id BIGINT NOT NULL REFERENCES portal_users(id) ON DELETE CASCADE,
+      product_id BIGINT NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, product_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_invoice_sync_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      last_successful_sync_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (
+      invoice_id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      invoice_date DATE NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL,
+      sku TEXT NOT NULL,
+      quantity NUMERIC(14, 3) NOT NULL CHECK (quantity > 0),
+      PRIMARY KEY (invoice_id, sku)
+    )
+  `);
+
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS login_otps_user_idx ON login_otps (user_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS account_setup_tokens_user_idx ON account_setup_tokens (user_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS portal_cart_lines_user_idx ON portal_cart_lines (user_id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
 }

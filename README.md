@@ -11,6 +11,7 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
 - `thanda-store/scripts/sync-xero-contact-access.mjs` - Reconciles enabled Xero primary/additional people and archives portal access removed in Xero.
+- `thanda-store/scripts/sync-xero-sales-history.mjs` - Caches eligible Xero sales invoice SKU lines for Home favourites.
 - `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
@@ -53,6 +54,7 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | The VPS supplier-sync timer runs this every five minutes. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
 | `npm run sync:xero-contact-access` | Disable enabled Xero-backed users removed from their linked Xero contact. | VPS runs it every 30 minutes. |
+| `npm run sync:xero-sales-history` | Incrementally cache authorised/paid sales invoice SKU lines for Home favourites. | VPS runs it every 30 minutes after the Xero invoice scope is approved. |
 | `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
 | `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
@@ -267,9 +269,9 @@ https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Current scopes are `offline_access accounting.settings.read accounting.contacts.read`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.invoices`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. `accounting.invoices` permits the sales-history read cache and creation of draft quotes. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
 
-Draft quote creation will need a write-capable Xero scope. Do not add that scope back blindly if Xero returns `invalid_scope`; verify the accepted scope against the current Xero app configuration before deploying quote creation.
+After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in User Admin. The connection status identifies any missing permission. Do not run sales-history sync or create quotes until `accounting.invoices` has been approved.
 
 ## Database
 
@@ -351,14 +353,16 @@ Five minutes is a reasonable starting point for supplier availability. If a supp
 
 ### VPS Xero schedules
 
-The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list.
+The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list. The sales-history timer also runs every 30 minutes. It pages only changed invoices after its initial 12-month backfill, then fetches the full detail only for those changed invoices because paged invoice responses do not reliably provide line items.
 
 ```bash
 systemctl list-timers thanda-store-xero-stock.timer
 systemctl list-timers thanda-store-xero-contact-access.timer
+systemctl list-timers thanda-store-xero-sales-history.timer
 journalctl -u thanda-store-xero-stock.service -n 100 --no-pager
 systemctl start thanda-store-xero-stock.service
 systemctl start thanda-store-xero-contact-access.service
+systemctl start thanda-store-xero-sales-history.service
 ```
 
 The tracked unit templates are in `deploy/systemd/`. Install the contact-access timer with:
@@ -368,6 +372,15 @@ sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.service /et
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now thanda-store-xero-contact-access.timer
+```
+
+Install the sales-history timer only after reconnecting Xero with `accounting.invoices`:
+
+```bash
+sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now thanda-store-xero-sales-history.timer
 ```
 
 ## Deployment and operations
@@ -381,6 +394,7 @@ Production is hosted at `https://oc.sensible.co.za`.
 - **Supplier timer:** `thanda-store-sync.timer`, every five minutes
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
 - **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, every 30 minutes
+- **Xero sales-history timer:** `thanda-store-xero-sales-history.timer`, every 30 minutes after Xero invoice consent
 
 Deploy a committed change from the VPS:
 
@@ -467,7 +481,7 @@ PYTHON=/Users/warwick/.cache/codex-runtimes/codex-primary-runtime/dependencies/p
 
 ## Known limitations and next operational work
 
-- Cart handling and draft Xero quote creation are not implemented. The cart button must not be treated as an ordering workflow yet.
+- Draft quotes are intentionally not treated as orders. Quote acceptance, invoicing, credits, fulfilment, and quote-status syncing remain future workflow work.
 - Hubble availability is still a manually seeded string; there is no administrator control for changing it.
 - Supplier and Xero job failures are available in systemd logs, but no external alerting or admin sync-health view exists yet.
 - A product thumbnail is generated after its first authenticated catalogue load. Use the batch thumbnail command after a bulk import when every thumbnail must be prepared before users browse.

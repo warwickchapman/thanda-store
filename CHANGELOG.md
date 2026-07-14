@@ -21,6 +21,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Xero local/KZN stock synchronization for Victron and LoRa products.
 - Category and supplier navigation, progressive product search, product-line support for Renogy, Victron, Hubble and LoRa.
 - Server-generated WebP product thumbnails with supplier-image and placeholder fallbacks.
+- A server-backed cart, Home favourites, draft Xero quote creation, and a derived Xero sales-history cache for ranking favourites.
 
 ### Changed
 
@@ -28,6 +29,8 @@ All notable production-facing changes are recorded here. This project does not y
 - Buyer pricing is emphasised as **Your Price Excl. VAT**; the non-buying reference price is labelled **List Price Excl. VAT**.
 - Thumbnail generation is now lazy and self-maintaining: the first catalogue load that encounters a missing thumbnail queues background generation without delaying the response.
 - Generated thumbnails are served through a cached application media route, so they become available without a Next.js restart.
+- Home is the first catalogue tab. It offers `My favourites` from the linked Xero customer's last 12 months of authorised/paid SKU invoice history and `Thanda favourites` from total units sold across all current catalogue SKUs.
+- Cart prices and discounts are recalculated from the current catalogue when read and again when a draft quote is created. A successful checkout creates an exclusive-VAT Xero draft quote and clears the cart; a rejected request retains it.
 
 ### Security
 
@@ -36,6 +39,5 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Known limitations
 
-- Cart and draft Xero quote creation are not yet implemented.
 - Hubble availability remains a manual product setting; an administrator control has not yet been built.
 - Supplier and Xero sync failures are logged locally but do not yet produce external alerts.
