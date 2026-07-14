@@ -9,6 +9,8 @@ import pg from 'pg';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const INVOICES_URL = 'https://api.xero.com/api.xro/2.0/Invoices';
 const INITIAL_WINDOW_DAYS = 365;
+const REQUEST_INTERVAL_MS = 1_100;
+let lastRequestAt = 0;
 
 function required(name) { if (!process.env[name]) throw new Error(`${name} is required`); return process.env[name]; }
 function isoDate(daysAgo = 0) { const date = new Date(Date.now() - daysAgo * 86_400_000); return date.toISOString().slice(0, 10); }
@@ -25,17 +27,30 @@ async function usableToken(config, token) {
   await writeToken(config.tokenFile, updated); return updated;
 }
 function headers(token, extra = {}) { return { Authorization: `Bearer ${token.access_token}`, 'xero-tenant-id': token.tenant_id, Accept: 'application/json', ...extra }; }
+function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 async function xeroJson(url, token, extraHeaders = {}) {
-  const response = await fetch(url, { headers: headers(token, extraHeaders) });
-  const body = await response.text();
-  let payload = {};
-  if (body.trim()) {
-    try { payload = JSON.parse(body); }
-    catch { throw new Error(`Xero invoices returned non-JSON: ${response.status} ${response.statusText} ${body.slice(0, 300)}`); }
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const wait = Math.max(0, REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
+    if (wait) await sleep(wait);
+    lastRequestAt = Date.now();
+    const response = await fetch(url, { headers: headers(token, extraHeaders) });
+    const body = await response.text();
+    if (response.status === 429 && attempt < 3) {
+      const retrySeconds = Math.max(5, Number(response.headers.get('retry-after')) || 30);
+      console.error(`Xero rate limited invoice sync; retrying in ${retrySeconds}s (attempt ${attempt + 1}/3)`);
+      await sleep(retrySeconds * 1_000);
+      continue;
+    }
+    let payload = {};
+    if (body.trim()) {
+      try { payload = JSON.parse(body); }
+      catch { throw new Error(`Xero invoices returned non-JSON: ${response.status} ${response.statusText} ${body.slice(0, 300)}`); }
+    }
+    if (!response.ok) throw new Error(`Xero invoices request failed: ${response.status} ${response.statusText} ${body.slice(0, 500)}`);
+    if (!body.trim()) throw new Error(`Xero invoices returned an empty successful response: ${response.status} ${response.statusText}`);
+    return payload;
   }
-  if (!response.ok) throw new Error(`Xero invoices request failed: ${response.status} ${response.statusText} ${body.slice(0, 500)}`);
-  if (!body.trim()) throw new Error(`Xero invoices returned an empty successful response: ${response.status} ${response.statusText}`);
-  return payload;
+  throw new Error('Xero invoice request exceeded retry limit');
 }
 async function ensureSchema(client) {
   await client.query(`CREATE TABLE IF NOT EXISTS xero_invoice_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_successful_sync_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);

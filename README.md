@@ -361,7 +361,7 @@ Five minutes is a reasonable starting point for supplier availability. If a supp
 
 ### VPS Xero schedules
 
-The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list. The sales-history timer also runs every 30 minutes. It pages only changed invoices after its initial 12-month backfill, then fetches the full detail only for those changed invoices because paged invoice responses do not reliably provide line items.
+The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list. The sales-history timer also runs every 30 minutes. It pages only changed invoices after its initial 12-month backfill, then fetches the full detail only for those changed invoices because paged invoice responses do not reliably provide line items. The initial backfill deliberately spaces Xero requests and respects `Retry-After`; it may take several minutes for a large invoice history.
 
 ```bash
 systemctl list-timers thanda-store-xero-stock.timer
