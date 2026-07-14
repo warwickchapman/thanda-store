@@ -12,6 +12,7 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
 - `thanda-store/scripts/sync-xero-contact-access.mjs` - Reconciles enabled Xero primary/additional people and archives portal access removed in Xero.
 - `thanda-store/scripts/sync-xero-sales-history.mjs` - Caches eligible Xero sales invoice SKU lines for Home favourites.
+- `thanda-store/scripts/process-xero-webhook-events.mjs` - Processes verified Xero Invoice and Contact webhook events from the durable local queue.
 - `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
@@ -34,11 +35,11 @@ Generated local data files such as CSV exports, Excel reports, `node_modules`, a
 
 ## External API discipline
 
-Supplier, accounting, and messaging APIs are finite operational resources. The portal must serve normal user requests from PostgreSQL-derived data, never by calling a supplier or Xero during page rendering. Scheduled syncs must use provider batching, pagination, conditional/modified-since reads, and webhooks where appropriate.
+Supplier, accounting, and messaging APIs are finite operational resources. The portal must serve normal user requests from PostgreSQL-derived data, never by calling a supplier or Xero during page rendering. Scheduled syncs must use provider batching, pagination, conditional/modified-since reads, and webhooks where appropriate. Where Xero supplies a webhook, it replaces routine polling; polling remains only a low-frequency reconciliation safety net.
 
 Before changing an integration, document the expected calls per run and per day, the provider allowance, and the safety margin left for existing jobs and interactive administration. Respect `429` and `Retry-After`; persist rate-limit headers when available and pause locally through a daily-limit reset instead of repeatedly making rejected calls. Initial backfills must be resumable and bounded, not an unbounded one-request-per-record loop.
 
-For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. The sales-history sync uses 100-invoice pages and 20-invoice detail batches, records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display.
+For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. The webhook worker batches up to 20 invoice IDs per request, records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
 
 ## Local development
 
@@ -61,8 +62,9 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | The VPS supplier-sync timer runs this every five minutes. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
-| `npm run sync:xero-contact-access` | Disable enabled Xero-backed users removed from their linked Xero contact. | VPS runs it every 30 minutes. |
-| `npm run sync:xero-sales-history` | Incrementally cache authorised/paid sales invoice SKU lines for Home favourites. | VPS runs it every 30 minutes after the Xero invoice scope is approved. |
+| `npm run sync:xero-contact-access` | Full reconciliation of enabled Xero-backed users removed from their linked Xero contact. | Daily safety net only; Contact webhooks normally handle changes. |
+| `npm run sync:xero-sales-history` | Incrementally cache authorised/paid sales invoice SKU lines for Home favourites. | Daily safety net only; Invoice webhooks normally handle changes. |
+| `npm run sync:xero-webhooks` | Process queued Xero Invoice/Contact webhook events. | VPS runs it every five minutes. It exits without a Xero call when the queue is empty. |
 | `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
 | `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
@@ -85,6 +87,7 @@ XERO_CLIENT_SECRET=...
 XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
 XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
 XERO_CONNECT_SECRET=...
+XERO_WEBHOOK_KEY=... # Xero Developer app webhook key; required by the PM2 Next.js process
 DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 RESEND_API_KEY=re_...
@@ -100,7 +103,7 @@ PRODUCT_THUMBNAIL_QUALITY=80
 `RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
 `VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
-`XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware.
+`XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware. `XERO_WEBHOOK_KEY` is distinct from OAuth credentials and must be configured in the PM2 environment that serves Next.js, not only in the systemd worker environment.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the fallback discount when a user has no supplier-specific discount. The API clamps it to a maximum of 40% off list price.
 `RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <sales@thanda.solar>`.
 `PORTAL_BASE_URL` is the public portal URL used in account setup and password-reset emails. It defaults to `https://oc.sensible.co.za`.
@@ -369,35 +372,45 @@ journalctl -u thanda-store-sync.service -n 100 --no-pager
 
 Five minutes is a reasonable starting point for supplier availability. If a supplier throttles or the run time approaches the interval, move to ten or fifteen minutes and add `last_updated` to the admin view.
 
-### VPS Xero schedules
+### VPS Xero schedules and webhooks
 
-The separate Xero local-stock timer runs every 30 minutes. This avoids using supplier-style polling against an API with daily request limits. The contact-access timer also runs every 30 minutes, but only retrieves linked customer contacts; it does not scan the entire Xero contact list. The sales-history timer also runs every 30 minutes. It pages only changed invoices after its initial 12-month backfill, then fetches missing line-item detail in batches of 20 invoice IDs rather than one request per invoice. The initial backfill deliberately spaces Xero requests and respects `Retry-After`; it may take several minutes for a large invoice history while remaining well within the 1,000-call daily allowance.
+Xero **Invoice CREATE/UPDATE** and **Contact CREATE/UPDATE** webhooks are the normal update path. `POST /api/xero/webhooks` HMAC-verifies the `x-xero-signature`, deduplicates events into `xero_webhook_events`, and immediately returns. The systemd webhook worker runs every five minutes, fetches only changed records, batches invoice IDs in groups of 20, and updates the derived invoice-history cache or linked-contact access. The worker does no Xero work when its queue is empty.
+
+The sales-history and contact-access timers now run once per day as recovery reconciliation. They use cached state and `If-Modified-Since` for invoice history; they are not the normal freshness mechanism. Xero Items are not available as a webhook category, so the separate Xero local-stock timer continues every 30 minutes.
+
+#### Configure the Xero webhook
+
+1. In the Xero Developer app, create a webhook subscription with endpoint `https://oc.sensible.co.za/api/xero/webhooks`.
+2. Subscribe only to **Invoice** `CREATE` and `UPDATE`, and **Contact** `CREATE` and `UPDATE`.
+3. Copy the Xero **Webhook Key** into the production PM2 environment as `XERO_WEBHOOK_KEY`, then restart PM2 with its environment refreshed. Do not put this value in Git or expose it in the admin UI.
+4. Install and enable the worker unit below. The User Admin Xero panel confirms whether the web receiver key is present, but intentionally never displays it.
+
+The endpoint returns `401` for an invalid signature and `503` if the queue/database is unavailable, which causes Xero to retry rather than losing an event. The queue is idempotent and a later event for the same invoice/contact fetches the current Xero record, not a stale event payload.
 
 ```bash
 systemctl list-timers thanda-store-xero-stock.timer
+systemctl list-timers thanda-store-xero-webhooks.timer
 systemctl list-timers thanda-store-xero-contact-access.timer
 systemctl list-timers thanda-store-xero-sales-history.timer
 journalctl -u thanda-store-xero-stock.service -n 100 --no-pager
 systemctl start thanda-store-xero-stock.service
+systemctl start thanda-store-xero-webhooks.service
 systemctl start thanda-store-xero-contact-access.service
 systemctl start thanda-store-xero-sales-history.service
 ```
 
-The tracked unit templates are in `deploy/systemd/`. Install the contact-access timer with:
+The tracked unit templates are in `deploy/systemd/`. Install the webhook worker and daily reconciliation timers with:
 
 ```bash
+sudo install -m 0644 deploy/systemd/thanda-store-xero-webhooks.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-webhooks.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now thanda-store-xero-contact-access.timer
-```
-
-Install the sales-history timer only after reconnecting Xero with `accounting.invoices`:
-
-```bash
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable --now thanda-store-xero-webhooks.timer
+sudo systemctl enable --now thanda-store-xero-contact-access.timer
 sudo systemctl enable --now thanda-store-xero-sales-history.timer
 ```
 
@@ -411,8 +424,9 @@ Production is hosted at `https://oc.sensible.co.za`.
 - **Reverse proxy and TLS:** Nginx with the Certbot-managed `oc.sensible.co.za` certificate
 - **Supplier timer:** `thanda-store-sync.timer`, every five minutes
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
-- **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, every 30 minutes
-- **Xero sales-history timer:** `thanda-store-xero-sales-history.timer`, every 30 minutes after Xero invoice consent
+- **Xero webhook worker:** `thanda-store-xero-webhooks.timer`, every five minutes, zero external calls when idle
+- **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, daily reconciliation
+- **Xero sales-history timer:** `thanda-store-xero-sales-history.timer`, daily reconciliation after Xero invoice consent
 
 Deploy a committed change from the VPS:
 

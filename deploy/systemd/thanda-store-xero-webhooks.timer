@@ -1,0 +1,11 @@
+[Unit]
+Description=Process queued Thanda Store Xero webhook events every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=thanda-store-xero-webhooks.service
+
+[Install]
+WantedBy=timers.target

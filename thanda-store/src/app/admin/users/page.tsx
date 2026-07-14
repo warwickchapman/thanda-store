@@ -26,6 +26,7 @@ type XeroStatus = {
   grantedScopes: string[];
   missingScopes: string[];
   reconnectRequired: boolean;
+  webhookConfigured: boolean;
   usage: {
     day_limit_remaining: number | null;
     minute_limit_remaining: number | null;
@@ -488,6 +489,9 @@ export default function AdminUsersPage() {
                     {xeroStatus.usage.next_allowed_at && ` Daily limit reached; next attempt after ${new Date(xeroStatus.usage.next_allowed_at).toLocaleString()}.`}
                   </p>
                 )}
+                <p className="mt-2 text-xs font-medium">
+                  Xero webhooks: {xeroStatus.webhookConfigured ? 'receiver key configured; queued events are processed every five minutes.' : 'receiver key is not configured. Reconciliation remains the fallback only.'}
+                </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button type="button" onClick={() => loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status'))} className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900">Refresh status</button>

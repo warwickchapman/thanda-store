@@ -22,6 +22,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Category and supplier navigation, progressive product search, product-line support for Renogy, Victron, Hubble and LoRa.
 - Server-generated WebP product thumbnails with supplier-image and placeholder fallbacks.
 - A server-backed cart, Home favourites, draft Xero quote creation, and a derived Xero sales-history cache for ranking favourites.
+- HMAC-verified Xero Invoice and Contact webhook ingestion with a durable PostgreSQL queue and a bounded systemd worker.
 
 ### Changed
 
@@ -33,6 +34,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Cart prices and discounts are recalculated from the current catalogue when read and again when a draft quote is created. A successful checkout creates an exclusive-VAT Xero draft quote and clears the cart; a rejected request retains it.
 - The customer-facing cart command is labelled **Quote me!**; it creates only a draft quote at this stage.
 - User Admin now displays the latest observed Xero API allowance and the sales-history timer pauses cleanly through a Xero daily-limit `Retry-After` window.
+- Xero Invoice/Contact routine polling has been replaced by webhook-driven updates; the old jobs are now daily `If-Modified-Since` reconciliation only.
 - Developer and operational documentation now require API-budget estimates, batch/incremental reads, cached portal data, bounded backfills, and strict `429`/`Retry-After` handling for all external integrations.
 
 ### Security

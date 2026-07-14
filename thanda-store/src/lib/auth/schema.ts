@@ -132,6 +132,26 @@ export async function ensureAuthSchema() {
   `);
   await pool.query('ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ');
 
+  // Xero webhooks are acknowledged immediately and processed by a separate
+  // worker. Keeping the queue in PostgreSQL makes delivery retries harmless
+  // and survives a Next.js or VPS restart.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_webhook_events (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT NOT NULL UNIQUE,
+      tenant_id TEXT NOT NULL,
+      event_category TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      event_date_utc TIMESTAMPTZ,
+      payload JSONB NOT NULL,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMPTZ,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    )
+  `);
+
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)');
@@ -140,4 +160,5 @@ export async function ensureAuthSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS portal_cart_lines_user_idx ON portal_cart_lines (user_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS xero_webhook_events_pending_idx ON xero_webhook_events (received_at) WHERE processed_at IS NULL');
 }

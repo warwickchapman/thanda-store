@@ -44,6 +44,7 @@ export async function GET() {
       requiredScopes,
       missingScopes,
       reconnectRequired: missingScopes.length > 0,
+      webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY),
       usage: usageResult.rows[0] || null,
     });
   } catch {
@@ -56,6 +57,7 @@ export async function GET() {
       requiredScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
       missingScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
       reconnectRequired: true,
+      webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY),
       usage: null,
     });
   }

@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Thanda Store Xero contact access sync every 30 minutes
+Description=Run daily Thanda Store Xero contact-access reconciliation
 
 [Timer]
-OnBootSec=7min
-OnUnitActiveSec=30min
+OnCalendar=*-*-* 06:15:00 UTC
+Persistent=true
 AccuracySec=1min
 Unit=thanda-store-xero-contact-access.service
 

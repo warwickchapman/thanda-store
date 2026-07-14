@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Thanda Store Xero sales-history sync every 30 minutes
+Description=Run daily Thanda Store Xero sales-history reconciliation
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=30min
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
 AccuracySec=1min
 Unit=thanda-store-xero-sales-history.service
 
