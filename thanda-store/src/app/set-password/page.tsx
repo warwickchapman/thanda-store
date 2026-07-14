@@ -18,6 +18,7 @@ function SetPasswordForm() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [message, setMessage] = useState('');
+  const [completedEmail, setCompletedEmail] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -48,7 +49,8 @@ function SetPasswordForm() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to set your password.');
-      setMessage('Password set. You can now sign in.');
+      setCompletedEmail(String(data.email || ''));
+      setMessage('Password set.');
       setPassword('');
       setConfirmation('');
     } catch (err) {
@@ -69,7 +71,11 @@ function SetPasswordForm() {
           </div>
         </div>
 
-        <form onSubmit={submit} className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        {completedEmail ? <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-sm font-semibold text-green-700">Password set.</p>
+          <p className="text-sm text-zinc-600">Sign in as <span className="font-semibold text-zinc-900">{completedEmail}</span>.</p>
+          <Link href={`/login?email=${encodeURIComponent(completedEmail)}`} className="flex h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Sign in</Link>
+        </div> : <form onSubmit={submit} className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div>
             <label className="mb-1 block text-sm font-semibold" htmlFor="password">New password</label>
             <input
@@ -103,9 +109,9 @@ function SetPasswordForm() {
           >
             {busy ? 'Saving password...' : 'Set password'}
           </button>
-        </form>
+        </form>}
 
-        <Link href="/login" className="mt-4 block text-center text-sm font-semibold text-zinc-600">Back to sign in</Link>
+        {!completedEmail && <Link href="/login" className="mt-4 block text-center text-sm font-semibold text-zinc-600">Back to sign in</Link>}
       </div>
     </main>
   );

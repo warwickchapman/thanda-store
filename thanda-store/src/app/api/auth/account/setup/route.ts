@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'This setup link is invalid or has expired.' }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, email: completed });
   } catch (error) {
     console.error('Account setup failed:', error);
     return NextResponse.json({ error: 'Unable to set your password.' }, { status: 500 });

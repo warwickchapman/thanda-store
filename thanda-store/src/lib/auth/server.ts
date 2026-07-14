@@ -86,19 +86,20 @@ export async function completeAccountSetup(token: string, password: string) {
     await client.query('BEGIN');
     const tokenResult = await client.query(
       `
-        SELECT user_id
-        FROM account_setup_tokens
-        WHERE token_hash = $1
-          AND consumed_at IS NULL
-          AND expires_at > NOW()
-        FOR UPDATE
+        SELECT t.user_id, u.email
+        FROM account_setup_tokens t
+        JOIN portal_users u ON u.id = t.user_id
+        WHERE t.token_hash = $1
+          AND t.consumed_at IS NULL
+          AND t.expires_at > NOW()
+        FOR UPDATE OF t
       `,
       [sha256(token)],
     );
     const row = tokenResult.rows[0];
     if (!row) {
       await client.query('ROLLBACK');
-      return false;
+      return null;
     }
 
     const passwordHash = await hashPassword(password);
@@ -111,7 +112,7 @@ export async function completeAccountSetup(token: string, password: string) {
       [sha256(token)],
     );
     await client.query('COMMIT');
-    return true;
+    return String(row.email);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

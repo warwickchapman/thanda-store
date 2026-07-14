@@ -1,9 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  return <Suspense fallback={<main className="min-h-screen bg-zinc-50" />}><LoginForm /></Suspense>;
+}
+
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const [email, setEmail] = useState(() => searchParams.get('email') || '');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'password' | 'otp'>('password');
