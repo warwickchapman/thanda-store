@@ -176,6 +176,12 @@ async function main() {
     }
     await client.query(`INSERT INTO xero_invoice_sync_state (id, last_successful_sync_at) VALUES (true, NOW()) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, updated_at = NOW()`);
     console.log(JSON.stringify(stats, null, 2));
+  } catch (error) {
+    if (error?.code === 'XERO_DAILY_LIMIT') {
+      console.log(`${error.message}. Future timer runs will skip until the recorded reset time.`);
+      return;
+    }
+    throw error;
   } finally { client.release(); await pool.end(); }
 }
 main().catch((error) => { console.error(error); process.exit(1); });
