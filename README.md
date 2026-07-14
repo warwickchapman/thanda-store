@@ -118,7 +118,7 @@ The storefront uses internal portal users with email OTP verification. Passwords
 
 Administrators manage users at `/admin/users`:
 
-1. Search Xero by the buyer primary contact email, select the customer contact, then enter the company and supplier discounts.
+1. Search Xero by the buyer primary contact email and select the customer contact. The company name is read from Xero; it is not entered in the portal.
 2. The portal emails a single-use account setup link that expires after seven days.
 3. The buyer chooses their own password, then signs in with their email, password, and a short-lived email OTP.
 
@@ -130,7 +130,7 @@ After a Xero link is saved, User Admin shows a compact locked contact summary. U
 
 Changing a portal user email clears the organisation's Xero link, revokes that user's active sessions and outstanding codes, then reruns the automatic match against the new email. Because the Xero link belongs to the organisation, this affects every portal user in that organisation.
 
-Xero is the source of truth for eligible people at a linked customer. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. The contact-access sync fetches every linked Xero contact every 30 minutes. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.
+Xero is the source of truth for linked company names and eligible people. The portal stores the Xero Contact ID as identity and only caches the Xero Contact Name for display; the contact-access sync refreshes that name every 30 minutes. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.
 
 Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 

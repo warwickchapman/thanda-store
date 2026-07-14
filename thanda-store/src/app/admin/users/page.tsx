@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 type AdminUser = {
   id: number;
@@ -51,26 +51,27 @@ async function fetchXeroContacts(email: string): Promise<XeroContact[]> {
 function XeroContactFields({
   email,
   initialContactId = '',
-  initialContactName = '',
   autoLookup = false,
   emailInput,
+  onContactSelected,
 }: {
   email: string;
   initialContactId?: string;
-  initialContactName?: string;
   autoLookup?: boolean;
   emailInput?: ReactNode;
+  onContactSelected?: (contact: XeroContact) => void;
 }) {
   const [contactId, setContactId] = useState(initialContactId);
-  const [contactName, setContactName] = useState(initialContactName);
+  const [contactName, setContactName] = useState('');
   const [contacts, setContacts] = useState<XeroContact[]>([]);
   const [lookupMessage, setLookupMessage] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
 
-  function selectContact(contact: XeroContact) {
+  const selectContact = useCallback((contact: XeroContact) => {
     setContactId(contact.id);
     setContactName(contact.name);
-  }
+    onContactSelected?.(contact);
+  }, [onContactSelected]);
 
   async function findContacts() {
     if (!email) {
@@ -128,7 +129,7 @@ function XeroContactFields({
     return () => {
       active = false;
     };
-  }, [autoLookup, email, initialContactId]);
+  }, [autoLookup, email, initialContactId, selectContact]);
 
   return (
     <div className="grid gap-3 lg:col-span-6">
@@ -136,11 +137,10 @@ function XeroContactFields({
         {emailInput}
         <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
       </div>}
-      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+      {emailInput ? <input type="hidden" name="xeroContactId" value={contactId} /> : <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => setContactId(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-        <label className="grid gap-1 text-sm font-semibold">Xero Contact Name<input name="xeroContactName" value={contactName} onChange={(event) => setContactName(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-        {!emailInput && <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>}
-      </div>
+        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
+      </div>}
       {contacts.length > 1 && (
         <label className="grid gap-1 text-sm font-semibold">Matching Xero contacts
           <select
@@ -156,6 +156,7 @@ function XeroContactFields({
           </select>
         </label>
       )}
+      {emailInput && contactName && <p className="text-sm text-zinc-700">Xero customer: <span className="font-semibold">{contactName}</span></p>}
       {lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
     </div>
   );
@@ -274,7 +275,6 @@ function XeroLinkEditor({
         key={`${user.id}-${user.xero_contact_id || ''}`}
         email={user.email}
         initialContactId={user.xero_contact_id || ''}
-        initialContactName={user.xero_contact_name || ''}
         autoLookup={!user.xero_contact_id}
       />
       <div className="flex flex-wrap gap-2">
@@ -293,6 +293,7 @@ export default function AdminUsersPage() {
   const [error, setError] = useState('');
   const [busyUserId, setBusyUserId] = useState<number | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteContact, setInviteContact] = useState<XeroContact | null>(null);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -340,11 +341,9 @@ export default function AdminUsersPage() {
     const response = await fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        organisationName: formData.get('organisationName'),
+        body: JSON.stringify({
         email: formData.get('email'),
         xeroContactId: formData.get('xeroContactId'),
-        xeroContactName: formData.get('xeroContactName'),
         victronDiscount: formData.get('victronDiscount'),
         renogyDiscount: formData.get('renogyDiscount'),
       }),
@@ -367,7 +366,6 @@ export default function AdminUsersPage() {
       body: JSON.stringify({
         organisationId: user.organisation_id,
         xeroContactId: formData.get('xeroContactId'),
-        xeroContactName: formData.get('xeroContactName'),
       }),
     });
     const data = await response.json();
@@ -497,13 +495,16 @@ export default function AdminUsersPage() {
             className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6"
           >
             <XeroContactFields
+              key={`invite-${inviteEmail}`}
               email={inviteEmail}
-              emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
+              emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => { setInviteEmail(event.target.value); setInviteContact(null); }} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
+              onContactSelected={setInviteContact}
             />
-            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Company<input name="organisationName" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-            <div className="flex items-end lg:col-span-2"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
+            {inviteContact && <>
+              <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+              <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+              <div className="flex items-end lg:col-span-4"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
+            </>}
           </form>
         </section>
 

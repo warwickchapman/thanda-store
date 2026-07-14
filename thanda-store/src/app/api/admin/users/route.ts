@@ -8,7 +8,7 @@ import {
 } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import { sendAccountSetupEmail } from '@/lib/email/resend';
-import { getXeroContactPeople } from '@/lib/xero/oauth';
+import { getXeroContactDetails, getXeroContactPeople } from '@/lib/xero/oauth';
 
 async function requireAdmin() {
   const user = await currentUser();
@@ -74,23 +74,22 @@ export async function POST(request: Request) {
   await ensureAuthSchema();
 
   const body = await request.json();
-  const organisationName = text(body.organisationName);
   const email = text(body.email).toLowerCase();
   const xeroContactId = text(body.xeroContactId);
-  const xeroContactName = text(body.xeroContactName);
   const victronDiscount = discount(body.victronDiscount);
   const renogyDiscount = discount(body.renogyDiscount);
 
-  if (!organisationName || !/^\S+@\S+\.\S+$/.test(email)) {
-    return NextResponse.json({ error: 'Provide a company and a valid email address.' }, { status: 400 });
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    return NextResponse.json({ error: 'Provide a valid email address.' }, { status: 400 });
   }
-  if (!xeroContactId || !xeroContactName) {
-    return NextResponse.json({ error: 'Link the company to a Xero contact before inviting a user.' }, { status: 400 });
+  if (!xeroContactId) {
+    return NextResponse.json({ error: 'Select a Xero contact before inviting a user.' }, { status: 400 });
   }
   if (victronDiscount === null || renogyDiscount === null) {
     return NextResponse.json({ error: 'Victron and Renogy discounts must be between 0% and 40%.' }, { status: 400 });
   }
-  const xeroPrimary = (await getXeroContactPeople(xeroContactId)).find(
+  const xeroContact = await getXeroContactDetails(xeroContactId);
+  const xeroPrimary = xeroContact.people.find(
     (person) => person.kind === 'primary' && person.email === email,
   );
   if (!xeroPrimary) {
@@ -105,13 +104,13 @@ export async function POST(request: Request) {
       `
         INSERT INTO organisations (name, xero_contact_id, xero_contact_name)
         VALUES ($1, $2, $3)
-        ON CONFLICT (name) DO UPDATE
-          SET xero_contact_id = EXCLUDED.xero_contact_id,
+        ON CONFLICT (xero_contact_id) WHERE xero_contact_id IS NOT NULL DO UPDATE
+          SET name = EXCLUDED.name,
               xero_contact_name = EXCLUDED.xero_contact_name,
               updated_at = NOW()
         RETURNING id
       `,
-      [organisationName, xeroContactId, xeroContactName],
+      [xeroContact.name, xeroContactId, xeroContact.name],
     );
     const unusablePassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
     const insertedUser = await client.query(
@@ -327,21 +326,22 @@ export async function PATCH(request: Request) {
 
   const organisationId = Number(body.organisationId);
   const xeroContactId = text(body.xeroContactId);
-  const xeroContactName = text(body.xeroContactName);
-  if (!Number.isInteger(organisationId) || !xeroContactId || !xeroContactName) {
-    return NextResponse.json({ error: 'Organisation, Xero contact ID, and name are required.' }, { status: 400 });
+  if (!Number.isInteger(organisationId) || !xeroContactId) {
+    return NextResponse.json({ error: 'Organisation and Xero contact ID are required.' }, { status: 400 });
   }
 
-  const people = await getXeroContactPeople(xeroContactId);
+  const xeroContact = await getXeroContactDetails(xeroContactId);
+  const people = xeroContact.people;
   await pool.query(
     `
       UPDATE organisations
-      SET xero_contact_id = $2,
-          xero_contact_name = $3,
+      SET name = $2,
+          xero_contact_id = $3,
+          xero_contact_name = $2,
           updated_at = NOW()
       WHERE id = $1
     `,
-    [organisationId, xeroContactId, xeroContactName],
+    [organisationId, xeroContact.name, xeroContactId],
   );
   for (const person of people) {
     await pool.query(

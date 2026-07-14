@@ -15,6 +15,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Xero-backed company access: the primary contact is the first login, additional people can be explicitly enabled, and a scheduled reconciliation archives enabled people removed from Xero.
 - Saved Xero contact links now collapse into a locked summary until an administrator explicitly chooses to edit them.
 - The internal `sales@thanda.solar` mailbox is excluded from Xero Additional people portal access.
+- Company names are now Xero-owned: buyer invite no longer accepts a company-name field, and linked organisation display names refresh from Xero.
 - Renogy and Victron supplier catalogue synchronization, with a quarterly Victron South Africa SKU allow-list process.
 - Xero local/KZN stock synchronization for Victron and LoRa products.
 - Category and supplier navigation, progressive product search, product-line support for Renogy, Victron, Hubble and LoRa.

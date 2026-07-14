@@ -130,6 +130,11 @@ export type XeroContactPerson = {
   includeInEmails: boolean;
 };
 
+export type XeroContactDetails = {
+  name: string;
+  people: XeroContactPerson[];
+};
+
 type XeroContactsResponse = {
   Contacts?: Array<{
     ContactID?: string;
@@ -151,7 +156,7 @@ function personName(firstName: unknown, lastName: unknown, fallback: string) {
   return [String(firstName || '').trim(), String(lastName || '').trim()].filter(Boolean).join(' ') || fallback;
 }
 
-export async function getXeroContactPeople(contactId: string): Promise<XeroContactPerson[]> {
+export async function getXeroContactDetails(contactId: string): Promise<XeroContactDetails> {
   const token = await accessTokenForRequest();
   if (!token.access_token || !token.tenant_id) throw new Error('Xero connection is incomplete');
 
@@ -165,7 +170,9 @@ export async function getXeroContactPeople(contactId: string): Promise<XeroConta
   const payload = await response.json() as XeroContactsResponse;
   if (!response.ok) throw new Error(`Xero contact fetch failed: ${response.status}`);
   const contact = payload.Contacts?.[0];
-  if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') return [];
+  if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') {
+    throw new Error('Xero contact was not found or is archived');
+  }
 
   const primaryEmail = String(contact.EmailAddress || '').trim().toLowerCase();
   const primary = primaryEmail
@@ -187,7 +194,13 @@ export async function getXeroContactPeople(contactId: string): Promise<XeroConta
       };
     })
     .filter((person) => person.email && person.email !== primaryEmail && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(person.email));
-  return [...primary, ...additional];
+  const name = String(contact.Name || '').trim();
+  if (!name) throw new Error('Xero contact does not have a name');
+  return { name, people: [...primary, ...additional] };
+}
+
+export async function getXeroContactPeople(contactId: string): Promise<XeroContactPerson[]> {
+  return (await getXeroContactDetails(contactId)).people;
 }
 
 async function accessTokenForRequest() {

@@ -52,7 +52,7 @@ async function refreshTokenIfNeeded(settings, token) {
   return updated;
 }
 
-async function xeroEmails(token, contactId) {
+async function xeroContact(token, contactId) {
   const response = await fetch(`${CONTACTS_URL}/${encodeURIComponent(contactId)}`, {
     headers: {
       Authorization: `Bearer ${token.access_token}`,
@@ -63,12 +63,14 @@ async function xeroEmails(token, contactId) {
   const payload = await response.json();
   if (!response.ok) throw new Error(`Xero contact ${contactId} fetch failed: ${response.status}`);
   const contact = payload.Contacts?.[0];
-  if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') return new Set();
+  if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') {
+    return { name: '', emails: new Set() };
+  }
   const primaryEmail = String(contact.EmailAddress || '').trim().toLowerCase();
   const additionalEmails = (contact.ContactPersons || [])
     .map((person) => String(person.EmailAddress || '').trim().toLowerCase())
     .filter((email) => email && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(email));
-  return new Set([primaryEmail, ...additionalEmails].filter(Boolean));
+  return { name: String(contact.Name || '').trim(), emails: new Set([primaryEmail, ...additionalEmails].filter(Boolean)) };
 }
 
 async function ensurePortalUserSchema(client) {
@@ -80,6 +82,8 @@ async function ensurePortalUserSchema(client) {
   await client.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
   await client.query('CREATE UNIQUE INDEX IF NOT EXISTS portal_users_email_lower_unique ON portal_users (LOWER(email))');
   await client.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
+  await client.query('ALTER TABLE organisations DROP CONSTRAINT IF EXISTS organisations_name_key');
+  await client.query('CREATE UNIQUE INDEX IF NOT EXISTS organisations_xero_contact_id_unique ON organisations (xero_contact_id) WHERE xero_contact_id IS NOT NULL');
 }
 
 async function main() {
@@ -91,6 +95,11 @@ async function main() {
 
   try {
     await ensurePortalUserSchema(client);
+    const organisations = await client.query(`
+      SELECT xero_contact_id
+      FROM organisations
+      WHERE xero_contact_id IS NOT NULL
+    `);
     const result = await client.query(`
       SELECT u.id, u.xero_person_email, o.xero_contact_id
       FROM portal_users u
@@ -100,6 +109,9 @@ async function main() {
         AND o.xero_contact_id IS NOT NULL
     `);
     const usersByContact = new Map();
+    for (const organisation of organisations.rows) {
+      usersByContact.set(String(organisation.xero_contact_id), []);
+    }
     for (const user of result.rows) {
       const contactId = String(user.xero_contact_id);
       usersByContact.set(contactId, [...(usersByContact.get(contactId) || []), user]);
@@ -107,7 +119,14 @@ async function main() {
 
     for (const [contactId, users] of usersByContact) {
       stats.contacts += 1;
-      const allowedEmails = await xeroEmails(token, contactId);
+      const contact = await xeroContact(token, contactId);
+      const allowedEmails = contact.emails;
+      if (contact.name) {
+        await client.query(
+          'UPDATE organisations SET name = $2, xero_contact_name = $2, updated_at = NOW() WHERE xero_contact_id = $1',
+          [contactId, contact.name],
+        );
+      }
       const missingIds = users
         .filter((user) => !allowedEmails.has(String(user.xero_person_email || '').toLowerCase()))
         .map((user) => Number(user.id));

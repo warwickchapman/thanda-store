@@ -4,13 +4,18 @@ export async function ensureAuthSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS organisations (
       id BIGSERIAL PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
       xero_contact_id TEXT,
       xero_contact_name TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // Organisation names are Xero-owned display data. Contact ID is the stable
+  // identity and avoids treating a mutable display name as a unique key.
+  await pool.query('ALTER TABLE organisations DROP CONSTRAINT IF EXISTS organisations_name_key');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS organisations_xero_contact_id_unique ON organisations (xero_contact_id) WHERE xero_contact_id IS NOT NULL');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS portal_users (
