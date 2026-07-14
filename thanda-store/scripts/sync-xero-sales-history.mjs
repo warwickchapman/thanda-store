@@ -32,7 +32,7 @@ async function usableToken(config, token) {
 }
 function headers(token, extra = {}) { return { Authorization: `Bearer ${token.access_token}`, 'xero-tenant-id': token.tenant_id, Accept: 'application/json', ...extra }; }
 function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
-async function xeroJson(url, token, extraHeaders = {}) {
+async function xeroJson(url, token, extraHeaders = {}, usageClient) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const wait = Math.max(0, REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
     if (wait) await sleep(wait);
@@ -52,9 +52,15 @@ async function xeroJson(url, token, extraHeaders = {}) {
       throw error;
     }
     const body = await response.text();
+    await recordUsage(usageClient, response);
     if (response.status === 304) return { Invoices: [] };
     if (response.status === 429 && attempt < 3) {
       const retrySeconds = Math.max(5, Number(response.headers.get('retry-after')) || 30);
+      if (response.headers.get('x-rate-limit-problem') === 'day') {
+        const error = new Error(`Xero daily API allowance is exhausted; retry after ${retrySeconds}s`);
+        error.code = 'XERO_DAILY_LIMIT';
+        throw error;
+      }
       console.error(`Xero rate limited invoice sync; retrying in ${retrySeconds}s (attempt ${attempt + 1}/3)`);
       await sleep(retrySeconds * 1_000);
       continue;
@@ -75,6 +81,33 @@ async function ensureSchema(client) {
   await client.query(`CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (invoice_id TEXT NOT NULL, contact_id TEXT NOT NULL, invoice_date DATE NOT NULL, updated_at TIMESTAMPTZ NOT NULL, sku TEXT NOT NULL, quantity NUMERIC(14,3) NOT NULL CHECK (quantity > 0), PRIMARY KEY (invoice_id, sku))`);
   await client.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)');
   await client.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
+  await client.query(`CREATE TABLE IF NOT EXISTS xero_api_usage (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), day_limit_remaining INTEGER, minute_limit_remaining INTEGER, app_minute_limit_remaining INTEGER, rate_limit_problem TEXT, retry_after_seconds INTEGER, next_allowed_at TIMESTAMPTZ, source TEXT, observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await client.query('ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ');
+}
+function headerNumber(headers, name) { const value = Number(headers.get(name)); return Number.isFinite(value) ? value : null; }
+async function recordUsage(client, response) {
+  if (!client) return;
+  await client.query(`
+    INSERT INTO xero_api_usage (id, day_limit_remaining, minute_limit_remaining, app_minute_limit_remaining, rate_limit_problem, retry_after_seconds, next_allowed_at, source, observed_at)
+    VALUES (true, $1, $2, $3, $4, $5, $6, 'sales-history', NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      day_limit_remaining = EXCLUDED.day_limit_remaining,
+      minute_limit_remaining = EXCLUDED.minute_limit_remaining,
+      app_minute_limit_remaining = EXCLUDED.app_minute_limit_remaining,
+      rate_limit_problem = EXCLUDED.rate_limit_problem,
+      retry_after_seconds = EXCLUDED.retry_after_seconds,
+      next_allowed_at = EXCLUDED.next_allowed_at,
+      source = EXCLUDED.source,
+      observed_at = EXCLUDED.observed_at
+  `, [
+    headerNumber(response.headers, 'x-daylimit-remaining'),
+    headerNumber(response.headers, 'x-minlimit-remaining'),
+    headerNumber(response.headers, 'x-appminlimit-remaining'),
+    response.headers.get('x-rate-limit-problem'),
+    headerNumber(response.headers, 'retry-after'),
+    response.headers.get('x-rate-limit-problem') === 'day' && headerNumber(response.headers, 'retry-after')
+      ? new Date(Date.now() + headerNumber(response.headers, 'retry-after') * 1_000).toISOString() : null,
+  ]);
 }
 function invoiceDate(invoice) { return String(invoice.DateString || invoice.Date || '').slice(0, 10); }
 async function cacheInvoice(client, invoice, stats) {
@@ -99,12 +132,12 @@ async function cacheInvoice(client, invoice, stats) {
   }
 }
 
-async function fetchInvoiceDetails(invoiceIds, token) {
+async function fetchInvoiceDetails(invoiceIds, token, usageClient) {
   const result = [];
   for (let index = 0; index < invoiceIds.length; index += DETAIL_BATCH_SIZE) {
     const ids = invoiceIds.slice(index, index + DETAIL_BATCH_SIZE);
     const query = new URLSearchParams({ InvoiceIDs: ids.join(',') });
-    const payload = await xeroJson(`${INVOICES_URL}?${query}`, token);
+    const payload = await xeroJson(`${INVOICES_URL}?${query}`, token, {}, usageClient);
     result.push(...(Array.isArray(payload.Invoices) ? payload.Invoices : []));
   }
   return result;
@@ -119,11 +152,17 @@ async function main() {
   const stats = { pages: 0, invoices: 0, eligibleInvoices: 0, cachedLines: 0 };
   try {
     await ensureSchema(client);
+    const allowance = await client.query('SELECT next_allowed_at FROM xero_api_usage WHERE id = true');
+    const nextAllowedAt = allowance.rows[0]?.next_allowed_at ? Date.parse(allowance.rows[0].next_allowed_at) : 0;
+    if (nextAllowedAt > Date.now()) {
+      console.log(`Xero sales history sync skipped until ${new Date(nextAllowedAt).toISOString()} after a daily rate limit response.`);
+      return;
+    }
     const state = await client.query('SELECT last_successful_sync_at FROM xero_invoice_sync_state WHERE id = true');
     const modifiedSince = state.rows[0]?.last_successful_sync_at;
     for (let page = 1; ; page += 1) {
       const query = new URLSearchParams({ page: String(page), pageSize: '100', DateFrom: isoDate(INITIAL_WINDOW_DAYS), order: 'Date DESC' });
-      const payload = await xeroJson(`${INVOICES_URL}?${query}`, token, modifiedSince ? { 'If-Modified-Since': new Date(modifiedSince).toUTCString() } : {});
+      const payload = await xeroJson(`${INVOICES_URL}?${query}`, token, modifiedSince ? { 'If-Modified-Since': new Date(modifiedSince).toUTCString() } : {}, client);
       const invoices = Array.isArray(payload.Invoices) ? payload.Invoices : [];
       stats.pages += 1;
       const summariesWithLines = invoices.filter((invoice) => Array.isArray(invoice.LineItems));
@@ -131,7 +170,7 @@ async function main() {
         .filter((invoice) => !Array.isArray(invoice.LineItems))
         .map((invoice) => String(invoice.InvoiceID || ''))
         .filter(Boolean);
-      const detailedInvoices = await fetchInvoiceDetails(idsNeedingLines, token);
+      const detailedInvoices = await fetchInvoiceDetails(idsNeedingLines, token, client);
       for (const invoice of [...summariesWithLines, ...detailedInvoices]) await cacheInvoice(client, invoice, stats);
       if (invoices.length === 0) break;
     }

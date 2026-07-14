@@ -26,6 +26,15 @@ type XeroStatus = {
   grantedScopes: string[];
   missingScopes: string[];
   reconnectRequired: boolean;
+  usage: {
+    day_limit_remaining: number | null;
+    minute_limit_remaining: number | null;
+    rate_limit_problem: string | null;
+    retry_after_seconds: number | null;
+    next_allowed_at: string | null;
+    source: string | null;
+    observed_at: string;
+  } | null;
 };
 
 type XeroContact = {
@@ -473,6 +482,12 @@ export default function AdminUsersPage() {
                     ? 'Connected with the required contact and organisation permissions.'
                     : `Reconnect is required${xeroStatus.missingScopes.length ? ` for: ${xeroStatus.missingScopes.join(', ')}` : ''}.`}
                 </p>
+                {xeroStatus.usage && (
+                  <p className="mt-2 text-xs font-medium">
+                    Xero API allowance: {xeroStatus.usage.day_limit_remaining ?? 'unknown'} calls left today; {xeroStatus.usage.minute_limit_remaining ?? 'unknown'} this minute. Last observed {new Date(xeroStatus.usage.observed_at).toLocaleString()} by {xeroStatus.usage.source || 'Xero sync'}.
+                    {xeroStatus.usage.next_allowed_at && ` Daily limit reached; next attempt after ${new Date(xeroStatus.usage.next_allowed_at).toLocaleString()}.`}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button type="button" onClick={() => loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status'))} className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900">Refresh status</button>

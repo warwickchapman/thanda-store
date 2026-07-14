@@ -117,6 +117,20 @@ export async function ensureAuthSchema() {
       PRIMARY KEY (invoice_id, sku)
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_api_usage (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      day_limit_remaining INTEGER,
+      minute_limit_remaining INTEGER,
+      app_minute_limit_remaining INTEGER,
+      rate_limit_problem TEXT,
+      retry_after_seconds INTEGER,
+      next_allowed_at TIMESTAMPTZ,
+      source TEXT,
+      observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query('ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ');
 
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');

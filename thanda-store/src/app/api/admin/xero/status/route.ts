@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import { currentUser } from '@/lib/auth/server';
+import pool from '@/lib/db';
 import { XERO_SCOPES, xeroConfig } from '@/lib/xero/oauth';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,11 @@ export async function GET() {
     const grantedScopes = String(token.scope || '').split(/\s+/).filter(Boolean);
     const requiredScopes = XERO_SCOPES.split(/\s+/).filter(Boolean);
     const missingScopes = requiredScopes.filter((scope) => !grantedScopes.includes(scope));
+    const usageResult = await pool.query(`
+      SELECT day_limit_remaining, minute_limit_remaining, rate_limit_problem,
+             retry_after_seconds, next_allowed_at, source, observed_at
+      FROM xero_api_usage WHERE id = true
+    `);
 
     return xeroStatusResponse({
       connected: Boolean(token.tenant_id && token.refresh_token),
@@ -38,6 +44,7 @@ export async function GET() {
       requiredScopes,
       missingScopes,
       reconnectRequired: missingScopes.length > 0,
+      usage: usageResult.rows[0] || null,
     });
   } catch {
     return xeroStatusResponse({
@@ -49,6 +56,7 @@ export async function GET() {
       requiredScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
       missingScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
       reconnectRequired: true,
+      usage: null,
     });
   }
 }
