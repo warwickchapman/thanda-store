@@ -17,11 +17,20 @@ export async function GET() {
 
     const [mine, thanda] = await Promise.all([
       user.xeroContactId ? pool.query(`
-        SELECT sku, COUNT(DISTINCT invoice_id)::int AS orders, MAX(invoice_date) AS last_ordered
+        SELECT
+          sku,
+          COUNT(DISTINCT invoice_id)::int AS orders,
+          MAX(invoice_date) AS last_ordered,
+          COUNT(DISTINCT invoice_id) * 100
+            + MAX(CASE
+              WHEN invoice_date >= CURRENT_DATE - INTERVAL '90 days' THEN 20
+              WHEN invoice_date >= CURRENT_DATE - INTERVAL '180 days' THEN 10
+              ELSE 0
+            END) AS rank_score
         FROM xero_sales_invoice_lines
         WHERE contact_id = $1 AND invoice_date >= $2::date
         GROUP BY sku
-        ORDER BY COUNT(DISTINCT invoice_id) DESC, MAX(invoice_date) DESC, SUM(quantity) DESC
+        ORDER BY rank_score DESC, MAX(invoice_date) DESC, SUM(quantity) DESC
         LIMIT $3
       `, [user.xeroContactId, start, LIMIT]) : Promise.resolve({ rows: [] }),
       pool.query(`

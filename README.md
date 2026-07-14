@@ -215,6 +215,14 @@ Use `--force` only after deliberately changing a source image or thumbnail setti
 
 `GET /api/products` exposes `thumbnail_url` only when the local file exists. The storefront renders `thumbnail_url` first, falls back to the supplier `image_url`, then falls back to the placeholder icon. Local files are served through the cached public media route `/api/product-images/<supplier>/<sku>`. This keeps browsing resilient even if thumbnail generation misses a product.
 
+## Home favourites and cart
+
+Home is the first catalogue tab. **My favourites** ranks current visible catalogue SKUs from the linked Xero contact's authorised/paid sales invoices in the last 12 months. Repeat order count dominates, with a small 90/180-day recency boost. **Thanda favourites** is a simple global ranking by total units sold, so bulk sales are allowed to influence it.
+
+Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read and again immediately before Xero quote creation.
+
+**Create draft quote** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
+
 ## Xero stock sync
 
 Xero is the source of truth for Thanda/KZN stock, not supplier warehouse stock. Supplier warehouse quantities still come from Renogy and Victron.
