@@ -381,7 +381,7 @@ export default function Home() {
               <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
                 <div className="flex min-w-max gap-2 border-b border-zinc-200">
                   <button type="button" onClick={() => setHomeTab('mine')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'mine' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>My favourites</button>
-                  <button type="button" onClick={() => setHomeTab('thanda')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'thanda' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>Thanda favourites</button>
+                  <button type="button" onClick={() => setHomeTab('thanda')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'thanda' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>Popular</button>
                 </div>
               </div>
             ) : <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
@@ -415,7 +415,7 @@ export default function Home() {
               <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
-                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Thanda favourites') : displayLabel(selectedCategory)}</h2>
+                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : displayLabel(selectedCategory)}</h2>
                 </div>
                 <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
                   {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
@@ -486,7 +486,7 @@ export default function Home() {
               </div>
               {selectedSupplier === 'home' && selectedHomeProducts.length === 0 && (
                 <p className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
-                  {homeTab === 'mine' ? 'No qualifying sales in the last 12 months yet. Browse Thanda favourites for common products.' : 'No sales history has been synced yet.'}
+                  {homeTab === 'mine' ? 'No qualifying sales in the last 12 months yet. Browse Popular products for common products.' : 'No sales history has been synced yet.'}
                 </p>
               )}
             </section>

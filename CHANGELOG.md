@@ -29,7 +29,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Buyer pricing is emphasised as **Your Price Excl. VAT**; the non-buying reference price is labelled **List Price Excl. VAT**.
 - Thumbnail generation is now lazy and self-maintaining: the first catalogue load that encounters a missing thumbnail queues background generation without delaying the response.
 - Generated thumbnails are served through a cached application media route, so they become available without a Next.js restart.
-- Home is the first catalogue tab. It offers `My favourites` from the linked Xero customer's last 12 months of authorised/paid SKU invoice history and `Thanda favourites` from total units sold across all current catalogue SKUs.
+- Home is the first catalogue tab. It offers `My favourites` from the linked Xero customer's last 12 months of authorised/paid SKU invoice history and `Popular` from total units sold across all current catalogue SKUs.
 - Cart prices and discounts are recalculated from the current catalogue when read and again when a draft quote is created. A successful checkout creates an exclusive-VAT Xero draft quote and clears the cart; a rejected request retains it.
 - The customer-facing cart command is labelled **Quote me!**; it creates only a draft quote at this stage.
 

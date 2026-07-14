@@ -217,7 +217,7 @@ Use `--force` only after deliberately changing a source image or thumbnail setti
 
 ## Home favourites and cart
 
-Home is the first catalogue tab. **My favourites** ranks current visible catalogue SKUs from the linked Xero contact's authorised/paid sales invoices in the last 12 months. Repeat order count dominates, with a small 90/180-day recency boost. **Thanda favourites** is a simple global ranking by total units sold, so bulk sales are allowed to influence it.
+Home is the first catalogue tab. **My favourites** ranks current visible catalogue SKUs from the linked Xero contact's authorised/paid sales invoices in the last 12 months. Repeat order count dominates, with a small 90/180-day recency boost. **Popular** is a simple global ranking by total units sold, so bulk sales are allowed to influence it.
 
 Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read and again immediately before Xero quote creation.
 
