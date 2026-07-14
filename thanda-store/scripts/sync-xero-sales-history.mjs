@@ -11,6 +11,7 @@ const INVOICES_URL = 'https://api.xero.com/api.xro/2.0/Invoices';
 const INITIAL_WINDOW_DAYS = 365;
 const REQUEST_INTERVAL_MS = 1_100;
 const REQUEST_TIMEOUT_MS = 30_000;
+const DETAIL_BATCH_SIZE = 20;
 let lastRequestAt = 0;
 
 function required(name) { if (!process.env[name]) throw new Error(`${name} is required`); return process.env[name]; }
@@ -49,6 +50,7 @@ async function xeroJson(url, token, extraHeaders = {}) {
       throw error;
     }
     const body = await response.text();
+    if (response.status === 304) return { Invoices: [] };
     if (response.status === 429 && attempt < 3) {
       const retrySeconds = Math.max(5, Number(response.headers.get('retry-after')) || 30);
       console.error(`Xero rate limited invoice sync; retrying in ${retrySeconds}s (attempt ${attempt + 1}/3)`);
@@ -73,6 +75,38 @@ async function ensureSchema(client) {
   await client.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
 }
 function invoiceDate(invoice) { return String(invoice.DateString || invoice.Date || '').slice(0, 10); }
+async function cacheInvoice(client, invoice, stats) {
+  const id = String(invoice.InvoiceID || '');
+  if (!id) return;
+  stats.invoices += 1;
+  await client.query('DELETE FROM xero_sales_invoice_lines WHERE invoice_id = $1', [id]);
+  const eligible = invoice.Type === 'ACCREC' && ['AUTHORISED', 'PAID'].includes(String(invoice.Status || '').toUpperCase());
+  const date = invoiceDate(invoice);
+  const contactId = String(invoice.Contact?.ContactID || '');
+  if (!eligible || !date || !contactId || date < isoDate(INITIAL_WINDOW_DAYS)) return;
+  stats.eligibleInvoices += 1;
+  const quantities = new Map();
+  for (const line of invoice.LineItems || []) {
+    const sku = String(line.ItemCode || line.Item?.Code || '').trim().toUpperCase();
+    const quantity = Number(line.Quantity);
+    if (sku && Number.isFinite(quantity) && quantity > 0) quantities.set(sku, (quantities.get(sku) || 0) + quantity);
+  }
+  for (const [sku, quantity] of quantities) {
+    await client.query('INSERT INTO xero_sales_invoice_lines (invoice_id, contact_id, invoice_date, updated_at, sku, quantity) VALUES ($1,$2,$3,NOW(),$4,$5)', [id, contactId, date, sku, quantity]);
+    stats.cachedLines += 1;
+  }
+}
+
+async function fetchInvoiceDetails(invoiceIds, token) {
+  const result = [];
+  for (let index = 0; index < invoiceIds.length; index += DETAIL_BATCH_SIZE) {
+    const ids = invoiceIds.slice(index, index + DETAIL_BATCH_SIZE);
+    const query = new URLSearchParams({ InvoiceIDs: ids.join(',') });
+    const payload = await xeroJson(`${INVOICES_URL}?${query}`, token);
+    result.push(...(Array.isArray(payload.Invoices) ? payload.Invoices : []));
+  }
+  return result;
+}
 async function main() {
   const config = { clientId: required('XERO_CLIENT_ID'), clientSecret: required('XERO_CLIENT_SECRET'), tokenFile: process.env.XERO_TOKEN_FILE || '/var/lib/thanda-store/xero-token.json' };
   let token = await usableToken(config, await readToken(config.tokenFile));
@@ -86,33 +120,17 @@ async function main() {
     const state = await client.query('SELECT last_successful_sync_at FROM xero_invoice_sync_state WHERE id = true');
     const modifiedSince = state.rows[0]?.last_successful_sync_at;
     for (let page = 1; ; page += 1) {
-      const query = new URLSearchParams({ page: String(page), DateFrom: isoDate(INITIAL_WINDOW_DAYS) });
+      const query = new URLSearchParams({ page: String(page), pageSize: '100', DateFrom: isoDate(INITIAL_WINDOW_DAYS), order: 'Date DESC' });
       const payload = await xeroJson(`${INVOICES_URL}?${query}`, token, modifiedSince ? { 'If-Modified-Since': new Date(modifiedSince).toUTCString() } : {});
       const invoices = Array.isArray(payload.Invoices) ? payload.Invoices : [];
       stats.pages += 1;
-      for (const summary of invoices) {
-        const id = String(summary.InvoiceID || '');
-        if (!id) continue;
-        const detail = (await xeroJson(`${INVOICES_URL}/${encodeURIComponent(id)}`, token)).Invoices?.[0];
-        if (!detail) continue;
-        stats.invoices += 1;
-        await client.query('DELETE FROM xero_sales_invoice_lines WHERE invoice_id = $1', [id]);
-        const eligible = detail.Type === 'ACCREC' && ['AUTHORISED', 'PAID'].includes(String(detail.Status || '').toUpperCase());
-        const date = invoiceDate(detail);
-        const contactId = String(detail.Contact?.ContactID || '');
-        if (!eligible || !date || !contactId || date < isoDate(INITIAL_WINDOW_DAYS)) continue;
-        stats.eligibleInvoices += 1;
-        const quantities = new Map();
-        for (const line of detail.LineItems || []) {
-          const sku = String(line.ItemCode || line.Item?.Code || '').trim().toUpperCase();
-          const quantity = Number(line.Quantity);
-          if (sku && Number.isFinite(quantity) && quantity > 0) quantities.set(sku, (quantities.get(sku) || 0) + quantity);
-        }
-        for (const [sku, quantity] of quantities) {
-          await client.query(`INSERT INTO xero_sales_invoice_lines (invoice_id, contact_id, invoice_date, updated_at, sku, quantity) VALUES ($1,$2,$3,NOW(),$4,$5)`, [id, contactId, date, sku, quantity]);
-          stats.cachedLines += 1;
-        }
-      }
+      const summariesWithLines = invoices.filter((invoice) => Array.isArray(invoice.LineItems));
+      const idsNeedingLines = invoices
+        .filter((invoice) => !Array.isArray(invoice.LineItems))
+        .map((invoice) => String(invoice.InvoiceID || ''))
+        .filter(Boolean);
+      const detailedInvoices = await fetchInvoiceDetails(idsNeedingLines, token);
+      for (const invoice of [...summariesWithLines, ...detailedInvoices]) await cacheInvoice(client, invoice, stats);
       if (invoices.length === 0) break;
     }
     await client.query(`INSERT INTO xero_invoice_sync_state (id, last_successful_sync_at) VALUES (true, NOW()) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, updated_at = NOW()`);
