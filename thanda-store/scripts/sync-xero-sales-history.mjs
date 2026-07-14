@@ -10,6 +10,7 @@ const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const INVOICES_URL = 'https://api.xero.com/api.xro/2.0/Invoices';
 const INITIAL_WINDOW_DAYS = 365;
 const REQUEST_INTERVAL_MS = 1_100;
+const REQUEST_TIMEOUT_MS = 30_000;
 let lastRequestAt = 0;
 
 function required(name) { if (!process.env[name]) throw new Error(`${name} is required`); return process.env[name]; }
@@ -33,7 +34,20 @@ async function xeroJson(url, token, extraHeaders = {}) {
     const wait = Math.max(0, REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
     if (wait) await sleep(wait);
     lastRequestAt = Date.now();
-    const response = await fetch(url, { headers: headers(token, extraHeaders) });
+    let response;
+    try {
+      response = await fetch(url, {
+        headers: headers(token, extraHeaders),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (attempt < 3) {
+        console.error(`Xero invoice request failed (${error instanceof Error ? error.name : 'unknown error'}); retrying in 30s (attempt ${attempt + 1}/3)`);
+        await sleep(30_000);
+        continue;
+      }
+      throw error;
+    }
     const body = await response.text();
     if (response.status === 429 && attempt < 3) {
       const retrySeconds = Math.max(5, Number(response.headers.get('retry-after')) || 30);
