@@ -380,6 +380,8 @@ The sales-history and contact-access timers now run once per day as recovery rec
 
 #### Configure the Xero webhook
 
+Manage the Thanda Store Xero API integration at [Xero Developer app management](https://developer.xero.com/app/manage).
+
 1. In the Xero Developer app, create a webhook subscription with endpoint `https://oc.sensible.co.za/api/xero/webhooks`.
 2. Subscribe only to **Invoice** `CREATE` and `UPDATE`, and **Contact** `CREATE` and `UPDATE`.
 3. Copy the Xero **Webhook Key** into the production PM2 environment as `XERO_WEBHOOK_KEY`, then restart PM2 with its environment refreshed. Do not put this value in Git or expose it in the admin UI.
