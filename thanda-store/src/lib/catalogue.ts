@@ -60,6 +60,7 @@ function displayDetails(details: Record<string, unknown>, price: unknown) {
     manualAvailability: typeof details.manualAvailability === 'string' ? details.manualAvailability : null,
     is120vAc: details.is120vAc === true,
     productNotes: Array.isArray(details.productNotes) ? details.productNotes.filter((note) => typeof note === 'string') : [],
+    xeroStockStatus: typeof details.xeroStockStatus === 'string' ? details.xeroStockStatus : null,
     distributorPrice: numberOrNull(price),
     maxB2bDiscountPercent: MAX_B2B_DISCOUNT_PERCENT,
   };

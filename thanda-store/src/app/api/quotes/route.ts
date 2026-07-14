@@ -20,7 +20,7 @@ export async function POST() {
         throw new Error('A cart item no longer has a current price. Remove it or contact sales.');
       }
       return {
-        ItemCode: product.sku,
+        ...(product.details.xeroStockStatus && product.details.xeroStockStatus !== 'missing' ? { ItemCode: product.sku } : {}),
         Description: product.name,
         Quantity: Number(line.quantity),
         UnitAmount: product.recommended_retail_ex_vat,
