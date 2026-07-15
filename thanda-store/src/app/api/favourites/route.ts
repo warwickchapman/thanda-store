@@ -48,7 +48,7 @@ function rankedProducts(
   rankedByFrequency: boolean,
 ) {
   const resolveFamily = familyResolver(successions);
-  const successorSkus = new Set(successions.map((row) => row.successor_sku.toUpperCase()));
+  const predecessorSkus = new Set(successions.map((row) => row.predecessor_sku.toUpperCase()));
   const liveSkusByFamily = new Map<string, Set<string>>();
   for (const sku of products.keys()) {
     const family = resolveFamily(sku);
@@ -87,9 +87,19 @@ function rankedProducts(
   return [...grouped.values()].flatMap((group) => {
     const family = resolveFamily([...group.skus][0]);
     const memberSkus = [...(liveSkusByFamily.get(family) || group.skus)];
-    const rootSkus = memberSkus.filter((sku) => !successorSkus.has(sku));
-    const preferredSkus = [...rootSkus, ...memberSkus.filter((sku) => !rootSkus.includes(sku))];
+    const expectedSuccessors = successions
+      .filter((row) => resolveFamily(row.predecessor_sku.toUpperCase()) === family)
+      .map((row) => row.successor_sku.toUpperCase());
+    // A SKU which is not itself superseded is the newest member of its family.
+    // Prefer that card for Home, but keep an older SKU eligible if it is the
+    // only orderable product while its successor has no stock.
+    const newestSkus = memberSkus.filter((sku) => !predecessorSkus.has(sku));
+    const preferredSkus = [...newestSkus, ...memberSkus.filter((sku) => !newestSkus.includes(sku))];
     const familyProducts = preferredSkus.map((sku) => products.get(sku)).filter((product): product is CatalogueProduct => Boolean(product));
+    // A successor discovered in Victron's description may be awaiting its
+    // first supplier sync. Do not offer an unavailable predecessor in Home
+    // while the actual replacement has not yet been imported.
+    if (!familyProducts.some(productIsOrderable) && expectedSuccessors.some((sku) => !products.has(sku))) return [];
     const product = familyProducts.find(productIsOrderable) || familyProducts[0];
     if (!product) return [];
     const score = rankedByFrequency

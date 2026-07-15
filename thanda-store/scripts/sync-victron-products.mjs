@@ -224,7 +224,16 @@ async function main() {
 
   const allowedSkus = loadAllowedSkus();
   const products = await fetchPagedProducts('products');
-  const allowedProducts = products.filter((product) => allowedSkus.has(String(product.sku || '').toUpperCase()));
+  const priceListProducts = products.filter((product) => allowedSkus.has(String(product.sku || '').toUpperCase()));
+  // The quarterly price list remains the normal catalogue authority. An
+  // explicit Victron "If 0, order <SKU>" marker is the narrow exception: the
+  // named successor must be available so a retired predecessor can transition
+  // cleanly without manually editing each quarter's allow-list.
+  const successorSkus = new Set(priceListProducts.map((product) => successorSkuFromDescription(product.description || product.product_data?.name)).filter(Boolean));
+  const allowedProducts = products.filter((product) => {
+    const sku = String(product.sku || '').toUpperCase();
+    return allowedSkus.has(sku) || successorSkus.has(sku);
+  });
   const extendedBySku = new Map();
   const extendedFailures = [];
 
@@ -244,6 +253,7 @@ async function main() {
   const client = await pool.connect();
   const stats = {
     allowed: allowedSkus.size,
+    explicitSuccessors: successorSkus.size,
     apiProducts: products.length,
     matched: allowedProducts.length,
     synced: 0,
