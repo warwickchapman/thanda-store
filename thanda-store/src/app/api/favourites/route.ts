@@ -4,6 +4,9 @@ import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 
 const LIMIT = 20;
+// Rank enough historic SKUs to discard retired/non-catalogue items before
+// applying the visible limit. Xero history is broader than the live portal.
+const CANDIDATE_LIMIT = 1_000;
 
 export async function GET() {
   try {
@@ -32,7 +35,7 @@ export async function GET() {
         GROUP BY sku
         ORDER BY rank_score DESC, MAX(invoice_date) DESC, SUM(quantity) DESC
         LIMIT $3
-      `, [user.xeroContactId, start, LIMIT]) : Promise.resolve({ rows: [] }),
+      `, [user.xeroContactId, start, CANDIDATE_LIMIT]) : Promise.resolve({ rows: [] }),
       pool.query(`
         SELECT sku, SUM(quantity) AS units, COUNT(DISTINCT invoice_id)::int AS orders, MAX(invoice_date) AS last_ordered
         FROM xero_sales_invoice_lines
@@ -40,12 +43,12 @@ export async function GET() {
         GROUP BY sku
         ORDER BY SUM(quantity) DESC, COUNT(DISTINCT invoice_id) DESC, MAX(invoice_date) DESC
         LIMIT $2
-      `, [start, LIMIT]),
+      `, [start, CANDIDATE_LIMIT]),
     ]);
     const match = (rows: Array<{ sku: string }>) => rows.flatMap((row) => {
       const product = bySku.get(String(row.sku).toUpperCase());
       return product ? [product] : [];
-    });
+    }).slice(0, LIMIT);
     return NextResponse.json({ mine: match(mine.rows), thanda: match(thanda.rows), windowStart: start });
   } catch (error) {
     console.error('Favourites API error:', error);

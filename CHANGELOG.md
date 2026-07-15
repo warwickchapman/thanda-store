@@ -36,6 +36,7 @@ All notable production-facing changes are recorded here. This project does not y
 - User Admin now displays the latest observed Xero API allowance and the sales-history timer pauses cleanly through a Xero daily-limit `Retry-After` window.
 - Xero Invoice/Contact routine polling has been replaced by webhook-driven updates; the old jobs are now daily `If-Modified-Since` reconciliation only.
 - Xero webhook invoice processing now uses only the documented per-invoice resource endpoint, with a 20-invoice run cap; unsupported collection batching cannot clear the sales-history cache.
+- Home favourites now filter retired historical SKUs before applying their visible ranking limit, so current catalogue products are not crowded out by old item codes.
 - Developer and operational documentation now require API-budget estimates, batch/incremental reads, cached portal data, bounded backfills, and strict `429`/`Retry-After` handling for all external integrations.
 
 ### Security
