@@ -40,8 +40,23 @@ export async function POST(request: NextRequest) {
     const id = Number(productId);
     const requested = validQuantity(quantity);
     if (!Number.isInteger(id) || !requested) return NextResponse.json({ error: 'A valid product and quantity are required' }, { status: 400 });
-    const exists = await pool.query("SELECT 1 FROM products WHERE id = $1 AND COALESCE((details->>'hidden')::boolean, false) = false", [id]);
-    if (!exists.rowCount) return NextResponse.json({ error: 'Product is no longer available' }, { status: 404 });
+    const productResult = await pool.query(`
+      SELECT supplier, stock_on_hand,
+        NULLIF(details->>'localStockOnHand', '')::numeric AS local_stock_on_hand
+      FROM products
+      WHERE id = $1
+        AND COALESCE((details->>'hidden')::boolean, false) = false
+    `, [id]);
+    if (!productResult.rowCount) return NextResponse.json({ error: 'Product is no longer available' }, { status: 404 });
+
+    const product = productResult.rows[0];
+    const supplier = String(product.supplier).toLowerCase();
+    const isUnavailableSupplierItem = ['renogy', 'victron'].includes(supplier)
+      && Number(product.stock_on_hand) <= 0
+      && Number(product.local_stock_on_hand ?? 0) <= 0;
+    if (isUnavailableSupplierItem) {
+      return NextResponse.json({ error: 'This product is currently not available to order' }, { status: 409 });
+    }
     await pool.query(`
       INSERT INTO portal_cart_lines (user_id, product_id, quantity)
       VALUES ($1, $2, $3)

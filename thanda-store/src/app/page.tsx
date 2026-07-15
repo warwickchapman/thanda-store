@@ -439,7 +439,7 @@ export default function Home() {
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
                         <ProductImage product={product} />
                         {isUnavailable(product) && (
-                          <span className="pointer-events-none absolute -right-10 top-7 w-40 rotate-45 bg-red-700 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-sm">
+                          <span className="pointer-events-none absolute -right-10 top-7 z-20 w-40 rotate-45 bg-red-700 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-sm">
                             Not available
                           </span>
                         )}
@@ -492,7 +492,13 @@ export default function Home() {
                                 {priceLabel(product.recommended_retail_ex_vat)}
                               </div>
                             </div>
-                            <button onClick={() => addToCart(product.id)} aria-label={`Add ${product.name} to cart`} className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10">
+                            <button
+                              onClick={() => addToCart(product.id)}
+                              aria-label={isUnavailable(product) ? `${product.name} is not available` : `Add ${product.name} to cart`}
+                              disabled={isUnavailable(product)}
+                              title={isUnavailable(product) ? 'Not available to order' : 'Add to cart'}
+                              className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none disabled:hover:scale-100 disabled:hover:bg-zinc-200"
+                            >
                               <ShoppingCart className="h-5 w-5" />
                             </button>
                           </div>
