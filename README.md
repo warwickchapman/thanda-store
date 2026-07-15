@@ -41,6 +41,8 @@ Before changing an integration, document the expected calls per run and per day,
 
 For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. Xero does not provide an `InvoiceIDs` batch parameter on its invoice collection endpoint, so the webhook worker fetches changed invoices by their individual resource URL and caps itself at 20 queued invoices per run. It retains a 150-call daily reserve for stock, administration, and reconciliation. It records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
 
+Every Xero integration change must be checked against the official [Xero OpenAPI 3 specification repository](https://github.com/XeroAPI/Xero-OpenAPI) before implementation. Follow Xero's [API Call Efficiencies guidance](https://developer.xero.com/documentation/getting-started-guide/) as a mandatory design rule: prefer webhooks where Xero supports them, cache derived portal data, use supported filters and `If-Modified-Since`, paginate deliberately, and retain a low-frequency reconciliation path. Do not invent request parameters or assume batch support; record the expected request count and allowance impact before deploying a changed Xero job.
+
 ## Local development
 
 ```bash
@@ -143,7 +145,7 @@ After a Xero link is saved, User Admin shows a compact locked contact summary. U
 
 Changing a portal user email clears the organisation's Xero link, revokes that user's active sessions and outstanding codes, then reruns the automatic match against the new email. Because the Xero link belongs to the organisation, this affects every portal user in that organisation.
 
-Xero is the source of truth for linked company names and eligible people. The portal stores the Xero Contact ID as identity and only caches the Xero Contact Name for display; the contact-access sync refreshes that name every 30 minutes. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.
+Xero is the source of truth for linked company names and eligible people. The portal stores the Xero Contact ID as identity and only caches the Xero Contact Name for display; Contact webhooks normally refresh that state and the daily contact-access job is a recovery reconciliation. The primary contact is the first portal login. User Admin can explicitly enable each Xero **Additional person**; it sends that person a setup email and applies the company discounts. It does not invite people automatically. If a previously enabled primary/additional person is removed from Xero (or the contact is archived), their portal account is archived, active sessions and outstanding codes are revoked, and access stops. Re-adding a person in Xero does not automatically restore access; an admin must explicitly re-enable them.
 
 Buyer invitations require a Xero contact link. Non-admin users cannot complete login until their organisation is linked to Xero.
 
