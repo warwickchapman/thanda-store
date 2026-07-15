@@ -39,6 +39,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Home favourites now filter retired historical SKUs before applying their visible ranking limit, so current catalogue products are not crowded out by old item codes.
 - The Xero webhook worker now reserves 150 daily API calls, pausing queued work before an event burst can exhaust the tenant allowance.
 - Xero integration changes now require verification against the official OpenAPI 3 repository and Xero's API Call Efficiencies guidance before implementation.
+- Victron and Renogy zero supplier stock no longer show a delivery promise; cards now state `Out of stock / not available` unless immediate KZN stock exists.
 - Developer and operational documentation now require API-budget estimates, batch/incremental reads, cached portal data, bounded backfills, and strict `429`/`Retry-After` handling for all external integrations.
 
 ### Security

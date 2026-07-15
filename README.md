@@ -184,12 +184,14 @@ Available now: n in stock (KZN)
 Renogy Warehouse ZA: n in stock (4-7 working days)
 ```
 
-Victron products use the equivalent wording with a 3-5 working day supplier lead time:
+Victron products use the equivalent wording with a 3-5 working day supplier lead time only when the E-Order South Africa warehouse quantity is positive:
 
 ```text
 Available now: n in stock (KZN)
 Victron Warehouse ZA: n in stock (3-5 working days)
 ```
+
+When Victron ZA stock is zero, the portal displays `Victron Warehouse ZA: Out of stock / not available` and does not promise a lead time. The current E-Order product response exposes warehouse quantities but does not provide a reliable inbound-shipment ETA, so the portal must not infer one from the E-Order web interface.
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
 
@@ -475,7 +477,7 @@ The Victron sync:
 1. Reads `data/victron-zar-2026-q3-skus.json`.
 2. Fetches `/api/v1/products/?format=json` from the Victron E-Order API.
 3. Filters the API result to only SKUs present in the South Africa ZAR price list.
-4. Uses `all_stock_by_warehouse.af_sa_inzuzo` when available for South Africa warehouse stock.
+4. Uses `all_stock_by_warehouse.af_sa_inzuzo` when available for South Africa warehouse stock. A zero quantity is `Out of stock / not available`; E-Order product responses currently do not supply a reliable inbound-shipment ETA.
 5. Stores the Victron account price as distributor cost and calculates recommended retail excluding VAT as `price / VICTRON_THANDA_DISCOUNT_FACTOR`.
 6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`.
 

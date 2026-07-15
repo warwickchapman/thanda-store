@@ -142,6 +142,7 @@ function buildProduct(product, extendedProduct) {
   const imageUrl = selectImageUrl(richProduct);
   const is120vAc = /(^|[^0-9])120V([^0-9]|$)/i.test(name);
   const hidden = category.toLowerCase() === 'solar home system';
+  const supplierStock = selectWarehouseStock(product);
   const details = {
     originalPrice: recommendedRetailExVat,
     recommendedRetailExVat,
@@ -167,7 +168,10 @@ function buildProduct(product, extendedProduct) {
     is120vAc,
     productNotes: is120vAc ? ['Note: 120V AC'] : [],
     supplierStockLabel: 'Victron Warehouse ZA',
-    supplierAvailability: 'Availability: 3-5 working days',
+    // E-Order exposes current warehouse quantities but does not expose a
+    // reliable inbound shipment/ETA field in the product response. Never
+    // promise the normal lead time when South African stock is zero.
+    supplierAvailability: supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
   };
 
   if (extendedProduct) {
@@ -184,7 +188,7 @@ function buildProduct(product, extendedProduct) {
     category,
     price: accountPrice,
     image_url: imageUrl,
-    stock_on_hand: selectWarehouseStock(product),
+    stock_on_hand: supplierStock,
     details,
   };
 }
