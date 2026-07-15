@@ -39,7 +39,7 @@ Supplier, accounting, and messaging APIs are finite operational resources. The p
 
 Before changing an integration, document the expected calls per run and per day, the provider allowance, and the safety margin left for existing jobs and interactive administration. Respect `429` and `Retry-After`; persist rate-limit headers when available and pause locally through a daily-limit reset instead of repeatedly making rejected calls. Initial backfills must be resumable and bounded, not an unbounded one-request-per-record loop.
 
-For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. Xero does not provide an `InvoiceIDs` batch parameter on its invoice collection endpoint, so the webhook worker fetches changed invoices by their individual resource URL and caps itself at 20 queued invoices per run. It records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
+For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. Xero does not provide an `InvoiceIDs` batch parameter on its invoice collection endpoint, so the webhook worker fetches changed invoices by their individual resource URL and caps itself at 20 queued invoices per run. It retains a 150-call daily reserve for stock, administration, and reconciliation. It records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
 
 ## Local development
 

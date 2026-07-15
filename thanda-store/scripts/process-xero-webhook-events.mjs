@@ -16,6 +16,9 @@ const REQUEST_INTERVAL_MS = 1_500;
 // tightly rather than risking the daily tenant allowance on a burst.
 const MAX_INVOICE_EVENTS_PER_RUN = 20;
 const MAX_CONTACT_EVENTS_PER_RUN = 10;
+// Preserve capacity for stock sync, interactive administration, and the
+// daily reconciliation even if Xero delivers an unusual burst of events.
+const DAILY_API_RESERVE = 150;
 const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 let lastRequestAt = 0;
 
@@ -175,10 +178,18 @@ async function main() {
     const lock = await client.query('SELECT pg_try_advisory_lock(742032) AS locked');
     if (!lock.rows[0]?.locked) { console.log('Another Xero webhook worker is already running.'); return; }
     try {
-      const allowance = await client.query('SELECT next_allowed_at FROM xero_api_usage WHERE id = true');
+      const allowance = await client.query('SELECT day_limit_remaining, next_allowed_at FROM xero_api_usage WHERE id = true');
       const nextAllowedAt = Date.parse(allowance.rows[0]?.next_allowed_at || '');
       if (Number.isFinite(nextAllowedAt) && nextAllowedAt > Date.now()) {
         console.log(`Xero webhook worker skipped until ${new Date(nextAllowedAt).toISOString()} after a daily rate limit response.`);
+        return;
+      }
+      const dayLimitRemaining = Number(allowance.rows[0]?.day_limit_remaining);
+      const workerBudget = Number.isFinite(dayLimitRemaining)
+        ? Math.max(0, Math.min(MAX_INVOICE_EVENTS_PER_RUN, dayLimitRemaining - DAILY_API_RESERVE))
+        : MAX_INVOICE_EVENTS_PER_RUN;
+      if (workerBudget === 0) {
+        console.log(`Xero webhook worker paused to retain the ${DAILY_API_RESERVE}-call daily reserve.`);
         return;
       }
       const token = await usableToken(config, await readToken(config.tokenFile));
@@ -189,7 +200,7 @@ async function main() {
         SELECT id, resource_id FROM xero_webhook_events
         WHERE processed_at IS NULL AND tenant_id = $1 AND event_category = 'INVOICE'
         ORDER BY received_at ASC LIMIT $2
-      `, [token.tenant_id, MAX_INVOICE_EVENTS_PER_RUN]);
+      `, [token.tenant_id, workerBudget]);
       const eventsByInvoice = new Map();
       for (const event of invoiceEvents.rows) eventsByInvoice.set(String(event.resource_id), [...(eventsByInvoice.get(String(event.resource_id)) || []), Number(event.id)]);
       for (const invoiceId of eventsByInvoice.keys()) {
@@ -213,7 +224,7 @@ async function main() {
         SELECT DISTINCT ON (resource_id) id, resource_id FROM xero_webhook_events
         WHERE processed_at IS NULL AND tenant_id = $1 AND event_category = 'CONTACT'
         ORDER BY resource_id, received_at DESC LIMIT $2
-      `, [token.tenant_id, MAX_CONTACT_EVENTS_PER_RUN]);
+      `, [token.tenant_id, Math.min(MAX_CONTACT_EVENTS_PER_RUN, Math.max(0, workerBudget - invoiceEvents.rows.length))]);
       for (const event of contactEvents.rows) {
         const related = await client.query(`
           SELECT id FROM xero_webhook_events WHERE processed_at IS NULL AND tenant_id = $1 AND event_category = 'CONTACT' AND resource_id = $2
