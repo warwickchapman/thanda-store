@@ -8,7 +8,7 @@ const LIMIT = 20;
 type InvoiceHistoryRow = {
   invoice_id: string;
   sku: string;
-  invoice_date: string;
+  invoice_date: string | Date;
   quantity: string | number;
 };
 
@@ -67,6 +67,9 @@ function rankedProducts(
 
   for (const row of rows) {
     const sku = String(row.sku).toUpperCase();
+    const invoiceDate = new Date(row.invoice_date);
+    if (Number.isNaN(invoiceDate.getTime())) continue;
+    const invoiceDateIso = invoiceDate.toISOString().slice(0, 10);
     const family = resolveFamily(sku);
     const group = grouped.get(family) || {
       skus: new Set<string>(), invoiceIds: new Set<string>(), units: 0, lastOrdered: '', recent90: false, recent180: false,
@@ -74,8 +77,8 @@ function rankedProducts(
     group.skus.add(sku);
     group.invoiceIds.add(String(row.invoice_id));
     group.units += Number(row.quantity) || 0;
-    if (row.invoice_date > group.lastOrdered) group.lastOrdered = row.invoice_date;
-    const ageDays = (Date.now() - Date.parse(row.invoice_date)) / 86_400_000;
+    if (invoiceDateIso > group.lastOrdered) group.lastOrdered = invoiceDateIso;
+    const ageDays = (Date.now() - invoiceDate.getTime()) / 86_400_000;
     if (ageDays <= 90) group.recent90 = true;
     if (ageDays <= 180) group.recent180 = true;
     grouped.set(family, group);
