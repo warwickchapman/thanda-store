@@ -39,7 +39,7 @@ Supplier, accounting, and messaging APIs are finite operational resources. The p
 
 Before changing an integration, document the expected calls per run and per day, the provider allowance, and the safety margin left for existing jobs and interactive administration. Respect `429` and `Retry-After`; persist rate-limit headers when available and pause locally through a daily-limit reset instead of repeatedly making rejected calls. Initial backfills must be resumable and bounded, not an unbounded one-request-per-record loop.
 
-For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. The webhook worker batches up to 20 invoice IDs per request, records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
+For Xero specifically, the current starter limit is 1,000 calls per tenant per day and 60 per minute. Xero does not provide an `InvoiceIDs` batch parameter on its invoice collection endpoint, so the webhook worker fetches changed invoices by their individual resource URL and caps itself at 20 queued invoices per run. It records the latest allowance in `xero_api_usage`, and shows the cached value in User Admin. Do not add a live Xero call just to refresh this display. The five-minute webhook-worker timer makes no Xero request when the local queue is empty.
 
 ## Local development
 
@@ -374,7 +374,7 @@ Five minutes is a reasonable starting point for supplier availability. If a supp
 
 ### VPS Xero schedules and webhooks
 
-Xero **Invoice CREATE/UPDATE** and **Contact CREATE/UPDATE** webhooks are the normal update path. `POST /api/xero/webhooks` HMAC-verifies the `x-xero-signature`, deduplicates events into `xero_webhook_events`, and immediately returns. The systemd webhook worker runs every five minutes, fetches only changed records, batches invoice IDs in groups of 20, and updates the derived invoice-history cache or linked-contact access. The worker does no Xero work when its queue is empty.
+Xero **Invoice CREATE/UPDATE** and **Contact CREATE/UPDATE** webhooks are the normal update path. `POST /api/xero/webhooks` HMAC-verifies the `x-xero-signature`, deduplicates events into `xero_webhook_events`, and immediately returns. The systemd webhook worker runs every five minutes, fetches only changed records, caps invoice work at 20 exact invoice-resource requests per run, and updates the derived invoice-history cache or linked-contact access. The worker does no Xero work when its queue is empty.
 
 The sales-history and contact-access timers now run once per day as recovery reconciliation. They use cached state and `If-Modified-Since` for invoice history; they are not the normal freshness mechanism. Xero Items are not available as a webhook category, so the separate Xero local-stock timer continues every 30 minutes.
 

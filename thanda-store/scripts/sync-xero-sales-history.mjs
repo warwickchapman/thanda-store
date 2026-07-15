@@ -13,7 +13,6 @@ const INITIAL_WINDOW_DAYS = 365;
 // jobs that share the same connection.
 const REQUEST_INTERVAL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 30_000;
-const DETAIL_BATCH_SIZE = 20;
 let lastRequestAt = 0;
 
 function required(name) { if (!process.env[name]) throw new Error(`${name} is required`); return process.env[name]; }
@@ -134,11 +133,16 @@ async function cacheInvoice(client, invoice, stats) {
 
 async function fetchInvoiceDetails(invoiceIds, token, usageClient) {
   const result = [];
-  for (let index = 0; index < invoiceIds.length; index += DETAIL_BATCH_SIZE) {
-    const ids = invoiceIds.slice(index, index + DETAIL_BATCH_SIZE);
-    const query = new URLSearchParams({ InvoiceIDs: ids.join(',') });
-    const payload = await xeroJson(`${INVOICES_URL}?${query}`, token, {}, usageClient);
-    result.push(...(Array.isArray(payload.Invoices) ? payload.Invoices : []));
+  // Xero's collection endpoint does not support an InvoiceIDs batch parameter.
+  // Fetch only the exceptional summaries that omitted line details by their
+  // canonical resource URL; normal paged responses already include lines.
+  for (const invoiceId of invoiceIds) {
+    const payload = await xeroJson(`${INVOICES_URL}/${encodeURIComponent(invoiceId)}`, token, {}, usageClient);
+    const invoice = Array.isArray(payload.Invoices) ? payload.Invoices[0] : null;
+    if (!invoice || String(invoice.InvoiceID || '') !== invoiceId || !Array.isArray(invoice.LineItems)) {
+      throw new Error(`Xero did not return complete detail for invoice ${invoiceId}`);
+    }
+    result.push(invoice);
   }
   return result;
 }

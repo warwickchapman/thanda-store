@@ -11,8 +11,10 @@ const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const ACCOUNTING_URL = 'https://api.xero.com/api.xro/2.0';
 const INITIAL_WINDOW_DAYS = 365;
 const REQUEST_INTERVAL_MS = 1_500;
-const INVOICE_BATCH_SIZE = 20;
-const MAX_INVOICE_EVENTS_PER_RUN = 100;
+// Xero's collection endpoint has no InvoiceIDs batch parameter. Each queued
+// invoice must be fetched by its canonical resource URL, so cap the worker
+// tightly rather than risking the daily tenant allowance on a burst.
+const MAX_INVOICE_EVENTS_PER_RUN = 20;
 const MAX_CONTACT_EVENTS_PER_RUN = 10;
 const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 let lastRequestAt = 0;
@@ -190,15 +192,16 @@ async function main() {
       `, [token.tenant_id, MAX_INVOICE_EVENTS_PER_RUN]);
       const eventsByInvoice = new Map();
       for (const event of invoiceEvents.rows) eventsByInvoice.set(String(event.resource_id), [...(eventsByInvoice.get(String(event.resource_id)) || []), Number(event.id)]);
-      for (const invoiceIds of Array.from(eventsByInvoice.keys()).reduce((batches, id, index) => {
-        if (index % INVOICE_BATCH_SIZE === 0) batches.push([]);
-        batches.at(-1).push(id);
-        return batches;
-      }, [])) {
-        const eventIds = invoiceIds.flatMap((id) => eventsByInvoice.get(id) || []);
+      for (const invoiceId of eventsByInvoice.keys()) {
+        const eventIds = eventsByInvoice.get(invoiceId) || [];
         try {
-          const payload = await xeroJson(client, token, `/Invoices?${new URLSearchParams({ InvoiceIDs: invoiceIds.join(',') })}`);
-          for (const invoice of payload.Invoices || []) { await cacheInvoice(client, invoice, stats); stats.invoices += 1; }
+          const payload = await xeroJson(client, token, `/Invoices/${encodeURIComponent(invoiceId)}`);
+          const invoice = payload.Invoices?.[0];
+          if (!invoice || String(invoice.InvoiceID || '') !== invoiceId || !Array.isArray(invoice.LineItems)) {
+            throw new Error(`Xero did not return complete detail for invoice ${invoiceId}`);
+          }
+          await cacheInvoice(client, invoice, stats);
+          stats.invoices += 1;
           await markProcessed(client, eventIds);
         } catch (error) {
           if (error?.code === 'XERO_DAILY_LIMIT') throw error;
