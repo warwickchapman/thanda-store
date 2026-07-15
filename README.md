@@ -193,6 +193,8 @@ Victron Warehouse ZA: n in stock (3-5 working days)
 
 When Victron ZA stock is zero, the portal displays `Victron Warehouse ZA: Out of stock / not available` and does not promise a lead time. The current E-Order product response exposes warehouse quantities but does not provide a reliable inbound-shipment ETA, so the portal must not infer one from the E-Order web interface.
 
+Supplier-backed items with zero supplier stock and no KZN stock also show a diagonal red `Not available` card ribbon. The ribbon is suppressed when Thanda has KZN stock, because that item remains available immediately.
+
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
 
 ## Product image thumbnails

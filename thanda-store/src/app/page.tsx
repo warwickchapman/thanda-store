@@ -106,6 +106,14 @@ function primaryStockBadge(product: Product) {
   return product.supplier === 'renogy' ? '4-7 days' : product.supplier === 'victron' ? '3-5 days' : 'Check stock';
 }
 
+function isUnavailable(product: Product) {
+  const supplier = product.supplier.toLowerCase();
+  if (!['renogy', 'victron'].includes(supplier)) return false;
+  const localStock = numberDetail(product.details.localStockOnHand);
+  const supplierStock = Number(product.stock_on_hand);
+  return (localStock === null || localStock <= 0) && Number.isFinite(supplierStock) && supplierStock <= 0;
+}
+
 function ProductImage({ product }: { product: Product }) {
   const [imageIndex, setImageIndex] = useState(0);
   const sources = [product.thumbnail_url, product.image_url].filter(Boolean);
@@ -430,6 +438,11 @@ export default function Home() {
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
                         <ProductImage product={product} />
+                        {isUnavailable(product) && (
+                          <span className="pointer-events-none absolute -right-10 top-7 w-40 rotate-45 bg-red-700 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-sm">
+                            Not available
+                          </span>
+                        )}
                         
                         {/* Category Badge - Subtle Glassmorphism */}
                         <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
