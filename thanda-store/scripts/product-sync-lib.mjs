@@ -47,6 +47,17 @@ export async function ensureProductSchema(client) {
   await client.query('ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key');
   await client.query('CREATE UNIQUE INDEX IF NOT EXISTS products_supplier_sku_key ON products (supplier, sku)');
   await client.query('CREATE INDEX IF NOT EXISTS products_supplier_item_id_idx ON products (supplier, supplier_item_id)');
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS victron_sku_successions (
+      predecessor_sku TEXT PRIMARY KEY,
+      successor_sku TEXT NOT NULL,
+      source_description TEXT NOT NULL,
+      first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (predecessor_sku <> successor_sku)
+    )
+  `);
+  await client.query('CREATE INDEX IF NOT EXISTS victron_sku_successions_successor_idx ON victron_sku_successions (successor_sku)');
 }
 
 export async function upsertProduct(client, product) {

@@ -129,6 +129,13 @@ function selectImageUrl(product) {
   return normalizeText(mainImage || productData.image || '');
 }
 
+function successorSkuFromDescription(description) {
+  // Victron marks a replacement explicitly as: "If 0, order <SKU>". Do not
+  // infer a succession from any other free-form product-description wording.
+  const match = String(description || '').match(/\bif\s+0\s*,?\s*order\s+([A-Z0-9-]+)\b/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
 function buildProduct(product, extendedProduct) {
   const richProduct = extendedProduct || product;
   const productData = richProduct.product_data || {};
@@ -139,6 +146,7 @@ function buildProduct(product, extendedProduct) {
     : apiRecommendedRetailExVat;
   const category = normalizeText(product.category || product.subcategory || productData.category, 'uncategorized');
   const name = normalizeText(product.description || productData.name, product.sku);
+  const successorSku = successorSkuFromDescription(name);
   const imageUrl = selectImageUrl(richProduct);
   const is120vAc = /(^|[^0-9])120V([^0-9]|$)/i.test(name);
   const hidden = category.toLowerCase() === 'solar home system';
@@ -154,7 +162,8 @@ function buildProduct(product, extendedProduct) {
     distributorPriceExVat: accountPrice,
     currency: product.currency || 'ZAR',
     gtin13: product.gtin13 || null,
-    replacementSku: product.replacement_sku || null,
+    replacementSku: successorSku,
+    apiReplacementSku: product.replacement_sku || null,
     subcategory: product.subcategory || null,
     categoryId: product.category_id || null,
     subcategoryId: product.subcategory_id || null,
@@ -193,6 +202,23 @@ function buildProduct(product, extendedProduct) {
   };
 }
 
+async function upsertSkuSuccession(client, product) {
+  const predecessorSku = String(product.sku || '').trim().toUpperCase();
+  const sourceDescription = normalizeText(product.description || product.product_data?.name);
+  const successorSku = successorSkuFromDescription(sourceDescription);
+  if (!predecessorSku || !successorSku || predecessorSku === successorSku) return false;
+
+  await client.query(`
+    INSERT INTO victron_sku_successions (predecessor_sku, successor_sku, source_description)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (predecessor_sku) DO UPDATE SET
+      successor_sku = EXCLUDED.successor_sku,
+      source_description = EXCLUDED.source_description,
+      last_seen_at = NOW()
+  `, [predecessorSku, successorSku, sourceDescription]);
+  return true;
+}
+
 async function main() {
   if (skipIfRateLimited()) return;
 
@@ -221,6 +247,7 @@ async function main() {
     apiProducts: products.length,
     matched: allowedProducts.length,
     synced: 0,
+    skuSuccessions: 0,
     missingFromApi: [],
     missingImagesAfterExtended: [],
     failed: [],
@@ -238,6 +265,7 @@ async function main() {
       try {
         const normalized = buildProduct(product, extendedBySku.get(sku));
         await upsertProduct(client, normalized);
+        if (await upsertSkuSuccession(client, product)) stats.skuSuccessions += 1;
         stats.synced += 1;
         if (FETCH_EXTENDED && !normalized.image_url) stats.missingImagesAfterExtended.push(sku);
       } catch (error) {

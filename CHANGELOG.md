@@ -7,6 +7,7 @@ All notable production-facing changes are recorded here. This project does not y
 ### Changed
 
 - Raised the red `Not available` ribbon above product stock/category badges and disabled ordering for items with no KZN or supplier stock. The cart API now enforces the same rule.
+- Victron `If 0, order <SKU>` description markers now link predecessor and successor SKUs for Home ranking while preserving the card and Xero quote SKU that is actually ordered.
 
 ### Added
 

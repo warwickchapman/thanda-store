@@ -236,6 +236,8 @@ Use `--force` only after deliberately changing a source image or thumbnail setti
 
 Home is the first catalogue tab. **My favourites** ranks current visible catalogue SKUs from the linked Xero contact's authorised/paid sales invoices in the last 12 months. Repeat order count dominates, with a small 90/180-day recency boost. **Popular** is a simple global ranking by total units sold, so bulk sales are allowed to influence it.
 
+Victron description markers in the exact form `If 0, order <SKU>` create a local SKU-succession relationship. The old SKU remains its own card and quote item while it has stock. Invoice history for the successor is combined into that old product family's Home ranking; if the old product is no longer orderable, Home selects an orderable successor instead. This affects ranking only: cart and Xero quotes always retain the product card's actual SKU.
+
 Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read and again immediately before Xero quote creation.
 
 **Quote me!** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
