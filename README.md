@@ -238,6 +238,8 @@ Home is the first catalogue tab. **My favourites** ranks current visible catalog
 
 Victron description markers in the exact form `If 0, order <SKU>` create a local SKU-succession relationship. The old SKU remains its own card and quote item while it has stock. The named successor is a deliberate exception to the quarterly PDF allow-list and is synchronised as a current catalogue product. Invoice history for all family members is combined into one Home ranking, which selects the newest orderable SKU. Cart and Xero quotes always retain the product card's actual SKU.
 
+When a successor has no own supplier image or generated thumbnail, its card temporarily uses the predecessor's image or thumbnail. The fallback is evaluated on every catalogue read: as soon as the successor receives its own supplier image or local thumbnail, the predecessor image is no longer used. This avoids blank cards without retaining a copied image as permanent successor data.
+
 Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read and again immediately before Xero quote creation.
 
 **Quote me!** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.

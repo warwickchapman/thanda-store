@@ -11,6 +11,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Fixed Home favourites ranking after the SKU-succession change by normalizing PostgreSQL invoice dates before sorting.
 - Explicit Victron replacement SKUs are now included in the catalogue even when omitted from the quarterly price-list allow-list, and Home prefers the newest orderable family member.
 - Split supplier scheduling: Renogy remains five-minute, while Victron's paginated catalogue sync is hourly and rate-paced to prevent repeated E-Order `429` responses.
+- Victron successor SKUs without their own supplier image now temporarily display their predecessor's image or thumbnail, automatically reverting to the successor image when it becomes available.
 
 ### Added
 
