@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
+import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 
 async function cartResponse() {
   const user = await currentUser();
@@ -40,21 +41,9 @@ export async function POST(request: NextRequest) {
     const id = Number(productId);
     const requested = validQuantity(quantity);
     if (!Number.isInteger(id) || !requested) return NextResponse.json({ error: 'A valid product and quantity are required' }, { status: 400 });
-    const productResult = await pool.query(`
-      SELECT supplier, stock_on_hand,
-        NULLIF(details->>'localStockOnHand', '')::numeric AS local_stock_on_hand
-      FROM products
-      WHERE id = $1
-        AND COALESCE((details->>'hidden')::boolean, false) = false
-    `, [id]);
-    if (!productResult.rowCount) return NextResponse.json({ error: 'Product is no longer available' }, { status: 404 });
-
-    const product = productResult.rows[0];
-    const supplier = String(product.supplier).toLowerCase();
-    const isUnavailableSupplierItem = ['renogy', 'victron'].includes(supplier)
-      && Number(product.stock_on_hand) <= 0
-      && Number(product.local_stock_on_hand ?? 0) <= 0;
-    if (isUnavailableSupplierItem) {
+    const product = await resolveFulfilmentProduct(id);
+    if (!product) return NextResponse.json({ error: 'Product is no longer available' }, { status: 404 });
+    if (!isSupplierProductAvailable(product)) {
       return NextResponse.json({ error: 'This product is currently not available to order' }, { status: 409 });
     }
     await pool.query(`
@@ -62,7 +51,7 @@ export async function POST(request: NextRequest) {
       VALUES ($1, $2, $3)
       ON CONFLICT (user_id, product_id)
       DO UPDATE SET quantity = LEAST(portal_cart_lines.quantity + EXCLUDED.quantity, 999), updated_at = NOW()
-    `, [user.id, id, requested]);
+    `, [user.id, product.id, requested]);
     return cartResponse();
   } catch (error) {
     console.error('Cart POST error:', error);

@@ -3,6 +3,7 @@ import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
+import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 
 export async function POST() {
   try {
@@ -14,15 +15,24 @@ export async function POST() {
     if (!cart.rowCount) return NextResponse.json({ error: 'Your cart is empty.' }, { status: 400 });
     const catalogue = await currentCatalogue(user.discounts);
     const products = new Map(catalogue.map((product) => [product.id, product]));
-    const lineItems = cart.rows.map((line) => {
-      const product = products.get(Number(line.product_id));
+    const resolvedQuantities = new Map<number, number>();
+    for (const line of cart.rows) {
+      const fulfilment = await resolveFulfilmentProduct(Number(line.product_id));
+      if (!fulfilment) throw new Error('A cart item is no longer available. Remove it or contact sales.');
+      if (!isSupplierProductAvailable(fulfilment)) {
+        throw new Error(`${fulfilment.sku} is currently not available to order. The cart has been kept unchanged.`);
+      }
+      resolvedQuantities.set(fulfilment.id, (resolvedQuantities.get(fulfilment.id) || 0) + Number(line.quantity));
+    }
+    const lineItems = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
+      const product = products.get(productId);
       if (!product || product.your_price_ex_vat === null || product.recommended_retail_ex_vat === null) {
         throw new Error('A cart item no longer has a current price. Remove it or contact sales.');
       }
       return {
         ...(product.details.xeroStockStatus && product.details.xeroStockStatus !== 'missing' ? { ItemCode: product.sku } : {}),
         Description: product.name,
-        Quantity: Number(line.quantity),
+        Quantity: quantity,
         UnitAmount: product.recommended_retail_ex_vat,
         DiscountRate: product.b2b_discount_percent,
       };
