@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Thanda Store Victron full catalogue sync hourly
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=1min
+RandomizedDelaySec=90s
+Persistent=true
+Unit=thanda-store-victron-sync.service
+
+[Install]
+WantedBy=timers.target

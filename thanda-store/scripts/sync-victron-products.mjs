@@ -17,6 +17,7 @@ const API_ROOT = process.env.VICTRON_EORDER_API_ROOT || 'https://eorder.victrone
 const API_KEY = process.env.VICTRON_EORDER_API_KEY;
 const REQUEST_TIMEOUT_MS = Number(process.env.VICTRON_REQUEST_TIMEOUT_MS || 20000);
 const PAGE_SIZE = Number(process.env.VICTRON_PAGE_SIZE || 250);
+const PAGE_REQUEST_DELAY_MS = Number(process.env.VICTRON_PAGE_REQUEST_DELAY_MS || 1000);
 const THANDA_DISCOUNT_FACTOR = Number(process.env.VICTRON_THANDA_DISCOUNT_FACTOR || 0.525);
 const EXTENDED_REQUEST_DELAY_MS = Number(process.env.VICTRON_EXTENDED_REQUEST_DELAY_MS || 500);
 const FETCH_EXTENDED = process.env.VICTRON_SYNC_EXTENDED === '1';
@@ -105,6 +106,7 @@ async function fetchPagedProducts(endpoint, pageSize = PAGE_SIZE) {
     const rows = Array.isArray(page) ? page : page.results || [];
     products.push(...rows);
     url = Array.isArray(page) ? '' : page.next;
+    if (url && PAGE_REQUEST_DELAY_MS > 0) await sleep(PAGE_REQUEST_DELAY_MS);
   }
   return products;
 }

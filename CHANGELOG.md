@@ -10,6 +10,7 @@ All notable production-facing changes are recorded here. This project does not y
 - Victron `If 0, order <SKU>` description markers now link predecessor and successor SKUs for Home ranking while preserving the card and Xero quote SKU that is actually ordered.
 - Fixed Home favourites ranking after the SKU-succession change by normalizing PostgreSQL invoice dates before sorting.
 - Explicit Victron replacement SKUs are now included in the catalogue even when omitted from the quarterly price-list allow-list, and Home prefers the newest orderable family member.
+- Split supplier scheduling: Renogy remains five-minute, while Victron's paginated catalogue sync is hourly and rate-paced to prevent repeated E-Order `429` responses.
 
 ### Added
 
@@ -53,6 +54,7 @@ All notable production-facing changes are recorded here. This project does not y
 ### Security
 
 - Buyer discounts are capped server-side at 40% off the list price.
+- Supplier sync credentials now belong in a root-only systemd `EnvironmentFile`, rather than service-unit definitions.
 - The fixed user/password seed command has been removed. User passwords are no longer part of the environment-based operational workflow.
 
 ### Known limitations

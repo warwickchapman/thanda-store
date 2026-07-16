@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Thanda Store Victron catalogue, prices and warehouse stock
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store-supplier.env
+ExecStart=/usr/bin/npm run sync:victron

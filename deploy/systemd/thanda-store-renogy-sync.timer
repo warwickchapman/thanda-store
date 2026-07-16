@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Thanda Store Renogy sync every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=thanda-store-renogy-sync.service
+
+[Install]
+WantedBy=timers.target

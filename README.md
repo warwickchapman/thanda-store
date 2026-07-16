@@ -59,10 +59,10 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 
 | Command | Purpose | When to run it |
 | --- | --- | --- |
-| `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | Manual troubleshooting only; `sync:all` runs it every five minutes on the VPS. |
-| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | After a new Victron allow-list, or manual troubleshooting; scheduled through `sync:all`. |
+| `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | The VPS runs it every five minutes. |
+| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | The VPS runs the full paginated E-Order read hourly. Do not add it to a five-minute job. |
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
-| `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | The VPS supplier-sync timer runs this every five minutes. |
+| `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | Manual recovery only. Production uses separate timers to protect Victron's API allowance. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
 | `npm run sync:xero-contact-access` | Full reconciliation of enabled Xero-backed users removed from their linked Xero contact. | Daily safety net only; Contact webhooks normally handle changes. |
 | `npm run sync:xero-sales-history` | Incrementally cache authorised/paid sales invoice SKU lines for Home favourites. | Daily safety net only; Invoice webhooks normally handle changes. |
@@ -334,36 +334,39 @@ The sync is intentionally warehouse-driven:
 This is more reliable than scanning hand-picked category batches. Direct testing found that all 95 warehouse SKUs resolve through SKU search, while the old category scan only found 22 products.
 The export itself contains SKU, description, available stock, in-transit quantity, and expected delivery date; it does not contain prices or image URLs.
 
-### VPS supplier schedule
+### VPS supplier schedules
 
-The production supplier timer runs both the Renogy and lightweight Victron sync every five minutes. It is already enabled on the VPS; use the following unit names and paths when inspecting or rebuilding it.
+Renogy and Victron have different API characteristics and must not share one timer:
 
-The current supplier unit keeps its credentials in root-managed systemd environment values. Do not copy those values into documentation, shell history, or source control. Moving them into a root-readable `EnvironmentFile` is a worthwhile hardening task, but must be done as a coordinated server change.
+- `thanda-store-renogy-sync.timer` runs every five minutes.
+- `thanda-store-victron-sync.timer` runs the full paginated E-Order catalogue read hourly. The sync waits one second between result pages and honours Victron `429 Retry-After` responses through `/var/lib/thanda-store/victron-rate-limit.json`.
 
-`/etc/systemd/system/thanda-store-sync.service`:
+Both services load credentials from `/etc/thanda-store-supplier.env`, owned by `root:root` with mode `0600`. Never store supplier or database credentials in unit files, documentation, shell history, or source control.
+
+`/etc/systemd/system/thanda-store-renogy-sync.service`:
 
 ```ini
 [Unit]
-Description=Sync Thanda Store products from Renogy
+Description=Sync Thanda Store Renogy catalogue and warehouse stock
 
 [Service]
 Type=oneshot
 WorkingDirectory=/root/thanda-store/thanda-store
-# Configure DATABASE_URL and supplier credentials as root-readable environment values.
-ExecStart=/usr/bin/npm run sync:all
+EnvironmentFile=/etc/thanda-store-supplier.env
+ExecStart=/usr/bin/npm run sync:renogy
 ```
 
-`/etc/systemd/system/thanda-store-sync.timer`:
+`/etc/systemd/system/thanda-store-renogy-sync.timer`:
 
 ```ini
 [Unit]
-Description=Run Thanda Store supplier sync every five minutes
+Description=Run Thanda Store Renogy sync every five minutes
 
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=5min
 AccuracySec=30s
-Unit=thanda-store-sync.service
+Unit=thanda-store-renogy-sync.service
 
 [Install]
 WantedBy=timers.target
@@ -373,12 +376,12 @@ Enable it with:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now thanda-store-sync.timer
-systemctl list-timers thanda-store-sync.timer
-journalctl -u thanda-store-sync.service -n 100 --no-pager
+sudo systemctl enable --now thanda-store-renogy-sync.timer thanda-store-victron-sync.timer
+systemctl list-timers 'thanda-store-*-sync.timer'
+journalctl -u thanda-store-victron-sync.service -n 100 --no-pager
 ```
 
-Five minutes is a reasonable starting point for supplier availability. If a supplier throttles or the run time approaches the interval, move to ten or fifteen minutes and add `last_updated` to the admin view.
+The Victron endpoint is a catalogue-wide paginated read, so a five-minute schedule repeatedly exhausts its allowance. Do not shorten the hourly timer without measuring page count and a sustained no-`429` run history.
 
 ### VPS Xero schedules and webhooks
 
@@ -492,14 +495,14 @@ cd thanda-store
 npm run sync:victron:extended
 ```
 
-For scheduled syncs, use:
+For a manual full supplier recovery, use:
 
 ```bash
 cd thanda-store
 npm run sync:all
 ```
 
-This runs Renogy and the lightweight Victron sync. A separate daily timer can run `sync:victron:extended` if product images and documents need routine refreshes.
+This runs Renogy and the lightweight Victron sync sequentially. It is not the production schedule. A separate daily timer can run `sync:victron:extended` if product images and documents need routine refreshes.
 
 ### Quarterly Victron PDF update
 
