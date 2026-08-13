@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Renogy authentication now documents the intended token-cache keepalive model: no Renogy username or password is stored on the VPS, and an expired session requires a deliberate email-OTP login.
+
 ### Changed
 
 - Corrected Renogy list-price VAT handling: the authenticated product API's `originalPrice` is already excluding VAT, while the partner portal displays it including VAT. Renogy buyer prices now apply the B2B discount directly to the Excl. VAT list price.

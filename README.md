@@ -79,8 +79,6 @@ Required environment variables:
 
 ```bash
 DATABASE_URL=postgres://user:password@localhost:5432/thanda_store
-RENOGY_EMAIL=warwick@example.com
-RENOGY_PASSWORD=...
 RENOGY_TOKEN_CACHE_FILE=/var/lib/thanda-store/renogy-token.json
 RENOGY_PRODUCT_SOURCE=export
 VICTRON_EORDER_API_KEY=...
@@ -103,7 +101,7 @@ PRODUCT_THUMBNAIL_QUALITY=80
 
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
 `RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
-`RENOGY_BEARER_TOKEN` is still supported as a bootstrap override, but production should use `RENOGY_EMAIL` and `RENOGY_PASSWORD` so the sync can refresh an expired token automatically. The refreshed token is cached in `RENOGY_TOKEN_CACHE_FILE` with file mode `0600`.
+Renogy production authentication uses the cached bearer token in `RENOGY_TOKEN_CACHE_FILE`, protected with file mode `0600`. The five-minute Renogy sync acts as the keepalive. Do not configure or store a Renogy username or password on the VPS: portal login requires an email OTP and must remain an intentional operator action. If Renogy rejects the cached token, the sync stops with a clear authentication error until an operator completes the portal login and securely replaces the cached token.
 `VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware. `XERO_WEBHOOK_KEY` is distinct from OAuth credentials and must be configured in the PM2 environment that serves Next.js, not only in the systemd worker environment.
@@ -479,7 +477,7 @@ Do not commit generated thumbnails, token files, credentials, `node_modules`, or
 
 ### Authentication
 
-The sync job authenticates directly against Renogy's portal API. On startup it uses a cached token when available, validates it with `GET /api/sc/portal/user/info`, and logs in again with `POST /api/sc/portal/user/prelogin` when the token is missing or expired. During a run, any `401` response triggers one token refresh and one retry of the failed request.
+The sync job authenticates directly against Renogy's portal API using the cached bearer token. On startup it validates the token with `GET /api/sc/portal/user/info`. The five-minute schedule keeps the session active. Renogy's current JWT-shaped token has no exposed `exp` claim, so it must be treated as a renewable session rather than a guaranteed permanent credential. A `401` is a manual intervention signal: complete the normal Renogy username/password/email-OTP login, then securely replace `RENOGY_TOKEN_CACHE_FILE`. The job must not automate or bypass the email OTP flow.
 
 The older browser-token helper scripts are for debugging only. Do not use browser token sniffing as the production refresh mechanism.
 
