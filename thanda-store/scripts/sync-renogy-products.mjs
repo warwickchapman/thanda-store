@@ -352,6 +352,10 @@ async function buildProduct(row, wrapper, detail) {
     stock_on_hand: stockOnHand,
     details: {
       originalPrice,
+      // Renogy's product-detail originalPrice is list price excluding VAT.
+      // The partner portal renders the same amount with 15% VAT included.
+      recommendedRetailExVat: originalPrice,
+      recommendedRetailPriceVatMode: 'ex_vat',
       basicPrice: numberOrNull(detail.basic_price),
       unitPrice: numberOrNull(detail.unitPrice),
       unitPriceAfterDiscount: numberOrNull(detail.unitPriceAfterDiscount),

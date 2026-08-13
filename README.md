@@ -119,7 +119,7 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 `GET /api/products` calculates buyer-facing prices from the supplier list price:
 
 - `recommended_retail_ex_vat` is the internal field name for the supplier list price normalized to excluding VAT. The storefront labels it **List Price Excl. VAT**.
-  - Renogy list price is treated as including VAT unless the sync marks it otherwise.
+  - Renogy product-detail `originalPrice` is the list price excluding VAT. The partner portal displays that value including VAT. The sync stores this explicitly as `recommendedRetailExVat` with `recommendedRetailPriceVatMode: ex_vat`; `unitPrice` remains Thanda's distributor cost and is never shown to buyers.
   - Victron South Africa list price is derived from the E-Order account price: `eorder_price / 0.525`. The PDF price list is used as the South Africa SKU allow-list, not as the pricing source. The raw Victron API retail field is kept in product details for comparison only.
 - `your_price_ex_vat` = the list price less the configured B2B discount.
 - B2B discount is capped server-side at 40%, even if environment configuration or user data asks for more.

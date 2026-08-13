@@ -6,6 +6,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Changed
 
+- Corrected Renogy list-price VAT handling: the authenticated product API's `originalPrice` is already excluding VAT, while the partner portal displays it including VAT. Renogy buyer prices now apply the B2B discount directly to the Excl. VAT list price.
 - Customer Invoice webhooks now request a debounced Xero Items refresh, so KZN stock normally updates within ten minutes instead of waiting for the 30-minute reconciliation timer. The request worker makes no Xero call when no invoice changed, cannot overlap another stock sync, and records API allowance headers.
 - Raised the red `Not available` ribbon above product stock/category badges and disabled ordering for items with no KZN or supplier stock. The cart API now enforces the same rule.
 - Victron `If 0, order <SKU>` description markers now link predecessor and successor SKUs for Home ranking while preserving each historical SKU as a separately visible card while it remains stocked.

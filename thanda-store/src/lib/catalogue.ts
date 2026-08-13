@@ -52,7 +52,7 @@ function recommendedRetailExVat(product: { supplier?: string; details?: Record<s
   if (originalPrice === null) return null;
   if (details.recommendedRetailPriceVatMode === 'ex_vat') return originalPrice;
   if (details.recommendedRetailPriceVatMode === 'incl_vat') return roundMoney(originalPrice / (1 + VAT_RATE));
-  return product.supplier === 'victron' ? originalPrice : roundMoney(originalPrice / (1 + VAT_RATE));
+  return originalPrice;
 }
 
 function configuredDiscountPercent(supplier: string, userDiscounts: Record<string, number>) {
