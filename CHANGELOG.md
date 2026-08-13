@@ -6,6 +6,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Changed
 
+- Customer Invoice webhooks now request a debounced Xero Items refresh, so KZN stock normally updates within ten minutes instead of waiting for the 30-minute reconciliation timer. The request worker makes no Xero call when no invoice changed, cannot overlap another stock sync, and records API allowance headers.
 - Raised the red `Not available` ribbon above product stock/category badges and disabled ordering for items with no KZN or supplier stock. The cart API now enforces the same rule.
 - Victron `If 0, order <SKU>` description markers now link predecessor and successor SKUs for Home ranking while preserving each historical SKU as a separately visible card while it remains stocked.
 - Victron cart and quote fulfilment now prefer a stocked older SKU in a replacement family; when no older SKU has stock, the current successor SKU is used for procurement. Quote lines resolving to the same SKU are consolidated.

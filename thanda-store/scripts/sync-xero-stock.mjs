@@ -8,6 +8,12 @@ import { createPool, ensureProductSchema } from './product-sync-lib.mjs';
 const TOKEN_URL = 'https://identity.xero.com/connect/token';
 const ITEMS_URL = 'https://api.xero.com/api.xro/2.0/Items';
 const DEFAULT_TOKEN_FILE = '/var/lib/thanda-store/xero-token.json';
+const DAILY_API_RESERVE = 150;
+
+function headerNumber(headers, name) {
+  const value = Number(headers.get(name));
+  return Number.isFinite(value) ? value : null;
+}
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -93,7 +99,7 @@ async function refreshTokenIfNeeded(config, token) {
   return { token: updated, refreshed: true };
 }
 
-async function fetchXeroItems(token) {
+async function fetchXeroItems(client, token) {
   if (!token.tenant_id) throw new Error('Xero token file does not contain tenant_id');
 
   const response = await fetch(ITEMS_URL, {
@@ -105,6 +111,7 @@ async function fetchXeroItems(token) {
   });
 
   const responseText = await response.text();
+  await recordUsage(client, response);
   let payload = {};
   try {
     payload = responseText ? JSON.parse(responseText) : {};
@@ -117,7 +124,59 @@ async function fetchXeroItems(token) {
 
   const items = Array.isArray(payload.Items) ? payload.Items : [];
   console.error(`Fetched Xero Items: ${items.length}`);
-  return items;
+  return { items };
+}
+
+async function ensureSyncState(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS xero_stock_sync_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      refresh_requested_at TIMESTAMPTZ,
+      last_started_at TIMESTAMPTZ,
+      last_completed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query('INSERT INTO xero_stock_sync_state (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS xero_api_usage (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      day_limit_remaining INTEGER,
+      minute_limit_remaining INTEGER,
+      app_minute_limit_remaining INTEGER,
+      rate_limit_problem TEXT,
+      retry_after_seconds INTEGER,
+      next_allowed_at TIMESTAMPTZ,
+      source TEXT,
+      observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query('ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ');
+}
+
+async function recordUsage(client, response) {
+  const rateLimitProblem = response.headers.get('x-rate-limit-problem');
+  const retryAfter = headerNumber(response.headers, 'retry-after');
+  await client.query(`
+    INSERT INTO xero_api_usage (id, day_limit_remaining, minute_limit_remaining, app_minute_limit_remaining, rate_limit_problem, retry_after_seconds, next_allowed_at, source, observed_at)
+    VALUES (true, $1, $2, $3, $4, $5, $6, 'stock-sync', NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      day_limit_remaining = EXCLUDED.day_limit_remaining,
+      minute_limit_remaining = EXCLUDED.minute_limit_remaining,
+      app_minute_limit_remaining = EXCLUDED.app_minute_limit_remaining,
+      rate_limit_problem = EXCLUDED.rate_limit_problem,
+      retry_after_seconds = EXCLUDED.retry_after_seconds,
+      next_allowed_at = EXCLUDED.next_allowed_at,
+      source = EXCLUDED.source,
+      observed_at = EXCLUDED.observed_at
+  `, [
+    headerNumber(response.headers, 'x-daylimit-remaining'),
+    headerNumber(response.headers, 'x-minlimit-remaining'),
+    headerNumber(response.headers, 'x-appminlimit-remaining'),
+    rateLimitProblem,
+    retryAfter,
+    rateLimitProblem === 'day' && retryAfter ? new Date(Date.now() + retryAfter * 1_000).toISOString() : null,
+  ]);
 }
 
 async function targetProducts(client) {
@@ -193,23 +252,15 @@ async function updateLocalStock(client, product, localStock, xeroItem) {
 }
 
 async function main() {
+  const requestedOnly = process.argv.includes('--if-requested');
   const config = xeroConfig();
-  let token = await readToken(config.tokenFile);
-  const refreshResult = await refreshTokenIfNeeded(config, token);
-  token = refreshResult.token;
-
-  const xeroItems = await fetchXeroItems(token);
-  const xeroItemsBySku = new Map();
-  for (const item of xeroItems) {
-    const sku = normalizeSku(item.Code);
-    if (sku) xeroItemsBySku.set(sku, item);
-  }
-
   const pool = createPool();
   const client = await pool.connect();
+  let locked = false;
   const stats = {
-    refreshedToken: refreshResult.refreshed,
-    xeroItems: xeroItems.length,
+    requestedOnly,
+    refreshedToken: false,
+    xeroItems: 0,
     targetProducts: 0,
     matched: 0,
     tracked: 0,
@@ -219,6 +270,44 @@ async function main() {
   };
 
   try {
+    await ensureSyncState(client);
+    const lock = await client.query('SELECT pg_try_advisory_lock(742033) AS locked');
+    locked = Boolean(lock.rows[0]?.locked);
+    if (!locked) {
+      console.log('Another Xero local-stock sync is already running.');
+      return;
+    }
+    const state = await client.query('SELECT refresh_requested_at FROM xero_stock_sync_state WHERE id = true');
+    if (requestedOnly && !state.rows[0]?.refresh_requested_at) {
+      console.log('No invoice-triggered local-stock refresh is pending.');
+      return;
+    }
+    const allowance = await client.query('SELECT day_limit_remaining, next_allowed_at FROM xero_api_usage WHERE id = true');
+    const nextAllowedAt = Date.parse(allowance.rows[0]?.next_allowed_at || '');
+    if (Number.isFinite(nextAllowedAt) && nextAllowedAt > Date.now()) {
+      console.log(`Xero local-stock sync paused until ${new Date(nextAllowedAt).toISOString()} after a daily rate limit response.`);
+      return;
+    }
+    const dayLimitRemaining = Number(allowance.rows[0]?.day_limit_remaining);
+    if (Number.isFinite(dayLimitRemaining) && dayLimitRemaining <= DAILY_API_RESERVE) {
+      console.log(`Xero local-stock sync paused to retain the ${DAILY_API_RESERVE}-call daily reserve.`);
+      return;
+    }
+
+    await client.query('UPDATE xero_stock_sync_state SET last_started_at = NOW(), updated_at = NOW() WHERE id = true');
+    let token = await readToken(config.tokenFile);
+    const refreshResult = await refreshTokenIfNeeded(config, token);
+    token = refreshResult.token;
+    stats.refreshedToken = refreshResult.refreshed;
+    const fetched = await fetchXeroItems(client, token);
+    const xeroItems = fetched.items;
+    stats.xeroItems = xeroItems.length;
+    const xeroItemsBySku = new Map();
+    for (const item of xeroItems) {
+      const sku = normalizeSku(item.Code);
+      if (sku) xeroItemsBySku.set(sku, item);
+    }
+
     await ensureProductSchema(client);
     const products = await targetProducts(client);
     stats.targetProducts = products.length;
@@ -242,7 +331,9 @@ async function main() {
       await updateLocalStock(client, product, quantityOnHand(xeroItem), xeroItem);
       stats.updated += 1;
     }
+    await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NULL, last_completed_at = NOW(), updated_at = NOW() WHERE id = true');
   } finally {
+    if (locked) await client.query('SELECT pg_advisory_unlock(742033)');
     client.release();
     await pool.end();
   }

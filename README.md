@@ -64,6 +64,7 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | Manual recovery only. Production uses separate timers to protect Victron's API allowance. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
+| `npm run sync:xero-stock -- --if-requested` | Refresh local/KZN stock only when an Invoice webhook requested it. | VPS runs it every five minutes; it makes no Xero request when no request is pending. |
 | `npm run sync:xero-contact-access` | Full reconciliation of enabled Xero-backed users removed from their linked Xero contact. | Daily safety net only; Contact webhooks normally handle changes. |
 | `npm run sync:xero-sales-history` | Incrementally cache authorised/paid sales invoice SKU lines for Home favourites. | Daily safety net only; Invoice webhooks normally handle changes. |
 | `npm run sync:xero-webhooks` | Process queued Xero Invoice/Contact webhook events. | VPS runs it every five minutes. It exits without a Xero call when the queue is empty. |
@@ -389,9 +390,9 @@ The Victron endpoint is a catalogue-wide paginated read, so a five-minute schedu
 
 ### VPS Xero schedules and webhooks
 
-Xero **Invoice CREATE/UPDATE** and **Contact CREATE/UPDATE** webhooks are the normal update path. `POST /api/xero/webhooks` HMAC-verifies the `x-xero-signature`, deduplicates events into `xero_webhook_events`, and immediately returns. The systemd webhook worker runs every five minutes, fetches only changed records, caps invoice work at 20 exact invoice-resource requests per run, and updates the derived invoice-history cache or linked-contact access. The worker does no Xero work when its queue is empty.
+Xero **Invoice CREATE/UPDATE** and **Contact CREATE/UPDATE** webhooks are the normal update path. `POST /api/xero/webhooks` HMAC-verifies the `x-xero-signature`, deduplicates events into `xero_webhook_events`, and immediately returns. The systemd webhook worker runs every five minutes, fetches only changed records, caps invoice work at 20 exact invoice-resource requests per run, and updates the derived invoice-history cache or linked-contact access. A processed customer-invoice event also writes a durable request for local stock refresh. The worker does no Xero work when its queue is empty.
 
-The sales-history and contact-access timers now run once per day as recovery reconciliation. They use cached state and `If-Modified-Since` for invoice history; they are not the normal freshness mechanism. Xero Items are not available as a webhook category, so the separate Xero local-stock timer continues every 30 minutes.
+The sales-history and contact-access timers now run once per day as recovery reconciliation. They use cached state and `If-Modified-Since` for invoice history; they are not the normal freshness mechanism. Xero Items are not available as a webhook category, so local stock has two bounded paths: the invoice-triggered five-minute worker makes one full Xero Items request only when a customer invoice has changed, while the separate 30-minute timer remains the safety net for stock adjustments and other non-invoice changes. Both use a shared advisory lock and record the Xero allowance headers.
 
 #### Configure the Xero webhook
 
@@ -406,6 +407,7 @@ The endpoint returns `401` for an invalid signature and `503` if the queue/datab
 
 ```bash
 systemctl list-timers thanda-store-xero-stock.timer
+systemctl list-timers thanda-store-xero-stock-webhook.timer
 systemctl list-timers thanda-store-xero-webhooks.timer
 systemctl list-timers thanda-store-xero-contact-access.timer
 systemctl list-timers thanda-store-xero-sales-history.timer
@@ -416,17 +418,23 @@ systemctl start thanda-store-xero-contact-access.service
 systemctl start thanda-store-xero-sales-history.service
 ```
 
-The tracked unit templates are in `deploy/systemd/`. Install the webhook worker and daily reconciliation timers with:
+The tracked unit templates are in `deploy/systemd/`. Install the stock, webhook, and daily reconciliation timers with:
 
 ```bash
 sudo install -m 0644 deploy/systemd/thanda-store-xero-webhooks.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-webhooks.timer /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-stock.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-stock.timer /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-stock-webhook.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-stock-webhook.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now thanda-store-xero-webhooks.timer
+sudo systemctl enable --now thanda-store-xero-stock.timer
+sudo systemctl enable --now thanda-store-xero-stock-webhook.timer
 sudo systemctl enable --now thanda-store-xero-contact-access.timer
 sudo systemctl enable --now thanda-store-xero-sales-history.timer
 ```
@@ -439,8 +447,9 @@ Production is hosted at `https://oc.sensible.co.za`.
 - **Next.js working directory:** `/root/thanda-store/thanda-store`
 - **Process manager:** PM2 process `thanda-store` (currently process id `0`)
 - **Reverse proxy and TLS:** Nginx with the Certbot-managed `oc.sensible.co.za` certificate
-- **Supplier timer:** `thanda-store-sync.timer`, every five minutes
+- **Supplier timers:** `thanda-store-renogy-sync.timer`, every five minutes; `thanda-store-victron-sync.timer`, hourly
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
+- **Xero invoice-stock timer:** `thanda-store-xero-stock-webhook.timer`, every five minutes and no external call when no invoice refresh is pending
 - **Xero webhook worker:** `thanda-store-xero-webhooks.timer`, every five minutes, zero external calls when idle
 - **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, daily reconciliation
 - **Xero sales-history timer:** `thanda-store-xero-sales-history.timer`, daily reconciliation after Xero invoice consent
