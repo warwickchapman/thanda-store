@@ -152,6 +152,58 @@ export async function ensureAuthSchema() {
     )
   `);
 
+  // Inbound supplier receipts are an operational audit trail. Xero remains the
+  // source of truth for sellable KZN stock; receiving a delivery only asks the
+  // existing Xero stock job to reconcile the catalogue after Xero is updated.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_inbound_orders (
+      id BIGSERIAL PRIMARY KEY,
+      supplier TEXT NOT NULL CHECK (supplier = 'victron'),
+      supplier_order_number TEXT NOT NULL,
+      customer_purchase_order TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'received')),
+      created_by_user_id BIGINT NOT NULL REFERENCES portal_users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      received_at TIMESTAMPTZ,
+      UNIQUE (supplier, supplier_order_number)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_inbound_order_lines (
+      id BIGSERIAL PRIMARY KEY,
+      inbound_order_id BIGINT NOT NULL REFERENCES supplier_inbound_orders(id) ON DELETE CASCADE,
+      sku TEXT NOT NULL,
+      description TEXT NOT NULL,
+      ordered_quantity INTEGER NOT NULL CHECK (ordered_quantity > 0),
+      received_quantity INTEGER NOT NULL DEFAULT 0 CHECK (received_quantity >= 0 AND received_quantity <= ordered_quantity),
+      is_stock_item BOOLEAN NOT NULL DEFAULT true,
+      received_at TIMESTAMPTZ,
+      received_by_user_id BIGINT REFERENCES portal_users(id),
+      UNIQUE (inbound_order_id, sku)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_inbound_order_documents (
+      id BIGSERIAL PRIMARY KEY,
+      inbound_order_id BIGINT NOT NULL REFERENCES supplier_inbound_orders(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      content_type TEXT NOT NULL CHECK (content_type = 'application/pdf'),
+      content BYTEA NOT NULL,
+      sha256 TEXT NOT NULL,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (inbound_order_id, sha256)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_stock_sync_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      refresh_requested_at TIMESTAMPTZ,
+      last_started_at TIMESTAMPTZ,
+      last_completed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)');
@@ -161,4 +213,6 @@ export async function ensureAuthSchema() {
   await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS xero_webhook_events_pending_idx ON xero_webhook_events (received_at) WHERE processed_at IS NULL');
+  await pool.query('CREATE INDEX IF NOT EXISTS supplier_inbound_orders_status_idx ON supplier_inbound_orders (supplier, status, created_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS supplier_inbound_order_lines_order_idx ON supplier_inbound_order_lines (inbound_order_id)');
 }

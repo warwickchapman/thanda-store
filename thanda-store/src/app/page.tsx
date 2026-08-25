@@ -314,10 +314,16 @@ export default function Home() {
                 </div>
               )}
               {sessionUser?.role === 'admin' && (
-                <a href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
-                  <Info className="h-4 w-4" />
-                  Admin
-                </a>
+                <>
+                  <a href="/admin/replenishment" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                    <Package className="h-4 w-4" />
+                    Inventory
+                  </a>
+                  <a href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                    <Info className="h-4 w-4" />
+                    Admin
+                  </a>
+                </>
               )}
               <button onClick={() => setCartOpen(true)} className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
                 <ShoppingCart className="h-4 w-4" />
