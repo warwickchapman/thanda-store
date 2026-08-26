@@ -11,7 +11,7 @@ export default function VictronStockMinimaPage() {
   const [items, setItems] = useState<EditableItem[]>([]);
   const [saved, setSaved] = useState<Map<string, number>>(new Map());
   const [query, setQuery] = useState('');
-  const [showConfiguredOnly, setShowConfiguredOnly] = useState(false);
+  const [showConfiguredOnly, setShowConfiguredOnly] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
