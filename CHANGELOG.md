@@ -18,6 +18,7 @@ All notable production-facing changes are recorded here. This project does not y
 - A provisional Victron cart SKU ending in `R` now fulfils the corresponding non-`R` replenishment SKU, reflecting its retail-packaging-only distinction.
 - Replenishment now identifies rows whose demand includes historic sales under predecessor SKUs. Victron SKU succession remains the single source of truth for this grouping, with a regression test for `PMP482305010 → PMP482305012`.
 - Administrators can add a previously unknown Victron predecessor SKU from the matching successor's replenishment row, without overwriting an existing conflicting relationship.
+- The optional `+ Details` action is now hidden until its replenishment row is hovered or keyboard-focused, matching `+ Note` and reducing visual noise.
 - Provisional-cart matching now prefers an exact SKU before applying the `R` packaging fallback, so an exact retail SKU is not incorrectly reported as unmatched.
 - A cart HTML upload now imports any previously unknown SKU directly from Victron E-Order before using that line in the replenishment audit.
 - Corrected Renogy list-price VAT handling: the authenticated product API's `originalPrice` is already excluding VAT, while the partner portal displays it including VAT. Renogy buyer prices now apply the B2B discount directly to the Excl. VAT list price.
