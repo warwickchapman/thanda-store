@@ -87,6 +87,9 @@ export async function GET() {
       groups.set(family, group);
       return group;
     };
+    // Prefer an exact cart SKU. Only use the retail-packaging fallback when
+    // that exact SKU is absent from the local catalogue.
+    const provisionalTargetSku = (sku: string) => groupFor(sku).products.length ? sku : replenishmentSkuForCart(sku);
     for (const product of products.rows) groupFor(product.sku).products.push(product);
     for (const row of sales.rows) {
       const group = groupFor(row.sku);
@@ -95,7 +98,7 @@ export async function GET() {
       if (!group.lastSoldAt || (row.last_sold_at && row.last_sold_at > group.lastSoldAt)) group.lastSoldAt = row.last_sold_at;
     }
     for (const row of inbound.rows) groupFor(row.sku).inbound += Number(row.quantity) || 0;
-    for (const row of provisional.rows) groupFor(replenishmentSkuForCart(row.sku)).provisional += Number(row.quantity) || 0;
+    for (const row of provisional.rows) groupFor(provisionalTargetSku(row.sku)).provisional += Number(row.quantity) || 0;
     for (const row of minimums.rows) {
       const group = groupFor(row.sku);
       // A replacement family should carry one floor, not accumulate stock for
@@ -135,7 +138,7 @@ export async function GET() {
       provisionalCart: {
         lineCount: provisional.rows.length,
         uploadedAt: provisional.rows[0]?.uploaded_at || null,
-        unmatchedLines: provisional.rows.filter((row) => groupFor(replenishmentSkuForCart(row.sku)).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
+        unmatchedLines: provisional.rows.filter((row) => groupFor(provisionalTargetSku(row.sku)).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
       },
       policy: { salesWindows: SALES_WINDOWS, leadTimeDays: LEAD_TIME_DAYS, safetyStockDays: SAFETY_STOCK_DAYS, targetCoverDays: TARGET_COVER_DAYS },
     });
