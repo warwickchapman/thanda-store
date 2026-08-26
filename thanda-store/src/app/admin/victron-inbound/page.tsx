@@ -24,6 +24,7 @@ export default function VictronInboundPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [receivingLine, setReceivingLine] = useState<number | null>(null);
+  const [receivingOrder, setReceivingOrder] = useState<number | null>(null);
 
   async function loadOrders() {
     const response = await fetch('/api/admin/victron-inbound', { cache: 'no-store' });
@@ -88,6 +89,20 @@ export default function VictronInboundPage() {
     finally { setReceivingLine(null); }
   }
 
+  async function receiveAll(order: InboundOrder) {
+    const outstanding = order.lines.filter((line) => line.receivedQuantity < line.orderedQuantity).length;
+    if (!window.confirm(`Confirm receipt of all ${outstanding} outstanding line${outstanding === 1 ? '' : 's'} on Victron order ${order.supplier_order_number}? This records each remaining quantity as received and cannot be undone.`)) return;
+    setReceivingOrder(order.id); setError(''); setMessage('');
+    try {
+      const response = await fetch('/api/admin/victron-inbound', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, receiveAll: true }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to record full receipt.');
+      setMessage('All items were received. The next Xero stock reconciliation has been requested.');
+      await loadOrders();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to record full receipt.'); }
+    finally { setReceivingOrder(null); }
+  }
+
   return <main className="min-h-screen bg-zinc-50 text-zinc-950">
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col justify-between gap-3 border-b border-zinc-200 pb-4 sm:flex-row sm:items-end">
@@ -119,8 +134,8 @@ export default function VictronInboundPage() {
       </section>
 
       <section><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Expected and received</h2><p className="text-sm text-zinc-500">Confirm a line only after counting the physical item. Promotional material is kept for reference but does not affect stock receipt completion.</p></div><button type="button" onClick={() => void loadOrders().catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to refresh.'))} className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold"><RefreshCw className="h-4 w-4" />Refresh</button></div>
-        <div className="grid gap-4">{orders.map((order) => <article key={order.id} className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm"><div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row"><div><h3 className="font-bold">Victron order {order.supplier_order_number}</h3><p className="text-sm text-zinc-500">{order.customer_purchase_order ? `PO ${order.customer_purchase_order} · ` : ''}Created {new Date(order.created_at).toLocaleDateString()}</p>{order.documents.length > 0 && <p className="mt-1 text-xs text-zinc-500">Invoices: {order.documents.map((document, index) => <span key={document.id}>{index > 0 && ', '}<a href={`/api/admin/victron-inbound/documents/${document.id}`} target="_blank" rel="noreferrer" className="font-semibold text-zinc-700 underline">{document.filename}</a></span>)}</p>}</div><span className={`inline-flex h-6 items-center self-start rounded-full px-2 text-xs font-bold ${order.status === 'received' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>{order.status === 'received' ? 'Received' : 'Awaiting receipt'}</span></div>
-          <div className="divide-y divide-zinc-100 border-t border-zinc-100">{order.lines.map((line) => <div key={line.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{line.sku} <span className="font-normal text-zinc-600">· {line.description}</span></p><p className="text-sm text-zinc-500">{line.receivedQuantity}/{line.orderedQuantity} received {line.isStockItem ? '' : '· promotional/reference item'}</p></div>{line.receivedQuantity >= line.orderedQuantity ? <span className="text-sm font-semibold text-green-700">Received</span> : <button type="button" onClick={() => void receiveLine(line.id)} disabled={receivingLine === line.id} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60"><PackageCheck className="h-4 w-4" />{receivingLine === line.id ? 'Recording' : 'Confirm received'}</button>}</div>)}</div>
+        <div className="grid gap-4">{orders.map((order) => <article key={order.id} className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm"><div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row"><div><h3 className="font-bold">Victron order {order.supplier_order_number}</h3><p className="text-sm text-zinc-500">{order.customer_purchase_order ? `PO ${order.customer_purchase_order} · ` : ''}Created {new Date(order.created_at).toLocaleDateString()}</p>{order.documents.length > 0 && <p className="mt-1 text-xs text-zinc-500">Invoices: {order.documents.map((document, index) => <span key={document.id}>{index > 0 && ', '}<a href={`/api/admin/victron-inbound/documents/${document.id}`} target="_blank" rel="noreferrer" className="font-semibold text-zinc-700 underline">{document.filename}</a></span>)}</p>}</div><div className="flex flex-wrap items-center gap-2"><span className={`inline-flex h-6 rounded-full px-2 text-xs font-bold ${order.status === 'received' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>{order.status === 'received' ? 'Received' : 'Awaiting receipt'}</span>{order.status === 'open' && <button type="button" onClick={() => void receiveAll(order)} disabled={receivingOrder === order.id || receivingLine !== null} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60"><PackageCheck className="h-4 w-4" />{receivingOrder === order.id ? 'Recording all' : 'Receive all items'}</button>}</div></div>
+          <div className="divide-y divide-zinc-100 border-t border-zinc-100">{order.lines.map((line) => <div key={line.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{line.sku} <span className="font-normal text-zinc-600">· {line.description}</span></p><p className="text-sm text-zinc-500">{line.receivedQuantity}/{line.orderedQuantity} received {line.isStockItem ? '' : '· promotional/reference item'}</p></div>{line.receivedQuantity >= line.orderedQuantity ? <span className="text-sm font-semibold text-green-700">Received</span> : <button type="button" onClick={() => void receiveLine(line.id)} disabled={receivingLine === line.id || receivingOrder !== null} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60"><PackageCheck className="h-4 w-4" />{receivingLine === line.id ? 'Recording' : 'Confirm received'}</button>}</div>)}</div>
         </article>)}{!orders.length && <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">No Victron inbound orders have been prepared yet.</div>}</div>
       </section>
     </div>

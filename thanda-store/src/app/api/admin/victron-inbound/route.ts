@@ -103,6 +103,36 @@ export async function PATCH(request: Request) {
   if (!user) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   const body = await request.json();
+  const orderId = Number(body.orderId);
+  if (body.receiveAll === true) {
+    if (!Number.isInteger(orderId)) return NextResponse.json({ error: 'A valid inbound order is required.' }, { status: 400 });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await client.query(`
+        SELECT id, status FROM supplier_inbound_orders
+        WHERE id = $1 AND supplier = 'victron' FOR UPDATE
+      `, [orderId]);
+      const row = order.rows[0];
+      if (!row) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Inbound order not found.' }, { status: 404 }); }
+      if (row.status === 'received') { await client.query('COMMIT'); return NextResponse.json({ ok: true, unchanged: true, complete: true }); }
+      const received = await client.query(`
+        UPDATE supplier_inbound_order_lines
+        SET received_quantity = ordered_quantity, received_at = NOW(), received_by_user_id = $2
+        WHERE inbound_order_id = $1 AND received_quantity < ordered_quantity
+        RETURNING is_stock_item
+      `, [orderId, user.id]);
+      await client.query(`UPDATE supplier_inbound_orders SET status = 'received', received_at = NOW() WHERE id = $1`, [orderId]);
+      if (received.rows.some((line) => line.is_stock_item)) await client.query(`
+        INSERT INTO xero_stock_sync_state (id, refresh_requested_at, updated_at)
+        VALUES (true, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET refresh_requested_at = NOW(), updated_at = NOW()
+      `);
+      await client.query('COMMIT');
+      return NextResponse.json({ ok: true, complete: true, receivedLines: received.rowCount || 0 });
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
   const lineId = Number(body.lineId);
   if (!Number.isInteger(lineId)) return NextResponse.json({ error: 'A valid receipt line is required.' }, { status: 400 });
   const client = await pool.connect();
