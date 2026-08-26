@@ -94,7 +94,7 @@ export default function VictronInboundPage() {
         <div><h1 className="text-2xl font-bold">Victron inbound stock</h1><p className="text-sm text-zinc-500">Prepare expected deliveries, retain their invoices, and record physical receipt.</p></div>
         <Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link>
       </div>
-      <nav className="mb-6 flex gap-1 border-b border-zinc-200" aria-label="Inventory planning"><Link href="/admin/replenishment" className="px-4 py-2 text-sm font-semibold text-zinc-600 hover:text-zinc-950">Replenishment</Link><span className="border-b-2 border-zinc-950 px-4 py-2 text-sm font-bold">Inbound deliveries</span></nav>
+      <nav className="mb-6 flex gap-1 border-b border-zinc-200" aria-label="Inventory planning"><Link href="/admin/replenishment" className="px-4 py-2 text-sm font-semibold text-zinc-600 hover:text-zinc-950">Replenishment</Link><span className="border-b-2 border-zinc-950 px-4 py-2 text-sm font-bold">Inbound deliveries</span><Link href="/admin/victron-stock-minima" className="px-4 py-2 text-sm font-semibold text-zinc-600 hover:text-zinc-950">Stock minima</Link></nav>
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
 

@@ -1,4 +1,5 @@
 import pool from '@/lib/db';
+import { INITIAL_VICTRON_STOCK_MINIMA } from '@/lib/victron-stock-minima';
 
 export async function ensureAuthSchema() {
   await pool.query(`
@@ -203,6 +204,22 @@ export async function ensureAuthSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_stock_minima (
+      sku TEXT PRIMARY KEY,
+      minimum_stock INTEGER NOT NULL CHECK (minimum_stock >= 0),
+      source TEXT NOT NULL DEFAULT 'admin',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // Import only missing SKU settings. Future edits in Inventory planning win
+  // permanently and no recurring workbook import is required.
+  await pool.query(`
+    INSERT INTO victron_stock_minima (sku, minimum_stock, source)
+    SELECT seed.sku, seed.minimum_stock, 'Victron stock sheet 2026-08-26'
+    FROM jsonb_to_recordset($1::jsonb) AS seed(sku TEXT, minimum_stock INTEGER)
+    ON CONFLICT (sku) DO NOTHING
+  `, [JSON.stringify(Object.entries(INITIAL_VICTRON_STOCK_MINIMA).map(([sku, minimum_stock]) => ({ sku, minimum_stock })))]);
 
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
   await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');

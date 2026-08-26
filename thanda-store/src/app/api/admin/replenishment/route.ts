@@ -12,6 +12,7 @@ type Succession = { predecessor_sku: string; successor_sku: string };
 type ProductRow = { sku: string; name: string; local_stock: string | number | null; supplier_stock: string | number };
 type SaleRow = { sku: string; sales_30: string | number; sales_90: string | number; last_sold_at: string | null };
 type InboundRow = { sku: string; quantity: string | number };
+type MinimumRow = { sku: string; minimum_stock: string | number };
 
 function familyResolver(successions: Succession[]) {
   const parent = new Map<string, string>();
@@ -39,7 +40,7 @@ export async function GET() {
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   try {
-    const [products, sales, inbound, successions] = await Promise.all([
+    const [products, sales, inbound, minimums, successions] = await Promise.all([
       pool.query<ProductRow>(`
         SELECT sku, name, COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock, stock_on_hand AS supplier_stock
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
@@ -60,6 +61,7 @@ export async function GET() {
         WHERE inbound.supplier = 'victron' AND inbound.status = 'open' AND line.is_stock_item = true
         GROUP BY UPPER(line.sku)
       `),
+      pool.query<MinimumRow>('SELECT UPPER(sku) AS sku, minimum_stock FROM victron_stock_minima'),
       pool.query<Succession>('SELECT predecessor_sku, successor_sku FROM victron_sku_successions').catch((error: { code?: string }) => {
         if (error.code === '42P01') return { rows: [] as Succession[] };
         throw error;
@@ -67,10 +69,10 @@ export async function GET() {
     ]);
     const resolveFamily = familyResolver(successions.rows);
     const predecessorSkus = new Set(successions.rows.map((row) => row.predecessor_sku.toUpperCase()));
-    const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; lastSoldAt: string | null }>();
+    const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; minimumStock: number; lastSoldAt: string | null }>();
     const groupFor = (sku: string) => {
       const family = resolveFamily(sku.toUpperCase());
-      const group = groups.get(family) || { products: [], sales30: 0, sales90: 0, inbound: 0, lastSoldAt: null };
+      const group = groups.get(family) || { products: [], sales30: 0, sales90: 0, inbound: 0, minimumStock: 0, lastSoldAt: null };
       groups.set(family, group);
       return group;
     };
@@ -82,22 +84,28 @@ export async function GET() {
       if (!group.lastSoldAt || (row.last_sold_at && row.last_sold_at > group.lastSoldAt)) group.lastSoldAt = row.last_sold_at;
     }
     for (const row of inbound.rows) groupFor(row.sku).inbound += Number(row.quantity) || 0;
+    for (const row of minimums.rows) {
+      const group = groupFor(row.sku);
+      // A replacement family should carry one floor, not accumulate stock for
+      // both obsolete and current article numbers.
+      group.minimumStock = Math.max(group.minimumStock, Number(row.minimum_stock) || 0);
+    }
 
     const items = [...groups.entries()].flatMap(([family, group]) => {
-      if (!group.products.length || group.sales90 <= 0) return [];
+      if (!group.products.length || (group.sales90 <= 0 && group.minimumStock <= 0)) return [];
       const currentProduct = [...group.products]
         .sort((left, right) => Number(predecessorSkus.has(left.sku.toUpperCase())) - Number(predecessorSkus.has(right.sku.toUpperCase())) || left.sku.localeCompare(right.sku))[0];
       const localStock = group.products.reduce((total, product) => total + (Number(product.local_stock) || 0), 0);
       const supplierStock = group.products.reduce((total, product) => total + (Number(product.supplier_stock) || 0), 0);
       const dailyDemand = Math.max(group.sales30 / SALES_WINDOWS.recent, group.sales90 / SALES_WINDOWS.baseline);
-      const reorderPoint = wholeUnits(dailyDemand * (LEAD_TIME_DAYS + SAFETY_STOCK_DAYS));
-      const targetStock = wholeUnits(dailyDemand * TARGET_COVER_DAYS);
+      const reorderPoint = Math.max(wholeUnits(dailyDemand * (LEAD_TIME_DAYS + SAFETY_STOCK_DAYS)), group.minimumStock);
+      const targetStock = Math.max(wholeUnits(dailyDemand * TARGET_COVER_DAYS), group.minimumStock);
       const availablePosition = localStock + group.inbound;
       const suggestedOrder = wholeUnits(targetStock - availablePosition);
       return [{
         family, sku: currentProduct.sku, name: currentProduct.name,
         sales30: group.sales30, sales90: group.sales90, dailyDemand,
-        localStock, inbound: group.inbound, supplierStock,
+        localStock, inbound: group.inbound, supplierStock, minimumStock: group.minimumStock,
         daysCover: dailyDemand ? availablePosition / dailyDemand : null,
         reorderPoint, targetStock, suggestedOrder,
         status: suggestedOrder > 0 ? (availablePosition <= reorderPoint ? 'order_now' : 'top_up') : 'covered',
