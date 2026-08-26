@@ -212,6 +212,19 @@ export async function ensureAuthSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_replenishment_done (
+      sku TEXT PRIMARY KEY,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_provisional_cart_lines (
+      sku TEXT PRIMARY KEY,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   // Import only missing SKU settings. Future edits in Inventory planning win
   // permanently and no recurring workbook import is required.
   await pool.query(`

@@ -47,3 +47,20 @@ export async function PUT(request: Request) {
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
+
+export async function PATCH(request: Request) {
+  if (!await requireAdmin()) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  await ensureAuthSchema();
+  const body = await request.json();
+  const sku = String(body?.sku || '').trim().toUpperCase();
+  const minimumStock = body?.minimumStock;
+  if (!/^[A-Z0-9-]{3,}$/.test(sku) || !Number.isInteger(minimumStock) || minimumStock < 0 || minimumStock > 10_000) {
+    return NextResponse.json({ error: 'Provide a valid SKU and a whole-number minimum between 0 and 10,000.' }, { status: 400 });
+  }
+  await pool.query(`
+    INSERT INTO victron_stock_minima (sku, minimum_stock, source, updated_at)
+    VALUES ($1, $2, 'admin', NOW())
+    ON CONFLICT (sku) DO UPDATE SET minimum_stock = EXCLUDED.minimum_stock, source = 'admin', updated_at = NOW()
+  `, [sku, minimumStock]);
+  return NextResponse.json({ ok: true });
+}
