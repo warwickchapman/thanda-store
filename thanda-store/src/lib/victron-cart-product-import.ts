@@ -1,4 +1,5 @@
 import pool from '@/lib/db';
+import { victronStockSku } from '@/lib/victron-sku';
 
 type EOrderProduct = Record<string, unknown> & {
   sku?: unknown; description?: unknown; category?: unknown; subcategory?: unknown;
@@ -12,7 +13,9 @@ function number(value: unknown) { const result = Number(value); return Number.is
 function stock(product: EOrderProduct) { return number(product.all_stock_by_warehouse?.af_sa_inzuzo) ?? number(product.stock_quantity) ?? 0; }
 
 export async function importVictronCartProducts(skus: string[]) {
-  const requested = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))];
+  // Retail-packaging article codes end in R. Import the canonical article so
+  // the cart cannot create a second planning/stock record for it.
+  const requested = [...new Set(skus.map(victronStockSku).filter(Boolean))];
   if (!requested.length) return [];
   const existing = await pool.query<{ sku: string }>('SELECT UPPER(sku) AS sku FROM products WHERE supplier = $1 AND UPPER(sku) = ANY($2)', ['victron', requested]);
   const missing = requested.filter((sku) => !new Set(existing.rows.map((row) => row.sku)).has(sku));

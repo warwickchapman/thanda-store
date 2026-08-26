@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
+import { victronStockSku } from '@/lib/victron-sku';
 
 const SALES_WINDOWS = { recent: 30, baseline: 90 };
 const LEAD_TIME_DAYS = 5;
@@ -26,8 +27,8 @@ function familyResolver(successions: Succession[]) {
     return root;
   };
   for (const { predecessor_sku, successor_sku } of successions) {
-    const predecessor = predecessor_sku.toUpperCase();
-    const successor = successor_sku.toUpperCase();
+    const predecessor = victronStockSku(predecessor_sku);
+    const successor = victronStockSku(successor_sku);
     const predecessorRoot = find(predecessor);
     const successorRoot = find(successor);
     if (predecessorRoot !== successorRoot) parent.set(successorRoot, predecessorRoot);
@@ -36,13 +37,6 @@ function familyResolver(successions: Succession[]) {
 }
 
 function wholeUnits(value: number) { return Math.max(0, Math.ceil(value - 1e-9)); }
-function replenishmentSkuForCart(sku: string) {
-  const normalized = sku.toUpperCase();
-  // Victron's trailing R is retail packaging. A retail cart line fulfils the
-  // otherwise identical non-retail replenishment item, but not vice versa.
-  return normalized.endsWith('R') ? normalized.slice(0, -1) : normalized;
-}
-
 export async function GET() {
   const user = await currentUser();
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
@@ -78,18 +72,15 @@ export async function GET() {
       }),
     ]);
     const resolveFamily = familyResolver(successions.rows);
-    const predecessorSkus = new Set(successions.rows.map((row) => row.predecessor_sku.toUpperCase()));
-    const completedBySku = new Map(completed.rows.map((row) => [row.sku, row.completed_at]));
+    const predecessorSkus = new Set(successions.rows.map((row) => victronStockSku(row.predecessor_sku)));
+    const completedBySku = new Map(completed.rows.map((row) => [resolveFamily(victronStockSku(row.sku)), row.completed_at]));
     const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; provisional: number; minimumStock: number; lastSoldAt: string | null }>();
     const groupFor = (sku: string) => {
-      const family = resolveFamily(sku.toUpperCase());
+      const family = resolveFamily(victronStockSku(sku));
       const group = groups.get(family) || { products: [], sales30: 0, sales90: 0, inbound: 0, provisional: 0, minimumStock: 0, lastSoldAt: null };
       groups.set(family, group);
       return group;
     };
-    // Prefer an exact cart SKU. Only use the retail-packaging fallback when
-    // that exact SKU is absent from the local catalogue.
-    const provisionalTargetSku = (sku: string) => groupFor(sku).products.length ? sku : replenishmentSkuForCart(sku);
     for (const product of products.rows) groupFor(product.sku).products.push(product);
     for (const row of sales.rows) {
       const group = groupFor(row.sku);
@@ -98,7 +89,7 @@ export async function GET() {
       if (!group.lastSoldAt || (row.last_sold_at && row.last_sold_at > group.lastSoldAt)) group.lastSoldAt = row.last_sold_at;
     }
     for (const row of inbound.rows) groupFor(row.sku).inbound += Number(row.quantity) || 0;
-    for (const row of provisional.rows) groupFor(provisionalTargetSku(row.sku)).provisional += Number(row.quantity) || 0;
+    for (const row of provisional.rows) groupFor(row.sku).provisional += Number(row.quantity) || 0;
     for (const row of minimums.rows) {
       const group = groupFor(row.sku);
       // A replacement family should carry one floor, not accumulate stock for
@@ -109,15 +100,21 @@ export async function GET() {
     const items = [...groups.entries()].flatMap(([family, group]) => {
       if (!group.products.length || (group.sales90 <= 0 && group.minimumStock <= 0 && group.provisional <= 0)) return [];
       const currentProduct = [...group.products]
-        .sort((left, right) => Number(predecessorSkus.has(left.sku.toUpperCase())) - Number(predecessorSkus.has(right.sku.toUpperCase())) || left.sku.localeCompare(right.sku))[0];
-      const localStock = group.products.reduce((total, product) => total + (Number(product.local_stock) || 0), 0);
-      const supplierStock = group.products.reduce((total, product) => total + (Number(product.supplier_stock) || 0), 0);
+        .sort((left, right) =>
+          Number(predecessorSkus.has(victronStockSku(left.sku))) - Number(predecessorSkus.has(victronStockSku(right.sku)))
+          || Number(left.sku.toUpperCase().endsWith('R')) - Number(right.sku.toUpperCase().endsWith('R'))
+          || left.sku.localeCompare(right.sku),
+        )[0];
+      // Retail and base SKUs are alternate packaging, not extra stock. Prefer
+      // the base SKU (or the current successor) rather than adding both rows.
+      const localStock = Number(currentProduct.local_stock) || 0;
+      const supplierStock = Number(currentProduct.supplier_stock) || 0;
       const dailyDemand = Math.max(group.sales30 / SALES_WINDOWS.recent, group.sales90 / SALES_WINDOWS.baseline);
       const reorderPoint = Math.max(wholeUnits(dailyDemand * (LEAD_TIME_DAYS + SAFETY_STOCK_DAYS)), group.minimumStock);
       const targetStock = Math.max(wholeUnits(dailyDemand * TARGET_COVER_DAYS), group.minimumStock);
       const availablePosition = localStock + group.inbound + group.provisional;
       const suggestedOrder = wholeUnits(targetStock - availablePosition);
-      const completedAt = completedBySku.get(currentProduct.sku.toUpperCase()) || null;
+      const completedAt = completedBySku.get(family) || null;
       const status = completedAt ? 'done'
         : suggestedOrder === 0 ? 'covered'
           : group.provisional >= suggestedOrder ? 'satisfied'
@@ -138,7 +135,7 @@ export async function GET() {
       provisionalCart: {
         lineCount: provisional.rows.length,
         uploadedAt: provisional.rows[0]?.uploaded_at || null,
-        unmatchedLines: provisional.rows.filter((row) => groupFor(provisionalTargetSku(row.sku)).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
+        unmatchedLines: provisional.rows.filter((row) => groupFor(row.sku).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
       },
       policy: { salesWindows: SALES_WINDOWS, leadTimeDays: LEAD_TIME_DAYS, safetyStockDays: SAFETY_STOCK_DAYS, targetCoverDays: TARGET_COVER_DAYS },
     });
