@@ -15,6 +15,7 @@ type SaleRow = { sku: string; sales_30: string | number; sales_90: string | numb
 type InboundRow = { sku: string; quantity: string | number };
 type MinimumRow = { sku: string; minimum_stock: string | number };
 type DoneRow = { sku: string; completed_at: string };
+type NoteRow = { sku: string; note: string };
 type ProvisionalRow = { sku: string; quantity: string | number; uploaded_at: string };
 
 function familyResolver(successions: Succession[]) {
@@ -42,7 +43,7 @@ export async function GET() {
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   try {
-    const [products, sales, inbound, minimums, completed, provisional, successions] = await Promise.all([
+    const [products, sales, inbound, minimums, completed, notes, provisional, successions] = await Promise.all([
       pool.query<ProductRow>(`
         SELECT sku, name, COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock, stock_on_hand AS supplier_stock
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
@@ -65,6 +66,7 @@ export async function GET() {
       `),
       pool.query<MinimumRow>('SELECT UPPER(sku) AS sku, minimum_stock FROM victron_stock_minima'),
       pool.query<DoneRow>('SELECT UPPER(sku) AS sku, completed_at::text FROM victron_replenishment_done'),
+      pool.query<NoteRow>('SELECT UPPER(sku) AS sku, note FROM victron_replenishment_notes'),
       pool.query<ProvisionalRow>('SELECT UPPER(sku) AS sku, quantity, uploaded_at::text FROM victron_provisional_cart_lines'),
       pool.query<Succession>('SELECT predecessor_sku, successor_sku FROM victron_sku_successions').catch((error: { code?: string }) => {
         if (error.code === '42P01') return { rows: [] as Succession[] };
@@ -74,6 +76,7 @@ export async function GET() {
     const resolveFamily = familyResolver(successions.rows);
     const predecessorSkus = new Set(successions.rows.map((row) => victronStockSku(row.predecessor_sku)));
     const completedBySku = new Map(completed.rows.map((row) => [resolveFamily(victronStockSku(row.sku)), row.completed_at]));
+    const notesBySku = new Map(notes.rows.map((row) => [resolveFamily(victronStockSku(row.sku)), row.note]));
     const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; provisional: number; minimumStock: number; lastSoldAt: string | null }>();
     const groupFor = (sku: string) => {
       const family = resolveFamily(victronStockSku(sku));
@@ -124,6 +127,7 @@ export async function GET() {
         family, sku: currentProduct.sku, name: currentProduct.name,
         sales30: group.sales30, sales90: group.sales90, dailyDemand,
         localStock, inbound: group.inbound, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock, completedAt,
+        note: notesBySku.get(family) || null,
         daysCover: dailyDemand ? availablePosition / dailyDemand : null,
         reorderPoint, targetStock, suggestedOrder,
         status,
@@ -151,7 +155,18 @@ export async function PATCH(request: Request) {
   await ensureAuthSchema();
   const body = await request.json();
   const sku = String(body?.sku || '').trim().toUpperCase();
-  if (!/^[A-Z0-9-]{3,}$/.test(sku) || typeof body?.done !== 'boolean') return NextResponse.json({ error: 'Provide a valid SKU and done state.' }, { status: 400 });
+  if (!/^[A-Z0-9-]{3,}$/.test(sku)) return NextResponse.json({ error: 'Provide a valid SKU.' }, { status: 400 });
+  if (typeof body?.note === 'string') {
+    const note = body.note.trim();
+    if (note.length > 2000) return NextResponse.json({ error: 'A note can be at most 2,000 characters.' }, { status: 400 });
+    if (note) await pool.query(`
+      INSERT INTO victron_replenishment_notes (sku, note) VALUES ($1, $2)
+      ON CONFLICT (sku) DO UPDATE SET note = EXCLUDED.note, updated_at = NOW()
+    `, [sku, note]);
+    else await pool.query('DELETE FROM victron_replenishment_notes WHERE sku = $1', [sku]);
+    return NextResponse.json({ ok: true, note: note || null });
+  }
+  if (typeof body?.done !== 'boolean') return NextResponse.json({ error: 'Provide a done state or note.' }, { status: 400 });
   if (body.done) await pool.query('INSERT INTO victron_replenishment_done (sku) VALUES ($1) ON CONFLICT (sku) DO NOTHING', [sku]);
   else await pool.query('DELETE FROM victron_replenishment_done WHERE sku = $1', [sku]);
   return NextResponse.json({ ok: true });

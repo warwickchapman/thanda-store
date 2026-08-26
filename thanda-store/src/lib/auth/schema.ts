@@ -219,6 +219,13 @@ export async function ensureAuthSchema() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_replenishment_notes (
+      sku TEXT PRIMARY KEY,
+      note TEXT NOT NULL CHECK (length(note) <= 2000),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS victron_provisional_cart_lines (
       sku TEXT PRIMARY KEY,
       quantity INTEGER NOT NULL CHECK (quantity > 0),
