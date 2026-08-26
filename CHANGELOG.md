@@ -16,6 +16,7 @@ All notable production-facing changes are recorded here. This project does not y
 - A red **Order now** status now means a line has not yet been addressed. Provisional cart quantities show blue **Satisfied** when they cover the displayed suggestion, or blue **In cart** when they only partially cover it.
 - A provisional Victron cart SKU ending in `R` now fulfils the corresponding non-`R` replenishment SKU, reflecting its retail-packaging-only distinction.
 - Provisional-cart matching now prefers an exact SKU before applying the `R` packaging fallback, so an exact retail SKU is not incorrectly reported as unmatched.
+- A cart HTML upload now imports any previously unknown SKU directly from Victron E-Order before using that line in the replenishment audit.
 - Corrected Renogy list-price VAT handling: the authenticated product API's `originalPrice` is already excluding VAT, while the partner portal displays it including VAT. Renogy buyer prices now apply the B2B discount directly to the Excl. VAT list price.
 - Customer Invoice webhooks now request a debounced Xero Items refresh, so KZN stock normally updates within ten minutes instead of waiting for the 30-minute reconciliation timer. The request worker makes no Xero call when no invoice changed, cannot overlap another stock sync, and records API allowance headers.
 - Raised the red `Not available` ribbon above product stock/category badges and disabled ordering for items with no KZN or supplier stock. The cart API now enforces the same rule.
