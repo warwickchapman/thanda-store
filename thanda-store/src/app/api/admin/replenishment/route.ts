@@ -36,6 +36,12 @@ function familyResolver(successions: Succession[]) {
 }
 
 function wholeUnits(value: number) { return Math.max(0, Math.ceil(value - 1e-9)); }
+function replenishmentSkuForCart(sku: string) {
+  const normalized = sku.toUpperCase();
+  // Victron's trailing R is retail packaging. A retail cart line fulfils the
+  // otherwise identical non-retail replenishment item, but not vice versa.
+  return normalized.endsWith('R') ? normalized.slice(0, -1) : normalized;
+}
 
 export async function GET() {
   const user = await currentUser();
@@ -89,7 +95,7 @@ export async function GET() {
       if (!group.lastSoldAt || (row.last_sold_at && row.last_sold_at > group.lastSoldAt)) group.lastSoldAt = row.last_sold_at;
     }
     for (const row of inbound.rows) groupFor(row.sku).inbound += Number(row.quantity) || 0;
-    for (const row of provisional.rows) groupFor(row.sku).provisional += Number(row.quantity) || 0;
+    for (const row of provisional.rows) groupFor(replenishmentSkuForCart(row.sku)).provisional += Number(row.quantity) || 0;
     for (const row of minimums.rows) {
       const group = groupFor(row.sku);
       // A replacement family should carry one floor, not accumulate stock for
@@ -129,7 +135,7 @@ export async function GET() {
       provisionalCart: {
         lineCount: provisional.rows.length,
         uploadedAt: provisional.rows[0]?.uploaded_at || null,
-        unmatchedLines: provisional.rows.filter((row) => groupFor(row.sku).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
+        unmatchedLines: provisional.rows.filter((row) => groupFor(replenishmentSkuForCart(row.sku)).products.length === 0).map((row) => ({ sku: row.sku, quantity: Number(row.quantity) || 0 })),
       },
       policy: { salesWindows: SALES_WINDOWS, leadTimeDays: LEAD_TIME_DAYS, safetyStockDays: SAFETY_STOCK_DAYS, targetCoverDays: TARGET_COVER_DAYS },
     });
