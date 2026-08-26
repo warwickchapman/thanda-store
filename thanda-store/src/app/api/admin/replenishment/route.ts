@@ -108,13 +108,19 @@ export async function GET() {
       const targetStock = Math.max(wholeUnits(dailyDemand * TARGET_COVER_DAYS), group.minimumStock);
       const availablePosition = localStock + group.inbound + group.provisional;
       const suggestedOrder = wholeUnits(targetStock - availablePosition);
+      const completedAt = completedBySku.get(currentProduct.sku.toUpperCase()) || null;
+      const status = completedAt ? 'done'
+        : suggestedOrder === 0 ? 'covered'
+          : group.provisional >= suggestedOrder ? 'satisfied'
+            : group.provisional > 0 ? 'in_cart'
+              : availablePosition <= reorderPoint ? 'order_now' : 'top_up';
       return [{
         family, sku: currentProduct.sku, name: currentProduct.name,
         sales30: group.sales30, sales90: group.sales90, dailyDemand,
-        localStock, inbound: group.inbound, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock, completedAt: completedBySku.get(currentProduct.sku.toUpperCase()) || null,
+        localStock, inbound: group.inbound, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock, completedAt,
         daysCover: dailyDemand ? availablePosition / dailyDemand : null,
         reorderPoint, targetStock, suggestedOrder,
-        status: suggestedOrder > 0 ? (availablePosition <= reorderPoint ? 'order_now' : 'top_up') : 'covered',
+        status,
         lastSoldAt: group.lastSoldAt,
       }];
     }).sort((left, right) => right.suggestedOrder - left.suggestedOrder || right.dailyDemand - left.dailyDemand || left.sku.localeCompare(right.sku));
