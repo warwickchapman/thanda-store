@@ -16,9 +16,25 @@ function SortHeader({ column, label, selected, direction, onSelect, className = 
 }
 
 function ItemNote({ item, editing, value, saving, onStart, onChange, onSave, onCancel }: { item: ReportItem; editing: boolean; value: string; saving: boolean; onStart: () => void; onChange: (value: string) => void; onSave: () => void; onCancel: () => void }) {
+  const [addingDetails, setAddingDetails] = useState(false);
+  const [predecessorSku, setPredecessorSku] = useState('');
+  const [detailsError, setDetailsError] = useState('');
+  const [savingDetails, setSavingDetails] = useState(false);
+  async function addDetails() {
+    setSavingDetails(true); setDetailsError('');
+    try {
+      const response = await fetch('/api/admin/victron-sku-successions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ predecessorSku, successorSku: item.sku }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to save the predecessor SKU.');
+      window.location.reload();
+    } catch (cause) { setDetailsError(cause instanceof Error ? cause.message : 'Unable to save the predecessor SKU.'); }
+    finally { setSavingDetails(false); }
+  }
   const details = item.predecessorSkus.length > 0 && <details className="relative"><summary className="cursor-pointer whitespace-nowrap text-xs font-semibold text-violet-800">Details</summary><div className="absolute right-0 top-5 z-20 w-64 rounded border border-violet-200 bg-white p-2 text-xs text-violet-950 shadow-lg">Sales include predecessor: {item.predecessorSkus.join(', ')}</div></details>;
+  const addDetail = !item.predecessorSkus.length && <button type="button" onClick={() => setAddingDetails(true)} className="whitespace-nowrap text-xs font-semibold text-violet-800">+ Details</button>;
   const savedNote = item.note && <details className="relative"><summary className="cursor-pointer whitespace-nowrap text-xs font-semibold text-sky-800">Note</summary><div className="absolute right-0 top-5 z-20 w-64 rounded border border-sky-200 bg-white p-2 text-xs text-sky-950 shadow-lg"><p className="whitespace-pre-wrap">{item.note}</p><button type="button" onClick={onStart} className="mt-1 text-xs font-semibold text-sky-800 underline">Edit note</button></div></details>;
-  const controls = (details || savedNote) && <div className={`absolute top-2 z-20 flex items-start gap-2 ${item.note ? 'right-2' : 'right-14'}`}>{details}{savedNote}</div>;
+  const controls = (details || addDetail || savedNote) && <div className={`absolute top-2 z-20 flex items-start gap-2 ${item.note ? 'right-2' : 'right-14'}`}>{details}{addDetail}{savedNote}</div>;
+  if (addingDetails) return <>{controls}<div className="mt-2 max-w-md rounded border border-violet-200 bg-violet-50 p-2"><label className="grid gap-1 text-xs font-semibold text-violet-950">Predecessor SKU for {item.sku}<input autoFocus value={predecessorSku} onChange={(event) => setPredecessorSku(event.target.value.toUpperCase())} placeholder="e.g. SCC145110510" className="h-8 rounded border border-violet-300 bg-white px-2 font-mono text-sm" /></label>{detailsError && <p className="mt-1 text-xs font-semibold text-red-800">{detailsError}</p>}<div className="mt-2 flex gap-2"><button type="button" onClick={() => void addDetails()} disabled={!predecessorSku || savingDetails} className="text-xs font-semibold text-violet-800 disabled:opacity-60">{savingDetails ? 'Saving' : 'Save details'}</button><button type="button" onClick={() => { setAddingDetails(false); setDetailsError(''); }} disabled={savingDetails} className="text-xs font-semibold text-zinc-600">Cancel</button></div></div></>;
   if (editing) return <>{controls}<div className="mt-2 max-w-md"><textarea autoFocus value={value} onChange={(event) => onChange(event.target.value)} maxLength={2000} rows={2} aria-label={`Note for ${item.sku}`} className="w-full rounded border border-sky-400 bg-white p-2 text-xs text-zinc-800 outline-none focus:ring-2 focus:ring-sky-200" /><div className="mt-1 flex gap-2"><button type="button" onClick={onSave} disabled={saving} className="text-xs font-semibold text-sky-800 disabled:opacity-60">{saving ? 'Saving' : 'Save note'}</button><button type="button" onClick={onCancel} disabled={saving} className="text-xs font-semibold text-zinc-600 disabled:opacity-60">Cancel</button></div></div></>;
   return controls;
 }
