@@ -57,3 +57,14 @@ body {
 .hero-gradient {
   background: linear-gradient(to bottom, transparent, var(--background));
 }
+
+/* Inventory planning column cues: scoped to its uniquely sized table. */
+table.min-w-\[1190px\] :is(th, td):nth-child(4) {
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+table.min-w-\[1190px\] :is(th, td):nth-child(6) {
+  background-color: #f0fdf4;
+  color: #166534;
+}
