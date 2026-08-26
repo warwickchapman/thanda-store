@@ -17,6 +17,15 @@ External API calls are a constrained production resource. Minimise them by defau
 - Initial backfills must be resumable, bounded, and safe to pause. They must not retry indefinitely or exhaust a daily budget in one run.
 - New API code must have request timeouts, bounded retries, useful error logs without secrets, and a test or manual verification plan for rate-limit behaviour.
 
+## Victron SKU succession contract
+
+`victron_sku_successions` is the single source of truth for Victron article-code replacements. It is populated by the Victron catalogue sync from explicit `If 0, order <SKU>` supplier markers.
+
+- Before adding or changing logic that compares, groups, totals, displays, fulfils, quotes, carts, orders, stocks, or analyses Victron SKUs, query this table and decide whether the operation applies to a whole replacement family rather than one literal SKU.
+- Do not introduce a second replacement map, hard-coded SKU substitution, or inferred successor rule. Reuse the shared family resolver, while treating an `R` suffix as retail packaging for the same stock item.
+- Where a result aggregates historic predecessor activity into a current successor, expose that relationship when it would help an operator audit a purchasing decision.
+- Add a regression test for each new succession-sensitive workflow. The canonical example is `PMP482305010 → PMP482305012`: historic sales under the predecessor must contribute to demand for the successor.
+
 ### Xero-specific contract and efficiency rules
 
 - Before changing any Xero request, consult the official [Xero OpenAPI 3 specification repository](https://github.com/XeroAPI/Xero-OpenAPI). Do not infer unsupported query parameters, request shapes, or batching behaviour from SDK snippets, older examples, or memory.

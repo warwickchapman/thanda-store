@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentCatalogue, type CatalogueProduct } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
+import { victronSkuFamilyResolver } from '@/lib/victron-sku-family.mjs';
 
 const LIMIT = 20;
 
@@ -22,32 +23,13 @@ function productIsOrderable(product: { stock_on_hand: number; details: Record<st
   return localStock > 0 || Number(product.stock_on_hand) > 0;
 }
 
-function familyResolver(successions: SkuSuccession[]) {
-  const parent = new Map<string, string>();
-  const find = (sku: string): string => {
-    const current = parent.get(sku) || sku;
-    if (current === sku) return sku;
-    const root = find(current);
-    parent.set(sku, root);
-    return root;
-  };
-  for (const succession of successions) {
-    const predecessor = succession.predecessor_sku.toUpperCase();
-    const successor = succession.successor_sku.toUpperCase();
-    const predecessorRoot = find(predecessor);
-    const successorRoot = find(successor);
-    if (predecessorRoot !== successorRoot) parent.set(successorRoot, predecessorRoot);
-  }
-  return find;
-}
-
 function rankedProducts(
   rows: InvoiceHistoryRow[],
   products: Map<string, Awaited<ReturnType<typeof currentCatalogue>>[number]>,
   successions: SkuSuccession[],
   rankedByFrequency: boolean,
 ) {
-  const resolveFamily = familyResolver(successions);
+  const resolveFamily = victronSkuFamilyResolver(successions);
   const predecessorSkus = new Set(successions.map((row) => row.predecessor_sku.toUpperCase()));
   const liveSkusByFamily = new Map<string, Set<string>>();
   for (const sku of products.keys()) {

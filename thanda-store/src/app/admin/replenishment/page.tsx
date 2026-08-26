@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ChevronDown, ChevronUp, FileUp, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type ReportItem = { sku: string; name: string; sales30: number; sales90: number; dailyDemand: number; localStock: number; inbound: number; provisional: number; supplierStock: number; minimumStock: number; note: string | null; daysCover: number | null; reorderPoint: number; targetStock: number; suggestedOrder: number; status: 'order_now' | 'top_up' | 'covered' | 'satisfied' | 'in_cart'; lastSoldAt: string | null };
+type ReportItem = { sku: string; name: string; sales30: number; sales90: number; dailyDemand: number; localStock: number; inbound: number; provisional: number; supplierStock: number; minimumStock: number; predecessorSkus: string[]; note: string | null; daysCover: number | null; reorderPoint: number; targetStock: number; suggestedOrder: number; status: 'order_now' | 'top_up' | 'covered' | 'satisfied' | 'in_cart'; lastSoldAt: string | null };
 type Report = { items: ReportItem[]; provisionalCart: { lineCount: number; uploadedAt: string | null; unmatchedLines: { sku: string; quantity: number }[] }; policy: { leadTimeDays: number; safetyStockDays: number; targetCoverDays: number } };
 type SortKey = 'item' | 'sales30' | 'sales90' | 'minimumStock' | 'localStock' | 'inbound' | 'provisional' | 'daysCover' | 'reorderPoint' | 'suggestedOrder' | 'status';
 type SortDirection = 'asc' | 'desc';
@@ -16,9 +16,10 @@ function SortHeader({ column, label, selected, direction, onSelect, className = 
 }
 
 function ItemNote({ item, editing, value, saving, onStart, onChange, onSave, onCancel }: { item: ReportItem; editing: boolean; value: string; saving: boolean; onStart: () => void; onChange: (value: string) => void; onSave: () => void; onCancel: () => void }) {
-  if (editing) return <div className="mt-2 max-w-md"><textarea autoFocus value={value} onChange={(event) => onChange(event.target.value)} maxLength={2000} rows={2} aria-label={`Note for ${item.sku}`} className="w-full rounded border border-sky-400 bg-white p-2 text-xs text-zinc-800 outline-none focus:ring-2 focus:ring-sky-200" /><div className="mt-1 flex gap-2"><button type="button" onClick={onSave} disabled={saving} className="text-xs font-semibold text-sky-800 disabled:opacity-60">{saving ? 'Saving' : 'Save note'}</button><button type="button" onClick={onCancel} disabled={saving} className="text-xs font-semibold text-zinc-600 disabled:opacity-60">Cancel</button></div></div>;
-  if (!item.note) return null;
-  return <details className="mt-2 max-w-md"><summary className="cursor-pointer text-xs font-semibold text-sky-800">Note</summary><div className="mt-1 rounded border border-sky-100 bg-sky-50 p-2 text-xs text-sky-950"><p className="whitespace-pre-wrap">{item.note}</p><button type="button" onClick={onStart} className="mt-1 text-xs font-semibold text-sky-800 underline">Edit note</button></div></details>;
+  const predecessorSales = item.predecessorSkus.length > 0 && <p className="mt-1 text-xs font-semibold text-violet-800">Sales include predecessor: {item.predecessorSkus.join(', ')}</p>;
+  if (editing) return <>{predecessorSales}<div className="mt-2 max-w-md"><textarea autoFocus value={value} onChange={(event) => onChange(event.target.value)} maxLength={2000} rows={2} aria-label={`Note for ${item.sku}`} className="w-full rounded border border-sky-400 bg-white p-2 text-xs text-zinc-800 outline-none focus:ring-2 focus:ring-sky-200" /><div className="mt-1 flex gap-2"><button type="button" onClick={onSave} disabled={saving} className="text-xs font-semibold text-sky-800 disabled:opacity-60">{saving ? 'Saving' : 'Save note'}</button><button type="button" onClick={onCancel} disabled={saving} className="text-xs font-semibold text-zinc-600 disabled:opacity-60">Cancel</button></div></div></>;
+  if (!item.note) return predecessorSales;
+  return <>{predecessorSales}<details className="mt-2 max-w-md"><summary className="cursor-pointer text-xs font-semibold text-sky-800">Note</summary><div className="mt-1 rounded border border-sky-100 bg-sky-50 p-2 text-xs text-sky-950"><p className="whitespace-pre-wrap">{item.note}</p><button type="button" onClick={onStart} className="mt-1 text-xs font-semibold text-sky-800 underline">Edit note</button></div></details></>;
 }
 
 export default function ReplenishmentPage() {

@@ -3,6 +3,7 @@ import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import { victronStockSku } from '@/lib/victron-sku';
+import { predecessorSkusForFamily, victronSkuFamilyResolver } from '@/lib/victron-sku-family.mjs';
 
 const SALES_WINDOWS = { recent: 30, baseline: 90 };
 const LEAD_TIME_DAYS = 5;
@@ -16,25 +17,6 @@ type InboundRow = { sku: string; quantity: string | number };
 type MinimumRow = { sku: string; minimum_stock: string | number };
 type NoteRow = { sku: string; note: string };
 type ProvisionalRow = { sku: string; quantity: string | number; uploaded_at: string };
-
-function familyResolver(successions: Succession[]) {
-  const parent = new Map<string, string>();
-  const find = (sku: string): string => {
-    const current = parent.get(sku) || sku;
-    if (current === sku) return sku;
-    const root = find(current);
-    parent.set(sku, root);
-    return root;
-  };
-  for (const { predecessor_sku, successor_sku } of successions) {
-    const predecessor = victronStockSku(predecessor_sku);
-    const successor = victronStockSku(successor_sku);
-    const predecessorRoot = find(predecessor);
-    const successorRoot = find(successor);
-    if (predecessorRoot !== successorRoot) parent.set(successorRoot, predecessorRoot);
-  }
-  return find;
-}
 
 function wholeUnits(value: number) { return Math.max(0, Math.ceil(value - 1e-9)); }
 export async function GET() {
@@ -71,7 +53,7 @@ export async function GET() {
         throw error;
       }),
     ]);
-    const resolveFamily = familyResolver(successions.rows);
+    const resolveFamily = victronSkuFamilyResolver(successions.rows);
     const predecessorSkus = new Set(successions.rows.map((row) => victronStockSku(row.predecessor_sku)));
     const notesBySku = new Map(notes.rows.map((row) => [resolveFamily(victronStockSku(row.sku)), row.note]));
     const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; provisional: number; minimumStock: number; lastSoldAt: string | null }>();
@@ -122,6 +104,7 @@ export async function GET() {
         family, sku: currentProduct.sku, name: currentProduct.name,
         sales30: group.sales30, sales90: group.sales90, dailyDemand,
         localStock, inbound: group.inbound, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock,
+        predecessorSkus: predecessorSkusForFamily(successions.rows, family),
         note: notesBySku.get(family) || null,
         daysCover: dailyDemand ? availablePosition / dailyDemand : null,
         reorderPoint, targetStock, suggestedOrder,
