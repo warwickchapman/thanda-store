@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { predecessorSkusForFamily, victronSkuFamilyResolver } from '../src/lib/victron-sku-family.mjs';
+import { familyMemberSkus, predecessorSkusForFamily, victronSkuFamilyResolver } from '../src/lib/victron-sku-family.mjs';
 
 test('PMP482305010 sales resolve into the PMP482305012 replacement family', () => {
   const successions = [{ predecessor_sku: 'PMP482305010', successor_sku: 'PMP482305012' }];
@@ -17,4 +17,5 @@ test('PMP482305010 sales resolve into the PMP482305012 replacement family', () =
   assert.equal(familyFor('PMP482305012'), familyFor('PMP482305010'));
   assert.equal(salesByFamily.get(familyFor('PMP482305012')), 5);
   assert.deepEqual(predecessorSkusForFamily(successions, familyFor('PMP482305012')), ['PMP482305010']);
+  assert.deepEqual(familyMemberSkus(successions, 'PMP482305012'), ['PMP482305010', 'PMP482305012']);
 });

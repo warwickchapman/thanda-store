@@ -31,3 +31,14 @@ export function predecessorSkusForFamily(successions, family) {
     .filter((succession) => resolveFamily(succession.predecessor_sku) === family)
     .map((succession) => String(succession.predecessor_sku).trim().toUpperCase()))].sort();
 }
+
+export function familyMemberSkus(successions, sku) {
+  const resolveFamily = victronSkuFamilyResolver(successions);
+  const family = resolveFamily(sku);
+  return [...new Set([
+    String(sku).trim().toUpperCase(),
+    ...successions.flatMap((succession) => [succession.predecessor_sku, succession.successor_sku])
+      .filter((candidate) => resolveFamily(candidate) === family)
+      .map((candidate) => String(candidate).trim().toUpperCase()),
+  ])].sort();
+}
