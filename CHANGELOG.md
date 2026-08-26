@@ -11,9 +11,9 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Changed
 
-- Replenishment table columns can now be sorted by clicking their headers. KZN stock remains visually highlighted, an administrator can click a Min value to update its saved stock minimum directly, and purchasing progress can be marked Done, undone, or hidden from the current list.
+- Replenishment table columns can now be sorted by clicking their headers. KZN stock remains visually highlighted, an administrator can click a Min value to update its saved stock minimum directly, and its floating header row remains opaque while scrolling.
 - Administrators can upload a saved Victron E-Order basket HTML file as a transient provisional cart. Its quantities are audited against the replenishment list, can be replaced or cleared, and reduce only the remaining suggested quantity; no source HTML or supplier order is retained.
-- A red **Order now** status now means a line has not yet been addressed. Provisional cart quantities show blue **Satisfied** when they cover the displayed suggestion, or blue **In cart** when they only partially cover it.
+- A red **Order** status identifies an outstanding recommendation. Provisional cart quantities show blue **Satisfied** when they cover the displayed suggestion, or amber **Partial** when they only partially cover it. The former manual Done workflow has been removed: recorded inbound deliveries, stock and sales are the sole inputs to replenishment.
 - A provisional Victron cart SKU ending in `R` now fulfils the corresponding non-`R` replenishment SKU, reflecting its retail-packaging-only distinction.
 - Provisional-cart matching now prefers an exact SKU before applying the `R` packaging fallback, so an exact retail SKU is not incorrectly reported as unmatched.
 - A cart HTML upload now imports any previously unknown SKU directly from Victron E-Order before using that line in the replenishment audit.

@@ -213,12 +213,6 @@ export async function ensureAuthSchema() {
     )
   `);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS victron_replenishment_done (
-      sku TEXT PRIMARY KEY,
-      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS victron_replenishment_notes (
       sku TEXT PRIMARY KEY,
       note TEXT NOT NULL CHECK (length(note) <= 2000),
