@@ -6,6 +6,30 @@ import { parseVictronBackordersHtml } from "@/lib/victron-provisional-cart";
 async function admin() {
   return (await currentUser())?.role === "admin";
 }
+
+export async function GET() {
+  if (!(await admin()))
+    return NextResponse.json(
+      { error: "Admin access required" },
+      { status: 403 },
+    );
+  await ensureAuthSchema();
+  const result = await pool.query(`
+    SELECT backorder.order_number, backorder.uploaded_at,
+      COALESCE(jsonb_agg(jsonb_build_object(
+        'sku', line.sku,
+        'description', line.description,
+        'quantity', line.quantity
+      ) ORDER BY line.sku) FILTER (WHERE line.sku IS NOT NULL), '[]'::jsonb) AS lines
+    FROM victron_provisional_backorders backorder
+    LEFT JOIN victron_provisional_backorder_order_lines line
+      ON line.order_number = backorder.order_number
+    GROUP BY backorder.order_number, backorder.uploaded_at
+    ORDER BY backorder.order_number DESC
+  `);
+  return NextResponse.json({ orders: result.rows });
+}
+
 export async function POST(request: Request) {
   if (!(await admin()))
     return NextResponse.json(
@@ -20,19 +44,43 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   try {
-    const lines = new Map<string, number>();
-    for (const order of parseVictronBackordersHtml(await file.text()))
-      for (const line of order.lines)
-        lines.set(line.sku, (lines.get(line.sku) || 0) + line.quantity);
+    const ordersByNumber = new Map<
+      string,
+      Map<string, { sku: string; description: string; quantity: number }>
+    >();
+    for (const order of parseVictronBackordersHtml(await file.text())) {
+      const lines = ordersByNumber.get(order.orderNumber) || new Map();
+      ordersByNumber.set(order.orderNumber, lines);
+      for (const line of order.lines) {
+        const existing = lines.get(line.sku);
+        lines.set(line.sku, {
+          sku: line.sku,
+          description: existing?.description || line.description,
+          quantity: (existing?.quantity || 0) + line.quantity,
+        });
+      }
+    }
+    const orders = [...ordersByNumber].map(([orderNumber, lines]) => ({
+      orderNumber,
+      lines: [...lines.values()],
+    }));
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("DELETE FROM victron_provisional_backorder_lines");
-      for (const [sku, quantity] of lines)
+      await client.query("DELETE FROM victron_provisional_backorders");
+      for (const order of orders) {
         await client.query(
-          "INSERT INTO victron_provisional_backorder_lines (sku, quantity) VALUES ($1, $2)",
-          [sku, quantity],
+          "INSERT INTO victron_provisional_backorders (order_number) VALUES ($1)",
+          [order.orderNumber],
         );
+        for (const line of order.lines)
+          await client.query(
+            `INSERT INTO victron_provisional_backorder_order_lines
+              (order_number, sku, description, quantity)
+             VALUES ($1, $2, $3, $4)`,
+            [order.orderNumber, line.sku, line.description, line.quantity],
+          );
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -40,7 +88,11 @@ export async function POST(request: Request) {
     } finally {
       client.release();
     }
-    return NextResponse.json({ ok: true, lineCount: lines.size });
+    return NextResponse.json({
+      ok: true,
+      orderCount: orders.length,
+      lineCount: orders.reduce((count, order) => count + order.lines.length, 0),
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -58,6 +110,6 @@ export async function DELETE() {
       { status: 403 },
     );
   await ensureAuthSchema();
-  await pool.query("DELETE FROM victron_provisional_backorder_lines");
+  await pool.query("DELETE FROM victron_provisional_backorders");
   return NextResponse.json({ ok: true });
 }

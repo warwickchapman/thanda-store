@@ -1,5 +1,5 @@
-import pool from '@/lib/db';
-import { INITIAL_VICTRON_STOCK_MINIMA } from '@/lib/victron-stock-minima';
+import pool from "@/lib/db";
+import { INITIAL_VICTRON_STOCK_MINIMA } from "@/lib/victron-stock-minima";
 
 export async function ensureAuthSchema() {
   await pool.query(`
@@ -15,8 +15,12 @@ export async function ensureAuthSchema() {
 
   // Organisation names are Xero-owned display data. Contact ID is the stable
   // identity and avoids treating a mutable display name as a unique key.
-  await pool.query('ALTER TABLE organisations DROP CONSTRAINT IF EXISTS organisations_name_key');
-  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS organisations_xero_contact_id_unique ON organisations (xero_contact_id) WHERE xero_contact_id IS NOT NULL');
+  await pool.query(
+    "ALTER TABLE organisations DROP CONSTRAINT IF EXISTS organisations_name_key",
+  );
+  await pool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS organisations_xero_contact_id_unique ON organisations (xero_contact_id) WHERE xero_contact_id IS NOT NULL",
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS portal_users (
@@ -36,11 +40,19 @@ export async function ensureAuthSchema() {
 
   // Pre-launch migration: email is the only login identifier. Keep the Xero
   // person source locally so a reconciliation can revoke removed access.
-  await pool.query('ALTER TABLE portal_users DROP COLUMN IF EXISTS username');
-  await pool.query("ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_kind TEXT NOT NULL DEFAULT 'manual'");
-  await pool.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_email TEXT');
-  await pool.query('ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
-  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS portal_users_email_lower_unique ON portal_users (LOWER(email))');
+  await pool.query("ALTER TABLE portal_users DROP COLUMN IF EXISTS username");
+  await pool.query(
+    "ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_kind TEXT NOT NULL DEFAULT 'manual'",
+  );
+  await pool.query(
+    "ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_email TEXT",
+  );
+  await pool.query(
+    "ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ",
+  );
+  await pool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS portal_users_email_lower_unique ON portal_users (LOWER(email))",
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_supplier_discounts (
@@ -131,7 +143,9 @@ export async function ensureAuthSchema() {
       observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await pool.query('ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ');
+  await pool.query(
+    "ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ",
+  );
 
   // Xero webhooks are acknowledged immediately and processed by a separate
   // worker. Keeping the queue in PostgreSQL makes delivery retries harmless
@@ -170,8 +184,30 @@ export async function ensureAuthSchema() {
       UNIQUE (supplier, supplier_order_number)
     )
   `);
-  await pool.query(`ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'inbound'`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS victron_provisional_backorder_lines (sku TEXT PRIMARY KEY, quantity INTEGER NOT NULL CHECK (quantity > 0), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(
+    `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'inbound'`,
+  );
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS victron_provisional_backorder_lines (sku TEXT PRIMARY KEY, quantity INTEGER NOT NULL CHECK (quantity > 0), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_provisional_backorders (
+      order_number TEXT PRIMARY KEY,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_provisional_backorder_order_lines (
+      order_number TEXT NOT NULL REFERENCES victron_provisional_backorders(order_number) ON DELETE CASCADE,
+      sku TEXT NOT NULL,
+      description TEXT NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      PRIMARY KEY (order_number, sku)
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS victron_provisional_backorder_order_lines_sku_idx ON victron_provisional_backorder_order_lines (sku)`,
+  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS supplier_inbound_order_lines (
       id BIGSERIAL PRIMARY KEY,
@@ -231,22 +267,53 @@ export async function ensureAuthSchema() {
   `);
   // Import only missing SKU settings. Future edits in Inventory planning win
   // permanently and no recurring workbook import is required.
-  await pool.query(`
+  await pool.query(
+    `
     INSERT INTO victron_stock_minima (sku, minimum_stock, source)
     SELECT seed.sku, seed.minimum_stock, 'Victron stock sheet 2026-08-26'
     FROM jsonb_to_recordset($1::jsonb) AS seed(sku TEXT, minimum_stock INTEGER)
     ON CONFLICT (sku) DO NOTHING
-  `, [JSON.stringify(Object.entries(INITIAL_VICTRON_STOCK_MINIMA).map(([sku, minimum_stock]) => ({ sku, minimum_stock })))]);
+  `,
+    [
+      JSON.stringify(
+        Object.entries(INITIAL_VICTRON_STOCK_MINIMA).map(
+          ([sku, minimum_stock]) => ({ sku, minimum_stock }),
+        ),
+      ),
+    ],
+  );
 
-  await pool.query('CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)');
-  await pool.query('CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS login_otps_user_idx ON login_otps (user_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS account_setup_tokens_user_idx ON account_setup_tokens (user_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS portal_cart_lines_user_idx ON portal_cart_lines (user_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)');
-  await pool.query('CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)');
-  await pool.query('CREATE INDEX IF NOT EXISTS xero_webhook_events_pending_idx ON xero_webhook_events (received_at) WHERE processed_at IS NULL');
-  await pool.query('CREATE INDEX IF NOT EXISTS supplier_inbound_orders_status_idx ON supplier_inbound_orders (supplier, status, created_at DESC)');
-  await pool.query('CREATE INDEX IF NOT EXISTS supplier_inbound_order_lines_order_idx ON supplier_inbound_order_lines (inbound_order_id)');
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS portal_users_organisation_idx ON portal_users (organisation_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS portal_users_xero_person_idx ON portal_users (organisation_id, xero_person_kind)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS portal_sessions_user_idx ON portal_sessions (user_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS login_otps_user_idx ON login_otps (user_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS account_setup_tokens_user_idx ON account_setup_tokens (user_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS portal_cart_lines_user_idx ON portal_cart_lines (user_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_contact_date_idx ON xero_sales_invoice_lines (contact_id, invoice_date DESC)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_sales_invoice_lines_sku_date_idx ON xero_sales_invoice_lines (sku, invoice_date DESC)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_webhook_events_pending_idx ON xero_webhook_events (received_at) WHERE processed_at IS NULL",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS supplier_inbound_orders_status_idx ON supplier_inbound_orders (supplier, status, created_at DESC)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS supplier_inbound_order_lines_order_idx ON supplier_inbound_order_lines (inbound_order_id)",
+  );
 }

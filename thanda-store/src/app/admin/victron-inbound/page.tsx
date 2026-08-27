@@ -26,6 +26,11 @@ type InboundOrder = {
   lines: InboundLine[];
   documents: Array<{ id: number; filename: string }>;
 };
+type Backorder = {
+  order_number: string;
+  uploaded_at: string;
+  lines: Array<{ sku: string; description: string; quantity: number }>;
+};
 
 function nonBlank(value: string) {
   return value.trim();
@@ -35,6 +40,7 @@ export default function VictronInboundPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const backordersInput = useRef<HTMLInputElement>(null);
   const [orders, setOrders] = useState<InboundOrder[]>([]);
+  const [backorders, setBackorders] = useState<Backorder[]>([]);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
   const [customerPurchaseOrder, setCustomerPurchaseOrder] = useState("");
@@ -47,13 +53,24 @@ export default function VictronInboundPage() {
   const [receivingOrder, setReceivingOrder] = useState<number | null>(null);
 
   async function loadOrders() {
-    const response = await fetch("/api/admin/victron-inbound", {
-      cache: "no-store",
-    });
-    const data = await response.json();
-    if (!response.ok)
-      throw new Error(data.error || "Unable to load inbound Victron orders.");
-    setOrders(data.orders || []);
+    const [inboundResponse, backorderResponse] = await Promise.all([
+      fetch("/api/admin/victron-inbound", { cache: "no-store" }),
+      fetch("/api/admin/victron-inbound/backorders", { cache: "no-store" }),
+    ]);
+    const [inboundData, backorderData] = await Promise.all([
+      inboundResponse.json(),
+      backorderResponse.json(),
+    ]);
+    if (!inboundResponse.ok)
+      throw new Error(
+        inboundData.error || "Unable to load inbound Victron orders.",
+      );
+    if (!backorderResponse.ok)
+      throw new Error(
+        backorderData.error || "Unable to load Victron backorders.",
+      );
+    setOrders(inboundData.orders || []);
+    setBackorders(backorderData.orders || []);
   }
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -122,8 +139,9 @@ export default function VictronInboundPage() {
       setBackordersFile(null);
       if (backordersInput.current) backordersInput.current.value = "";
       setMessage(
-        `Loaded ${data.lineCount} transient backorder line${data.lineCount === 1 ? "" : "s"}. This snapshot can be replaced or cleared and does not alter inbound orders.`,
+        `Loaded ${data.orderCount} transient backorder${data.orderCount === 1 ? "" : "s"} containing ${data.lineCount} line${data.lineCount === 1 ? "" : "s"}. This snapshot can be replaced or cleared and does not alter inbound orders.`,
       );
+      await loadOrders();
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -147,6 +165,7 @@ export default function VictronInboundPage() {
       if (!response.ok)
         throw new Error(data.error || "Unable to clear backorders.");
       setMessage("Transient backorders cleared.");
+      await loadOrders();
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to clear backorders.",
@@ -566,9 +585,8 @@ export default function VictronInboundPage() {
             <div>
               <h2 className="text-lg font-bold">Expected orders</h2>
               <p className="text-sm text-zinc-500">
-                Confirm a line only after counting the physical item.
-                Promotional material is kept for reference but does not affect
-                stock receipt completion.
+                Backorders are shown first as a temporary Victron snapshot.
+                Confirm inbound lines only after counting the physical items.
               </p>
             </div>
             <button
@@ -589,6 +607,45 @@ export default function VictronInboundPage() {
             </button>
           </div>
           <div className="grid gap-4">
+            {backorders.map((backorder) => (
+              <article
+                key={backorder.order_number}
+                className="rounded-lg border border-orange-200 bg-orange-50 p-4 shadow-sm"
+              >
+                <div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+                  <div>
+                    <h3 className="font-bold text-orange-950">
+                      Victron backorder {backorder.order_number}
+                    </h3>
+                    <p className="text-sm text-orange-800">
+                      Snapshot uploaded{" "}
+                      {new Date(backorder.uploaded_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="inline-flex h-6 self-start rounded-full bg-orange-100 px-2 text-xs font-bold text-orange-900">
+                    Backorder · transient
+                  </span>
+                </div>
+                <div className="divide-y divide-orange-200 border-t border-orange-200">
+                  {backorder.lines.map((line) => (
+                    <div
+                      key={line.sku}
+                      className="flex items-center justify-between gap-3 py-3"
+                    >
+                      <p className="font-semibold text-orange-950">
+                        {line.sku}{" "}
+                        <span className="font-normal text-orange-900">
+                          · {line.description}
+                        </span>
+                      </p>
+                      <span className="shrink-0 text-sm font-semibold text-orange-900">
+                        {line.quantity} remaining
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
             {orders.map((order) => (
               <article
                 key={order.id}
@@ -708,7 +765,7 @@ export default function VictronInboundPage() {
                 </div>
               </article>
             ))}
-            {!orders.length && (
+            {!backorders.length && !orders.length && (
               <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
                 No Victron inbound orders have been prepared yet.
               </div>
