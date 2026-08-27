@@ -162,6 +162,7 @@ export async function ensureAuthSchema() {
       supplier TEXT NOT NULL CHECK (supplier = 'victron'),
       supplier_order_number TEXT NOT NULL,
       customer_purchase_order TEXT,
+      source TEXT NOT NULL DEFAULT 'inbound',
       status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'received')),
       created_by_user_id BIGINT NOT NULL REFERENCES portal_users(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -169,6 +170,8 @@ export async function ensureAuthSchema() {
       UNIQUE (supplier, supplier_order_number)
     )
   `);
+  await pool.query(`ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'inbound'`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS victron_provisional_backorder_lines (sku TEXT PRIMARY KEY, quantity INTEGER NOT NULL CHECK (quantity > 0), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS supplier_inbound_order_lines (
       id BIGSERIAL PRIMARY KEY,

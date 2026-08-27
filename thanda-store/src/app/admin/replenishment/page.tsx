@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ChevronDown, ChevronUp, FileUp, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type ReportItem = { sku: string; name: string; sales30: number; sales90: number; dailyDemand: number; localStock: number; inbound: number; provisional: number; supplierStock: number; minimumStock: number; predecessorSkus: string[]; note: string | null; daysCover: number | null; reorderPoint: number; targetStock: number; suggestedOrder: number; status: 'order_now' | 'top_up' | 'covered' | 'satisfied' | 'in_cart'; lastSoldAt: string | null };
+type ReportItem = { sku: string; name: string; sales30: number; sales90: number; dailyDemand: number; localStock: number; inbound: number; backorder: number; provisional: number; supplierStock: number; minimumStock: number; predecessorSkus: string[]; note: string | null; daysCover: number | null; reorderPoint: number; targetStock: number; suggestedOrder: number; status: 'order_now' | 'top_up' | 'covered' | 'satisfied' | 'in_cart'; lastSoldAt: string | null };
 type Report = { items: ReportItem[]; provisionalCart: { lineCount: number; uploadedAt: string | null; unmatchedLines: { sku: string; quantity: number }[] }; policy: { leadTimeDays: number; safetyStockDays: number; targetCoverDays: number } };
 type SortKey = 'item' | 'sales30' | 'sales90' | 'minimumStock' | 'localStock' | 'inbound' | 'provisional' | 'daysCover' | 'reorderPoint' | 'suggestedOrder' | 'status';
 type SortDirection = 'asc' | 'desc';

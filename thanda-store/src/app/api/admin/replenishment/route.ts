@@ -24,7 +24,7 @@ export async function GET() {
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   try {
-    const [products, sales, inbound, minimums, notes, provisional, successions] = await Promise.all([
+    const [products, sales, inbound, backorders, minimums, notes, provisional, successions] = await Promise.all([
       pool.query<ProductRow>(`
         SELECT sku, name, COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock, stock_on_hand AS supplier_stock
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
@@ -42,9 +42,10 @@ export async function GET() {
         SELECT UPPER(line.sku) AS sku, SUM(line.ordered_quantity - line.received_quantity) AS quantity
         FROM supplier_inbound_order_lines line
         JOIN supplier_inbound_orders inbound ON inbound.id = line.inbound_order_id
-        WHERE inbound.supplier = 'victron' AND inbound.status = 'open' AND line.is_stock_item = true
+        WHERE inbound.supplier = 'victron' AND inbound.status = 'open' AND inbound.source = 'inbound' AND line.is_stock_item = true
         GROUP BY UPPER(line.sku)
       `),
+      pool.query<InboundRow>('SELECT UPPER(sku) AS sku, quantity FROM victron_provisional_backorder_lines'),
       pool.query<MinimumRow>('SELECT UPPER(sku) AS sku, minimum_stock FROM victron_stock_minima'),
       pool.query<NoteRow>('SELECT UPPER(sku) AS sku, note FROM victron_replenishment_notes'),
       pool.query<ProvisionalRow>('SELECT UPPER(sku) AS sku, quantity, uploaded_at::text FROM victron_provisional_cart_lines'),
@@ -56,10 +57,10 @@ export async function GET() {
     const resolveFamily = victronSkuFamilyResolver(successions.rows);
     const predecessorSkus = new Set(successions.rows.map((row) => victronStockSku(row.predecessor_sku)));
     const notesBySku = new Map(notes.rows.map((row) => [resolveFamily(victronStockSku(row.sku)), row.note]));
-    const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; provisional: number; minimumStock: number; lastSoldAt: string | null }>();
+    const groups = new Map<string, { products: ProductRow[]; sales30: number; sales90: number; inbound: number; backorder: number; provisional: number; minimumStock: number; lastSoldAt: string | null }>();
     const groupFor = (sku: string) => {
       const family = resolveFamily(victronStockSku(sku));
-      const group = groups.get(family) || { products: [], sales30: 0, sales90: 0, inbound: 0, provisional: 0, minimumStock: 0, lastSoldAt: null };
+      const group = groups.get(family) || { products: [], sales30: 0, sales90: 0, inbound: 0, backorder: 0, provisional: 0, minimumStock: 0, lastSoldAt: null };
       groups.set(family, group);
       return group;
     };
@@ -71,6 +72,7 @@ export async function GET() {
       if (!group.lastSoldAt || (row.last_sold_at && row.last_sold_at > group.lastSoldAt)) group.lastSoldAt = row.last_sold_at;
     }
     for (const row of inbound.rows) groupFor(row.sku).inbound += Number(row.quantity) || 0;
+    for (const row of backorders.rows) groupFor(row.sku).backorder += Number(row.quantity) || 0;
     for (const row of provisional.rows) groupFor(row.sku).provisional += Number(row.quantity) || 0;
     for (const row of minimums.rows) {
       const group = groupFor(row.sku);
@@ -94,7 +96,7 @@ export async function GET() {
       const dailyDemand = Math.max(group.sales30 / SALES_WINDOWS.recent, group.sales90 / SALES_WINDOWS.baseline);
       const reorderPoint = Math.max(wholeUnits(dailyDemand * (LEAD_TIME_DAYS + SAFETY_STOCK_DAYS)), group.minimumStock);
       const targetStock = Math.max(wholeUnits(dailyDemand * TARGET_COVER_DAYS), group.minimumStock);
-      const availablePosition = localStock + group.inbound + group.provisional;
+      const availablePosition = localStock + group.inbound + group.backorder + group.provisional;
       const suggestedOrder = wholeUnits(targetStock - availablePosition);
       const status = suggestedOrder === 0 ? 'covered'
           : group.provisional >= suggestedOrder ? 'satisfied'
@@ -103,7 +105,7 @@ export async function GET() {
       return [{
         family, sku: currentProduct.sku, name: currentProduct.name,
         sales30: group.sales30, sales90: group.sales90, dailyDemand,
-        localStock, inbound: group.inbound, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock,
+        localStock, inbound: group.inbound, backorder: group.backorder, provisional: group.provisional, supplierStock, minimumStock: group.minimumStock,
         predecessorSkus: predecessorSkusForFamily(successions.rows, family),
         note: notesBySku.get(family) || null,
         daysCover: dailyDemand ? availablePosition / dailyDemand : null,

@@ -32,7 +32,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   const result = await pool.query(`
-    SELECT o.id, o.supplier_order_number, o.customer_purchase_order, o.status, o.created_at, o.received_at,
+    SELECT o.id, o.supplier_order_number, o.customer_purchase_order, o.source, o.status, o.created_at, o.received_at,
       lines.lines, documents.documents
     FROM supplier_inbound_orders o
     LEFT JOIN LATERAL (
@@ -48,7 +48,7 @@ export async function GET() {
       FROM supplier_inbound_order_documents document WHERE document.inbound_order_id = o.id
     ) documents ON true
     WHERE o.supplier = 'victron'
-    ORDER BY CASE WHEN o.status = 'open' THEN 0 ELSE 1 END, o.created_at DESC
+    ORDER BY CASE WHEN o.status = 'open' THEN 0 ELSE 1 END, CASE WHEN o.source = 'backorder' THEN 0 ELSE 1 END, o.created_at DESC
   `);
   return NextResponse.json({ orders: result.rows });
 }
@@ -135,6 +135,8 @@ export async function PATCH(request: Request) {
   }
   const lineId = Number(body.lineId);
   if (!Number.isInteger(lineId)) return NextResponse.json({ error: 'A valid receipt line is required.' }, { status: 400 });
+  const partialQuantity = body.partialQuantity === undefined ? null : Number(body.partialQuantity);
+  if (partialQuantity !== null && (!Number.isInteger(partialQuantity) || partialQuantity < 1)) return NextResponse.json({ error: 'Partial receipt must be a positive whole number.' }, { status: 400 });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -147,11 +149,13 @@ export async function PATCH(request: Request) {
     const row = line.rows[0];
     if (!row) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Inbound line not found.' }, { status: 404 }); }
     if (row.status === 'received') { await client.query('COMMIT'); return NextResponse.json({ ok: true, unchanged: true }); }
+    const outstandingQuantity = Number(row.ordered_quantity) - Number(row.received_quantity);
+    if (partialQuantity !== null && partialQuantity > outstandingQuantity) { await client.query('ROLLBACK'); return NextResponse.json({ error: `Only ${outstandingQuantity} unit${outstandingQuantity === 1 ? '' : 's'} remain to be received.` }, { status: 400 }); }
     await client.query(`
       UPDATE supplier_inbound_order_lines
-      SET received_quantity = ordered_quantity, received_at = NOW(), received_by_user_id = $2
+      SET received_quantity = received_quantity + $2, received_at = NOW(), received_by_user_id = $3
       WHERE id = $1
-    `, [lineId, user.id]);
+    `, [lineId, partialQuantity ?? outstandingQuantity, user.id]);
     const remaining = await client.query(`
       SELECT count(*)::int AS count FROM supplier_inbound_order_lines
       WHERE inbound_order_id = $1 AND is_stock_item = true AND received_quantity < ordered_quantity
