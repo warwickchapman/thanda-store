@@ -15,11 +15,13 @@ function nonBlank(value: string) { return value.trim(); }
 
 export default function VictronInboundPage() {
   const fileInput = useRef<HTMLInputElement>(null);
+  const backordersInput = useRef<HTMLInputElement>(null);
   const [orders, setOrders] = useState<InboundOrder[]>([]);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [supplierOrderNumber, setSupplierOrderNumber] = useState('');
   const [customerPurchaseOrder, setCustomerPurchaseOrder] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [backordersFile, setBackordersFile] = useState<File | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +55,20 @@ export default function VictronInboundPage() {
       setLines(data.lines || []);
       setMessage(`Prepared ${data.lines.length} lines from invoice${data.invoices.length === 1 ? '' : 's'} ${data.invoices.join(', ')}. Review before saving.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to read invoices.'); }
+    finally { setBusy(false); }
+  }
+
+  async function importBackorders() {
+    if (!backordersFile) { setError('Choose a saved Victron Backorders HTML file first.'); return; }
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const formData = new FormData(); formData.set('backordersHtml', backordersFile);
+      const response = await fetch('/api/admin/victron-inbound/backorders', { method: 'POST', body: formData }); const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to import the Backorders report.');
+      setBackordersFile(null); if (backordersInput.current) backordersInput.current.value = '';
+      setMessage(`Backorders imported: ${data.created} new and ${data.updated} updated inbound order${data.orderCount === 1 ? '' : 's'}. Confirm receipt only when the items physically arrive.`);
+      await loadOrders();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to import the Backorders report.'); }
     finally { setBusy(false); }
   }
 
@@ -112,6 +128,8 @@ export default function VictronInboundPage() {
       <nav className="mb-6 flex gap-1 border-b border-zinc-200" aria-label="Inventory planning"><Link href="/admin/replenishment" className="px-4 py-2 text-sm font-semibold text-zinc-600 hover:text-zinc-950">Replenishment</Link><span className="border-b-2 border-zinc-950 px-4 py-2 text-sm font-bold">Inbound deliveries</span><Link href="/admin/victron-stock-minima" className="px-4 py-2 text-sm font-semibold text-zinc-600 hover:text-zinc-950">Stock minima</Link></nav>
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+
+      <section className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 shadow-sm"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><h2 className="text-lg font-bold text-green-950">Import E-Order backorders</h2><p className="mt-1 text-sm text-green-900">Upload the saved Victron Backorders page after placing an order. Its remaining quantities create or update the matching inbound orders; they are not treated as a provisional cart.</p></div><div className="flex gap-2"><input ref={backordersInput} type="file" accept=".html,text/html" onChange={(event) => setBackordersFile(event.target.files?.[0] || null)} className="block h-10 max-w-72 rounded-md border border-green-300 bg-white p-1.5 text-sm" /><button type="button" onClick={() => void importBackorders()} disabled={busy || !backordersFile} className="inline-flex h-10 items-center gap-2 rounded-md border border-green-300 bg-white px-4 text-sm font-semibold text-green-950 disabled:opacity-60"><FileUp className="h-4 w-4" />{busy ? 'Importing' : 'Import backorders'}</button></div></div></section>
 
       <section className="mb-8 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="mb-4"><h2 className="text-lg font-bold">Prepare an inbound order</h2><p className="mt-1 text-sm text-zinc-500">Upload Victron tax-invoice PDFs to prefill the order, or enter lines manually. Source PDFs are optional and retained with the order.</p></div>
