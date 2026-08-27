@@ -18,7 +18,7 @@ type MinimumRow = { sku: string; minimum_stock: string | number };
 type NoteRow = { sku: string; note: string };
 type ProvisionalRow = { sku: string; quantity: string | number; uploaded_at: string };
 
-function wholeUnits(value: number) { return Math.max(0, Math.ceil(value - 1e-9)); }
+function wholeUnits(value: number) { return Math.max(0, Math.round(value)); }
 export async function GET() {
   const user = await currentUser();
   if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
