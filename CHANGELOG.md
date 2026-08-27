@@ -12,6 +12,7 @@ All notable production-facing changes are recorded here. This project does not y
 ### Changed
 
 - Replenishment table columns can now be sorted by clicking their headers. KZN stock remains visually highlighted, an administrator can click a Min value to update its saved stock minimum directly, and its floating header row remains opaque while scrolling.
+- The **Provisional E-Order cart** panel now uses the same mustard colour treatment as the Replenishment table's **Provisional** column.
 - The **Item to order** header now opens a progressive SKU/name filter when its text is clicked (or with `/`); the remaining header space continues to sort the column.
 - Replenishment demand thresholds now round to the nearest whole unit rather than always upward, avoiding an extra unit for small fractional requirements.
 - Administrators can upload a saved Victron E-Order basket HTML file as a transient provisional cart. Its quantities are audited against the replenishment list, can be replaced or cleared, and reduce only the remaining suggested quantity; no source HTML or supplier order is retained.

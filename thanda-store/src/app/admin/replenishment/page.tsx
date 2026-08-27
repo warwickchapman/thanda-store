@@ -679,19 +679,19 @@ export default function ReplenishmentPage() {
                 Refresh
               </button>
             </div>
-            <section className="mb-5 rounded-lg border border-sky-200 bg-sky-50 p-4 shadow-sm">
+            <section className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
-                  <h2 className="font-bold text-sky-950">
+                  <h2 className="font-bold text-amber-950">
                     Provisional E-Order cart
                   </h2>
-                  <p className="mt-1 text-sm text-sky-900">
+                  <p className="mt-1 text-sm text-amber-900">
                     Upload a saved E-Order basket overview HTML file. Its
                     quantities are temporary, are not retained as an order, and
                     reduce the remaining suggested quantity.
                   </p>
                   {report.provisionalCart.lineCount > 0 && (
-                    <p className="mt-2 text-sm font-semibold text-sky-950">
+                    <p className="mt-2 text-sm font-semibold text-amber-950">
                       {report.provisionalCart.lineCount} cart line
                       {report.provisionalCart.lineCount === 1 ? "" : "s"}{" "}
                       currently applied
@@ -707,7 +707,7 @@ export default function ReplenishmentPage() {
                     type="button"
                     onClick={() => void clearCart()}
                     disabled={cartBusy}
-                    className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-sky-300 bg-white px-3 text-sm font-semibold text-sky-950 disabled:opacity-60"
+                    className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-950 disabled:opacity-60"
                   >
                     <Trash2 className="h-4 w-4" />
                     Clear cart
@@ -722,13 +722,13 @@ export default function ReplenishmentPage() {
                   onChange={(event) =>
                     setCartFile(event.target.files?.[0] || null)
                   }
-                  className="block h-10 flex-1 rounded-md border border-sky-300 bg-white p-1.5 text-sm"
+                  className="block h-10 flex-1 rounded-md border border-amber-300 bg-white p-1.5 text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => void uploadCart()}
                   disabled={!cartFile || cartBusy}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-sky-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-amber-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
                 >
                   <FileUp className="h-4 w-4" />
                   {cartBusy
