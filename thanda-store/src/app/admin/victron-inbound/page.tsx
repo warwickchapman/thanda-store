@@ -183,6 +183,31 @@ export default function VictronInboundPage() {
     }
   }
 
+  async function clearAllBackorders() {
+    if (!window.confirm("Clear all transient Victron backorders?")) return;
+    setClearingBackorder("*");
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/victron-inbound/backorders", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Unable to clear backorders.");
+      setMessage("All transient backorders cleared.");
+      await loadOrders();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to clear backorders.",
+      );
+    } finally {
+      setClearingBackorder(null);
+    }
+  }
+
   function addLine() {
     setLines((current) => [
       ...current,
@@ -413,11 +438,21 @@ export default function VictronInboundPage() {
               <button
                 type="button"
                 onClick={() => void importBackorders()}
-                disabled={busy || !backordersFile}
+                disabled={busy || clearingBackorder !== null || !backordersFile}
                 className="inline-flex h-10 items-center gap-2 rounded-md border border-orange-300 bg-white px-4 text-sm font-semibold text-orange-950 disabled:opacity-60"
               >
                 <FileUp className="h-4 w-4" />
                 {busy ? "Importing" : "Import backorders"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearAllBackorders()}
+                disabled={
+                  busy || clearingBackorder !== null || !backorders.length
+                }
+                className="h-10 rounded-md border border-orange-300 bg-white px-4 text-sm font-semibold text-orange-950 disabled:opacity-60"
+              >
+                {clearingBackorder === "*" ? "Clearing" : "Clear backorders"}
               </button>
             </div>
           </div>
@@ -651,10 +686,7 @@ export default function VictronInboundPage() {
                               line.sku,
                             )
                           }
-                          disabled={
-                            clearingBackorder ===
-                            `${backorder.order_number}:${line.sku}`
-                          }
+                          disabled={clearingBackorder !== null}
                           className="h-8 rounded-md border border-orange-300 bg-white px-3 text-xs font-semibold text-orange-950 disabled:opacity-60"
                         >
                           {clearingBackorder ===

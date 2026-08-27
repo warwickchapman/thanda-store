@@ -110,7 +110,7 @@ export async function DELETE(request: Request) {
       { status: 403 },
     );
   await ensureAuthSchema();
-  let body: { orderNumber?: unknown; sku?: unknown };
+  let body: { all?: unknown; orderNumber?: unknown; sku?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -118,6 +118,10 @@ export async function DELETE(request: Request) {
       { error: "Choose a backorder item to clear." },
       { status: 400 },
     );
+  }
+  if (body.all === true) {
+    await pool.query("DELETE FROM victron_provisional_backorders");
+    return NextResponse.json({ ok: true });
   }
   const orderNumber = String(body.orderNumber || "").trim();
   const sku = String(body.sku || "")
