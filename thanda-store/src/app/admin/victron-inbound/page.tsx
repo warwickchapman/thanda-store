@@ -49,6 +49,9 @@ export default function VictronInboundPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [clearingBackorder, setClearingBackorder] = useState<string | null>(
+    null,
+  );
   const [receivingLine, setReceivingLine] = useState<number | null>(null);
   const [receivingOrder, setReceivingOrder] = useState<number | null>(null);
 
@@ -153,25 +156,30 @@ export default function VictronInboundPage() {
     }
   }
 
-  async function clearBackorders() {
-    setBusy(true);
+  async function clearBackorder(orderNumber: string, sku: string) {
+    const key = `${orderNumber}:${sku}`;
+    setClearingBackorder(key);
     setError("");
     setMessage("");
     try {
       const response = await fetch("/api/admin/victron-inbound/backorders", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderNumber, sku }),
       });
       const data = await response.json();
       if (!response.ok)
-        throw new Error(data.error || "Unable to clear backorders.");
-      setMessage("Transient backorders cleared.");
+        throw new Error(data.error || "Unable to clear the backorder item.");
+      setMessage(`${sku} cleared from backorder ${orderNumber}.`);
       await loadOrders();
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "Unable to clear backorders.",
+        cause instanceof Error
+          ? cause.message
+          : "Unable to clear the backorder item.",
       );
     } finally {
-      setBusy(false);
+      setClearingBackorder(null);
     }
   }
 
@@ -389,6 +397,7 @@ export default function VictronInboundPage() {
                 Upload the saved Victron Backorders page as a transient
                 snapshot. It replaces the previous snapshot, reduces
                 replenishment suggestions, and never alters inbound orders.
+                Individual lines can be cleared under Expected orders.
               </p>
             </div>
             <div className="flex gap-2">
@@ -409,14 +418,6 @@ export default function VictronInboundPage() {
               >
                 <FileUp className="h-4 w-4" />
                 {busy ? "Importing" : "Import backorders"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void clearBackorders()}
-                disabled={busy}
-                className="h-10 rounded-md border border-orange-300 bg-white px-4 text-sm font-semibold text-orange-950 disabled:opacity-60"
-              >
-                Clear backorders
               </button>
             </div>
           </div>
@@ -638,9 +639,30 @@ export default function VictronInboundPage() {
                           · {line.description}
                         </span>
                       </p>
-                      <span className="shrink-0 text-sm font-semibold text-orange-900">
-                        {line.quantity} remaining
-                      </span>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="text-sm font-semibold text-orange-900">
+                          {line.quantity} remaining
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void clearBackorder(
+                              backorder.order_number,
+                              line.sku,
+                            )
+                          }
+                          disabled={
+                            clearingBackorder ===
+                            `${backorder.order_number}:${line.sku}`
+                          }
+                          className="h-8 rounded-md border border-orange-300 bg-white px-3 text-xs font-semibold text-orange-950 disabled:opacity-60"
+                        >
+                          {clearingBackorder ===
+                          `${backorder.order_number}:${line.sku}`
+                            ? "Clearing"
+                            : "Clear"}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

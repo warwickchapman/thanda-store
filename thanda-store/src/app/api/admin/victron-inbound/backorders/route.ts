@@ -103,13 +103,61 @@ export async function POST(request: Request) {
     );
   }
 }
-export async function DELETE() {
+export async function DELETE(request: Request) {
   if (!(await admin()))
     return NextResponse.json(
       { error: "Admin access required" },
       { status: 403 },
     );
   await ensureAuthSchema();
-  await pool.query("DELETE FROM victron_provisional_backorders");
-  return NextResponse.json({ ok: true });
+  let body: { orderNumber?: unknown; sku?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Choose a backorder item to clear." },
+      { status: 400 },
+    );
+  }
+  const orderNumber = String(body.orderNumber || "").trim();
+  const sku = String(body.sku || "")
+    .trim()
+    .toUpperCase();
+  if (!/^\d+$/.test(orderNumber) || !/^[A-Z0-9-]{3,}$/.test(sku))
+    return NextResponse.json(
+      { error: "Choose a valid backorder item to clear." },
+      { status: 400 },
+    );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const removed = await client.query(
+      `DELETE FROM victron_provisional_backorder_order_lines
+       WHERE order_number = $1 AND sku = $2`,
+      [orderNumber, sku],
+    );
+    if (!removed.rowCount) {
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { error: "That backorder item is no longer present." },
+        { status: 404 },
+      );
+    }
+    await client.query(
+      `DELETE FROM victron_provisional_backorders backorder
+       WHERE backorder.order_number = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM victron_provisional_backorder_order_lines line
+           WHERE line.order_number = backorder.order_number
+         )`,
+      [orderNumber],
+    );
+    await client.query("COMMIT");
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
