@@ -1,5 +1,42 @@
-import Link from 'next/link';
+import Link from "next/link";
 
 export default function ReplenishmentHowItWorksPage() {
-  return <main className="min-h-screen bg-zinc-50 text-zinc-950"><div className="mx-auto max-w-3xl px-4 py-6"><nav className="mb-6 flex gap-4 border-b border-zinc-200 pb-3 text-sm font-semibold"><Link href="/admin/replenishment">Replenishment</Link><Link href="/admin/victron-inbound">Inbound</Link><Link href="/admin/victron-stock-minima">Minimums</Link><span>How recommendations work</span></nav><h1 className="text-2xl font-bold">How recommendations work</h1><div className="mt-5 space-y-4 rounded-lg border border-zinc-200 bg-white p-5 text-sm"><p><b>Configured minimum</b> is the quantity you maintain in Minimums. It is a floor, not an order quantity.</p><p><b>7-day Target</b> is expected demand over Victron’s 5-day lead time plus 2 days of safety stock, compared with the configured minimum; the higher value applies.</p><p><b>14-day Target</b> is expected demand over 14 days, compared with the configured minimum; the higher value applies.</p><p><b>Suggested</b> is the 14-day Target less KZN stock, ordinary inbound, Victron backorders and the temporary E-Order cart. Values are rounded to the nearest whole unit.</p><p>Backorders are confirmed Victron remaining quantities. They count toward coverage but are shown separately from ordinary inbound deliveries.</p></div></div></main>;
+  return (
+    <main className="min-h-screen bg-zinc-50 text-zinc-950">
+      <div className="mx-auto max-w-3xl px-4 py-6">
+        <nav className="mb-6 flex gap-4 border-b border-zinc-200 pb-3 text-sm font-semibold">
+          <Link href="/admin/replenishment">Replenishment</Link>
+          <Link href="/admin/victron-inbound">Inbound</Link>
+          <Link href="/admin/victron-stock-minima">Minimums</Link>
+          <span>How recommendations work</span>
+        </nav>
+        <h1 className="text-2xl font-bold">How recommendations work</h1>
+        <div className="mt-5 space-y-4 rounded-lg border border-zinc-200 bg-white p-5 text-sm">
+          <p>
+            <b>Configured minimum</b> is the quantity you maintain in Minimums.
+            It is a floor, not an order quantity.
+          </p>
+          <p>
+            <b>7-day Target</b> is expected demand over Victron’s 5-day lead
+            time plus 2 days of safety stock, compared with the configured
+            minimum; the higher value applies.
+          </p>
+          <p>
+            <b>14-day Target</b> is expected demand over 14 days, compared with
+            the configured minimum; the higher value applies.
+          </p>
+          <p>
+            <b>Suggested</b> is the 14-day Target less KZN stock, ordinary
+            inbound, Victron backorders and the temporary E-Order cart. Values
+            are rounded to the nearest whole unit.
+          </p>
+          <p>
+            Backorders are confirmed Victron remaining quantities. They count
+            toward coverage but are shown separately from ordinary inbound
+            deliveries.
+          </p>
+        </div>
+      </div>
+    </main>
+  );
 }
