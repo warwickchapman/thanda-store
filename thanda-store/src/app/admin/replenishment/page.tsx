@@ -761,7 +761,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "item"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="px-4"
+                    className="rounded-tl-lg px-4"
                     align="left"
                   />
                   <SortHeader
@@ -786,7 +786,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "minimumStock"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="bg-red-50 text-right font-bold text-red-800"
+                    className="border-l border-zinc-300 bg-red-50 text-right font-bold text-red-800"
                   />
                   <SortHeader
                     column="localStock"
@@ -834,7 +834,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "suggestedOrder"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="text-right"
+                    className="border-l border-zinc-300 text-right"
                   />
                   <SortHeader
                     column="status"
@@ -842,7 +842,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "status"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="px-4 text-left"
+                    className="rounded-tr-lg border-l border-zinc-300 px-4 text-left"
                     align="left"
                   />
                 </tr>
@@ -878,13 +878,13 @@ export default function ReplenishmentPage() {
                         onCancel={() => setEditingNote(null)}
                       />
                     </td>
-                    <td className="bg-red-50 px-3 py-3 text-right text-red-800">
+                    <td className="px-3 py-3 text-right">
                       {number(item.sales30)}
                     </td>
                     <td className="px-3 py-3 text-right">
                       {number(item.sales90)}
                     </td>
-                    <td className="px-3 py-3 text-right">
+                    <td className="border-l border-zinc-300 bg-red-50 px-3 py-3 text-right text-red-800">
                       {editingMinimum === item.sku ? (
                         <input
                           autoFocus
@@ -937,12 +937,12 @@ export default function ReplenishmentPage() {
                         : number(item.daysCover, 1)}
                     </td>
                     <td
-                      className="px-3 py-3 text-right font-bold"
+                      className="border-l border-zinc-300 px-3 py-3 text-right font-bold"
                       title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}`}
                     >
                       {item.suggestedOrder ? number(item.suggestedOrder) : "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="border-l border-zinc-300 px-4 py-3">
                       <span
                         className={`inline-flex border px-2 py-0.5 text-xs font-semibold ${item.status === "order_now" ? "border-red-200 bg-red-50 text-red-800" : item.status === "top_up" || item.status === "in_cart" ? "border-amber-200 bg-amber-50 text-amber-900" : item.status === "satisfied" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-green-200 bg-green-50 text-green-800"}`}
                       >
