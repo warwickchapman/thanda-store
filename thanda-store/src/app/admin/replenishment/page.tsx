@@ -761,7 +761,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "item"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="rounded-tl-lg px-4"
+                    className="rounded-tl-lg border-r border-zinc-300 px-4"
                     align="left"
                   />
                   <SortHeader
@@ -818,7 +818,7 @@ export default function ReplenishmentPage() {
                     selected={sortKey === "provisional"}
                     direction={sortDirection}
                     onSelect={selectSort}
-                    className="bg-amber-50 text-right font-bold text-amber-900"
+                    className="border-r border-zinc-300 bg-amber-50 text-right font-bold text-amber-900"
                   />
                   <SortHeader
                     column="daysCover"
@@ -850,7 +850,7 @@ export default function ReplenishmentPage() {
               <tbody>
                 {items.map((item) => (
                   <tr key={item.sku} className="border-t border-zinc-100">
-                    <td className="group relative px-4 py-3">
+                    <td className="group relative border-r border-zinc-300 px-4 py-3">
                       <p className="font-bold">{item.sku}</p>
                       <p className="text-xs text-zinc-500">
                         {item.name}
@@ -928,7 +928,7 @@ export default function ReplenishmentPage() {
                     <td className="bg-orange-50 px-3 py-3 text-right font-bold text-orange-800">
                       {item.backorder ? number(item.backorder) : "—"}
                     </td>
-                    <td className="bg-amber-50 px-3 py-3 text-right font-bold text-amber-900">
+                    <td className="border-r border-zinc-300 bg-amber-50 px-3 py-3 text-right font-bold text-amber-900">
                       {item.provisional ? number(item.provisional) : "—"}
                     </td>
                     <td className="px-3 py-3 text-right">
