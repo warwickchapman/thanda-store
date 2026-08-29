@@ -138,7 +138,7 @@ Administrators manage users at `/admin/users`:
 
 1. Search Xero by the buyer primary contact email and select the customer contact. The company name is read from Xero; it is not entered in the portal.
 2. The portal emails a single-use account setup link that expires after seven days.
-3. The buyer chooses their own password, then signs in with their email, password, and a short-lived email OTP.
+3. The buyer chooses their own password, then signs in with their email, password, and a short-lived email OTP. The verification step lets them resend a code after 30 seconds.
 
 The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Disable an account to block future session checks without deleting its audit trail.
 

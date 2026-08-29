@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Buyers can resend their email login code from the verification step after a 30-second cooldown.
 - Added an administrator-only Victron inbound-stock workflow. It optionally reads and retains Victron tax-invoice PDFs, prepares a reviewable SKU/quantity list, records line-by-line physical receipt, and requests the existing Xero stock reconciliation without changing Xero inventory directly.
 - Added the administrator-only Victron **Replenishment** report. It uses cached 30/90-day invoice sales, current KZN stock, and open inbound quantities to show days of cover, reorder points, and suggested order quantities without making a live Xero or Victron request.
 - Seeded Victron stock-minimum settings once from the supplied stock sheet. Administrators now maintain those values in **Inventory planning → Stock minima**; the replenishment report uses the configured minimum as a hard floor alongside demand-based cover. No recurring spreadsheet import is used.

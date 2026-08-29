@@ -1,7 +1,9 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+
+const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function LoginPage() {
   return <Suspense fallback={<main className="min-h-screen bg-zinc-50" />}><LoginForm /></Suspense>;
@@ -16,9 +18,20 @@ function LoginForm() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resendSeconds, setResendSeconds] = useState(0);
 
-  async function requestOtp(event: React.FormEvent) {
-    event.preventDefault();
+  useEffect(() => {
+    if (resendSeconds === 0) return;
+
+    const timer = window.setInterval(() => {
+      setResendSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [resendSeconds]);
+
+  async function requestOtp() {
+    const isResend = step === 'otp';
     setBusy(true);
     setError('');
     setMessage('');
@@ -31,7 +44,8 @@ function LoginForm() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not request login code');
       setStep('otp');
-      setMessage(`Login code sent to ${data.email}.`);
+      setResendSeconds(RESEND_COOLDOWN_SECONDS);
+      setMessage(isResend ? `A new login code was sent to ${data.email}.` : `Login code sent to ${data.email}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not request login code');
     } finally {
@@ -70,7 +84,17 @@ function LoginForm() {
           </div>
         </div>
 
-        <form onSubmit={step === 'password' ? requestOtp : verifyOtp} className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <form
+          onSubmit={(event) => {
+            if (step === 'password') {
+              event.preventDefault();
+              void requestOtp();
+              return;
+            }
+            void verifyOtp(event);
+          }}
+          className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
+        >
           <div>
             <label className="mb-1 block text-sm font-semibold" htmlFor="email">Email</label>
             <input
@@ -122,18 +146,29 @@ function LoginForm() {
           </button>
 
           {step === 'otp' && (
-            <button
-              type="button"
-              onClick={() => {
-                setStep('password');
-                setOtp('');
-                setMessage('');
-                setError('');
-              }}
-              className="h-10 w-full text-sm font-semibold text-zinc-600"
-            >
-              Use a different password
-            </button>
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => void requestOtp()}
+                disabled={busy || resendSeconds > 0}
+                className="h-10 w-full text-sm font-semibold text-zinc-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : 'Resend code'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('password');
+                  setOtp('');
+                  setMessage('');
+                  setError('');
+                  setResendSeconds(0);
+                }}
+                className="h-10 w-full text-sm font-semibold text-zinc-600"
+              >
+                Use a different password
+              </button>
+            </div>
           )}
         </form>
       </div>
