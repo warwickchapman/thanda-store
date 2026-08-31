@@ -1,17 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FileUp, PackageCheck, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { PackageCheck, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 
-type DraftLine = {
+type InboundLine = {
+  id: number;
   sku: string;
   description: string;
-  quantity: number;
   isStockItem: boolean;
-};
-type InboundLine = DraftLine & {
-  id: number;
   orderedQuantity: number;
   receivedQuantity: number;
   receivedAt: string | null;
@@ -20,35 +17,53 @@ type InboundOrder = {
   id: number;
   supplier_order_number: string;
   customer_purchase_order: string | null;
+  api_managed: boolean;
+  external_order_date: string | null;
+  external_last_seen_at: string | null;
+  external_finished: boolean | null;
   status: "open" | "received";
   created_at: string;
   received_at: string | null;
   lines: InboundLine[];
   documents: Array<{ id: number; filename: string }>;
+  invoices: Array<{
+    invoiceNumber: string;
+    status: string | null;
+    shipmentNumber: string | null;
+    shippingDate: string | null;
+  }>;
 };
 type Backorder = {
   order_number: string;
+  order_date: string | null;
+  reference: string | null;
   uploaded_at: string;
-  lines: Array<{ sku: string; description: string; quantity: number }>;
+  lines: Array<{
+    sku: string;
+    description: string;
+    quantity: number;
+    plannedFor: string | null;
+  }>;
+};
+type SyncState = {
+  effective_cutover_date: string | null;
+  last_successful_sync_at: string | null;
+  next_allowed_at: string | null;
+  last_error: string | null;
+  last_stats: {
+    shipmentsImported?: number;
+    backordersImported?: number;
+    rmaShipmentsExcluded?: number;
+  } | null;
 };
 
-function nonBlank(value: string) {
-  return value.trim();
-}
-
 export default function VictronInboundPage() {
-  const fileInput = useRef<HTMLInputElement>(null);
-  const backordersInput = useRef<HTMLInputElement>(null);
   const [orders, setOrders] = useState<InboundOrder[]>([]);
   const [backorders, setBackorders] = useState<Backorder[]>([]);
-  const [lines, setLines] = useState<DraftLine[]>([]);
-  const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
-  const [customerPurchaseOrder, setCustomerPurchaseOrder] = useState("");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [backordersFile, setBackordersFile] = useState<File | null>(null);
+  const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [clearingBackorder, setClearingBackorder] = useState<string | null>(
     null,
   );
@@ -74,6 +89,7 @@ export default function VictronInboundPage() {
       );
     setOrders(inboundData.orders || []);
     setBackorders(backorderData.orders || []);
+    setSyncState(inboundData.syncState || null);
   }
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -86,73 +102,34 @@ export default function VictronInboundPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function prepareFromInvoices() {
-    if (!selectedFiles.length) {
-      setError("Choose one or more Victron invoice PDFs first.");
-      return;
-    }
-    setBusy(true);
+  async function syncVictron() {
+    setSyncing(true);
     setError("");
     setMessage("");
     try {
-      const formData = new FormData();
-      selectedFiles.forEach((file) => formData.append("documents", file));
-      const response = await fetch("/api/admin/victron-inbound/parse", {
+      const response = await fetch("/api/admin/victron-inbound/sync", {
         method: "POST",
-        body: formData,
       });
       const data = await response.json();
       if (!response.ok)
-        throw new Error(data.error || "Unable to read the uploaded invoices.");
-      setSupplierOrderNumber(data.supplierOrderNumber || "");
-      setCustomerPurchaseOrder(data.customerPurchaseOrder || "");
-      setLines(data.lines || []);
+        throw new Error(data.error || "Unable to synchronize Victron orders.");
+      const result = data.result || {};
       setMessage(
-        `Prepared ${data.lines.length} lines from invoice${data.invoices.length === 1 ? "" : "s"} ${data.invoices.join(", ")}. Review before saving.`,
-      );
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Unable to read invoices.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function importBackorders() {
-    if (!backordersFile) {
-      setError("Choose a saved Victron Backorders HTML file first.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const formData = new FormData();
-      formData.set("backordersHtml", backordersFile);
-      const response = await fetch("/api/admin/victron-inbound/backorders", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(
-          data.error || "Unable to import the Backorders report.",
-        );
-      setBackordersFile(null);
-      if (backordersInput.current) backordersInput.current.value = "";
-      setMessage(
-        `Loaded ${data.orderCount} transient backorder${data.orderCount === 1 ? "" : "s"} containing ${data.lineCount} line${data.lineCount === 1 ? "" : "s"}. This snapshot can be replaced or cleared and does not alter inbound orders.`,
+        result.reason === "already_running"
+          ? "A Victron synchronization is already running."
+          : result.reason === "rate_limited"
+            ? `Victron synchronization is paused until ${new Date(result.retryAt).toLocaleString()}.`
+            : `Victron synchronized: ${result.shipmentsImported || 0} shipment orders and ${result.backordersImported || 0} backorder orders are current.`,
       );
       await loadOrders();
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause.message
-          : "Unable to import the Backorders report.",
+          : "Unable to synchronize Victron orders.",
       );
     } finally {
-      setBusy(false);
+      setSyncing(false);
     }
   }
 
@@ -205,60 +182,6 @@ export default function VictronInboundPage() {
       );
     } finally {
       setClearingBackorder(null);
-    }
-  }
-
-  function addLine() {
-    setLines((current) => [
-      ...current,
-      { sku: "", description: "", quantity: 1, isStockItem: true },
-    ]);
-  }
-  function updateLine(index: number, patch: Partial<DraftLine>) {
-    setLines((current) =>
-      current.map((line, currentIndex) =>
-        currentIndex === index ? { ...line, ...patch } : line,
-      ),
-    );
-  }
-
-  async function saveOrder() {
-    if (!nonBlank(supplierOrderNumber) || !lines.length) {
-      setError("Add an order number and at least one inbound line.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const formData = new FormData();
-      formData.set(
-        "order",
-        JSON.stringify({ supplierOrderNumber, customerPurchaseOrder, lines }),
-      );
-      selectedFiles.forEach((file) => formData.append("documents", file));
-      const response = await fetch("/api/admin/victron-inbound", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.error || "Unable to save this inbound order.");
-      setLines([]);
-      setSupplierOrderNumber("");
-      setCustomerPurchaseOrder("");
-      setSelectedFiles([]);
-      if (fileInput.current) fileInput.current.value = "";
-      setMessage(
-        "Inbound Victron order saved. Confirm each stock line when it physically arrives.",
-      );
-      await loadOrders();
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Unable to save order.",
-      );
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -367,8 +290,8 @@ export default function VictronInboundPage() {
           <div>
             <h1 className="text-2xl font-bold">Victron inbound stock</h1>
             <p className="text-sm text-zinc-500">
-              Prepare expected deliveries, retain their invoices, and record
-              physical receipt.
+              Review E-Order shipments and backorders, then record the quantity
+              physically received.
             </p>
           </div>
           <Link href="/" className="text-sm font-semibold text-zinc-700">
@@ -412,207 +335,50 @@ export default function VictronInboundPage() {
           </div>
         )}
 
-        <section className="mb-5 rounded-lg border border-orange-200 bg-orange-50 p-4 shadow-sm">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <section className="mb-8 rounded-lg border border-sky-200 bg-sky-50 p-4 shadow-sm">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
-              <h2 className="text-lg font-bold text-orange-950">
-                Import E-Order backorders
+              <h2 className="text-lg font-bold text-sky-950">
+                Victron shipment and backorder sync
               </h2>
-              <p className="mt-1 text-sm text-orange-900">
-                Upload the saved Victron Backorders page as a transient
-                snapshot. It replaces the previous snapshot, reduces
-                replenishment suggestions, and never alters inbound orders.
-                Individual lines can be cleared under Expected orders.
+              <p className="mt-1 text-sm text-sky-900">
+                E-Order supplies billed shipment quantities and the current
+                backorder snapshot. Physical receipt is recorded only with the
+                confirmation controls below; KZN stock continues to come from
+                Xero.
               </p>
+              <p className="mt-2 text-xs text-sky-800">
+                {syncState?.last_successful_sync_at
+                  ? `Last synchronized ${new Date(syncState.last_successful_sync_at).toLocaleString()} · cutover ${syncState.effective_cutover_date || "not set"} · ${syncState.last_stats?.rmaShipmentsExcluded || 0} RMA shipments excluded`
+                  : "No successful API synchronization has been recorded yet."}
+              </p>
+              {syncState?.last_error && (
+                <p className="mt-1 text-xs font-semibold text-red-700">
+                  Last attempt: {syncState.last_error}
+                </p>
+              )}
             </div>
-            <div className="flex gap-2">
-              <input
-                ref={backordersInput}
-                type="file"
-                accept=".html,text/html"
-                onChange={(event) =>
-                  setBackordersFile(event.target.files?.[0] || null)
-                }
-                className="block h-10 max-w-72 rounded-md border border-orange-300 bg-white p-1.5 text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => void importBackorders()}
-                disabled={busy || clearingBackorder !== null || !backordersFile}
-                className="inline-flex h-10 items-center gap-2 rounded-md border border-orange-300 bg-white px-4 text-sm font-semibold text-orange-950 disabled:opacity-60"
-              >
-                <FileUp className="h-4 w-4" />
-                {busy ? "Importing" : "Import backorders"}
-              </button>
+            <div className="flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={() => void clearAllBackorders()}
                 disabled={
-                  busy || clearingBackorder !== null || !backorders.length
+                  syncing || clearingBackorder !== null || !backorders.length
                 }
                 className="h-10 rounded-md border border-orange-300 bg-white px-4 text-sm font-semibold text-orange-950 disabled:opacity-60"
               >
                 {clearingBackorder === "*" ? "Clearing" : "Clear backorders"}
               </button>
+              <button
+                type="button"
+                onClick={() => void syncVictron()}
+                disabled={syncing || clearingBackorder !== null}
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-sky-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Synchronizing" : "Sync Victron"}
+              </button>
             </div>
-          </div>
-        </section>
-
-        <section className="mb-8 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-          <div className="mb-4">
-            <h2 className="text-lg font-bold">Prepare an inbound order</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Upload Victron tax-invoice PDFs to prefill the order, or enter
-              lines manually. Source PDFs are optional and retained with the
-              order.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-            <label className="grid gap-1 text-sm font-semibold">
-              Victron invoice PDFs (optional)
-              <input
-                ref={fileInput}
-                type="file"
-                accept="application/pdf"
-                multiple
-                onChange={(event) =>
-                  setSelectedFiles(Array.from(event.target.files || []))
-                }
-                className="block h-10 w-full rounded-md border border-zinc-300 p-1.5 text-sm font-normal"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void prepareFromInvoices()}
-              disabled={busy || !selectedFiles.length}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold disabled:opacity-60"
-            >
-              <FileUp className="h-4 w-4" />
-              {busy ? "Reading" : "Read invoices"}
-            </button>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm font-semibold">
-              Victron order number
-              <input
-                value={supplierOrderNumber}
-                onChange={(event) => setSupplierOrderNumber(event.target.value)}
-                className="h-10 rounded-md border border-zinc-300 px-3 font-normal"
-                placeholder="e.g. 8800116"
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-semibold">
-              Your PO reference
-              <input
-                value={customerPurchaseOrder}
-                onChange={(event) =>
-                  setCustomerPurchaseOrder(event.target.value)
-                }
-                className="h-10 rounded-md border border-zinc-300 px-3 font-normal"
-                placeholder="Optional"
-              />
-            </label>
-          </div>
-          <div className="mt-5 overflow-x-auto rounded-md border border-zinc-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
-                <tr>
-                  <th className="px-3 py-2">SKU</th>
-                  <th className="px-3 py-2">Description</th>
-                  <th className="px-3 py-2">Qty</th>
-                  <th className="px-3 py-2">Stock item</th>
-                  <th className="px-3 py-2">
-                    <span className="sr-only">Remove</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, index) => (
-                  <tr
-                    key={`${line.sku}-${index}`}
-                    className="border-t border-zinc-100"
-                  >
-                    <td className="p-2">
-                      <input
-                        value={line.sku}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            sku: event.target.value.toUpperCase(),
-                          })
-                        }
-                        className="h-9 w-36 rounded border border-zinc-300 px-2"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        value={line.description}
-                        onChange={(event) =>
-                          updateLine(index, { description: event.target.value })
-                        }
-                        className="h-9 min-w-72 w-full rounded border border-zinc-300 px-2"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        min="1"
-                        value={line.quantity}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            quantity: Number(event.target.value),
-                          })
-                        }
-                        className="h-9 w-20 rounded border border-zinc-300 px-2"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="checkbox"
-                        checked={line.isStockItem}
-                        onChange={(event) =>
-                          updateLine(index, {
-                            isStockItem: event.target.checked,
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLines((current) =>
-                            current.filter(
-                              (_, currentIndex) => currentIndex !== index,
-                            ),
-                          )
-                        }
-                        className="text-xs font-semibold text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={addLine}
-              className="h-10 rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold"
-            >
-              Add line
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveOrder()}
-              disabled={busy || !lines.length}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              <PackageCheck className="h-4 w-4" />
-              Save inbound order
-            </button>
           </div>
         </section>
 
@@ -654,7 +420,8 @@ export default function VictronInboundPage() {
                       Victron backorder {backorder.order_number}
                     </h3>
                     <p className="text-sm text-orange-800">
-                      Snapshot uploaded{" "}
+                      {backorder.reference ? `${backorder.reference} · ` : ""}
+                      Snapshot synchronized{" "}
                       {new Date(backorder.uploaded_at).toLocaleString()}
                     </p>
                   </div>
@@ -677,6 +444,9 @@ export default function VictronInboundPage() {
                       <div className="flex shrink-0 items-center gap-3">
                         <span className="text-sm font-semibold text-orange-900">
                           {line.quantity} remaining
+                          {line.plannedFor
+                            ? ` · planned ${new Date(line.plannedFor).toLocaleDateString()}`
+                            : ""}
                         </span>
                         <button
                           type="button"
@@ -714,8 +484,15 @@ export default function VictronInboundPage() {
                       {order.customer_purchase_order
                         ? `PO ${order.customer_purchase_order} · `
                         : ""}
-                      Created {new Date(order.created_at).toLocaleDateString()}
+                      {order.external_order_date
+                        ? `Ordered ${new Date(order.external_order_date).toLocaleDateString()}`
+                        : `Created ${new Date(order.created_at).toLocaleDateString()}`}
                     </p>
+                    {order.invoices.length > 0 && (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        E-Order invoices: {order.invoices.map((invoice) => invoice.invoiceNumber).join(", ")}
+                      </p>
+                    )}
                     {order.documents.length > 0 && (
                       <p className="mt-1 text-xs text-zinc-500">
                         Invoices:{" "}
@@ -821,7 +598,7 @@ export default function VictronInboundPage() {
             ))}
             {!backorders.length && !orders.length && (
               <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
-                No Victron inbound orders have been prepared yet.
+                No Victron shipments or backorders are currently expected.
               </div>
             )}
           </div>

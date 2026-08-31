@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/root/thanda-store/thanda-store
 EnvironmentFile=/etc/thanda-store-supplier.env
-ExecStart=/usr/bin/npm run sync:victron
+ExecStart=/usr/bin/npm run sync:victron:scheduled

@@ -7,6 +7,7 @@ import {
   predecessorSkusForFamily,
   victronSkuFamilyResolver,
 } from "@/lib/victron-sku-family.mjs";
+import { backorderQuantityAfterInbound } from "@/lib/victron-order-sync.mjs";
 
 const SALES_WINDOWS = { recent: 30, baseline: 90 };
 const LEAD_TIME_DAYS = 5;
@@ -26,7 +27,11 @@ type SaleRow = {
   sales_90: string | number;
   last_sold_at: string | null;
 };
-type InboundRow = { sku: string; quantity: string | number };
+type InboundRow = {
+  order_number: string;
+  sku: string;
+  quantity: string | number;
+};
 type MinimumRow = { sku: string; minimum_stock: string | number };
 type NoteRow = { sku: string; note: string };
 type ProvisionalRow = {
@@ -71,16 +76,21 @@ export async function GET() {
         GROUP BY UPPER(sku)
       `),
       pool.query<InboundRow>(`
-        SELECT UPPER(line.sku) AS sku, SUM(line.ordered_quantity - line.received_quantity) AS quantity
+        SELECT inbound.supplier_order_number AS order_number,
+          UPPER(line.sku) AS sku,
+          SUM(line.ordered_quantity - line.received_quantity) AS quantity
         FROM supplier_inbound_order_lines line
         JOIN supplier_inbound_orders inbound ON inbound.id = line.inbound_order_id
         WHERE inbound.supplier = 'victron' AND inbound.status = 'open' AND inbound.source = 'inbound' AND line.is_stock_item = true
-        GROUP BY UPPER(line.sku)
+        GROUP BY inbound.supplier_order_number, UPPER(line.sku)
       `),
       pool.query<InboundRow>(`
-        SELECT UPPER(sku) AS sku, SUM(quantity) AS quantity
-        FROM victron_provisional_backorder_order_lines
-        GROUP BY UPPER(sku)
+        SELECT line.order_number, UPPER(line.sku) AS sku, SUM(line.quantity) AS quantity
+        FROM victron_provisional_backorder_order_lines line
+        LEFT JOIN victron_backorder_ignored_lines ignored
+          ON ignored.order_number = line.order_number AND ignored.sku = line.sku
+        WHERE ignored.sku IS NULL
+        GROUP BY line.order_number, UPPER(line.sku)
       `),
       pool.query<MinimumRow>(
         "SELECT UPPER(sku) AS sku, minimum_stock FROM victron_stock_minima",
@@ -118,6 +128,7 @@ export async function GET() {
         sales90: number;
         inbound: number;
         backorder: number;
+        backorderCoverage: number;
         provisional: number;
         minimumStock: number;
         lastSoldAt: string | null;
@@ -131,6 +142,7 @@ export async function GET() {
         sales90: 0,
         inbound: 0,
         backorder: 0,
+        backorderCoverage: 0,
         provisional: 0,
         minimumStock: 0,
         lastSoldAt: null,
@@ -150,10 +162,31 @@ export async function GET() {
       )
         group.lastSoldAt = row.last_sold_at;
     }
-    for (const row of inbound.rows)
-      groupFor(row.sku).inbound += Number(row.quantity) || 0;
-    for (const row of backorders.rows)
-      groupFor(row.sku).backorder += Number(row.quantity) || 0;
+    const inboundByOrderFamily = new Map<string, number>();
+    for (const row of inbound.rows) {
+      const family = resolveFamily(victronStockSku(row.sku));
+      const quantity = Number(row.quantity) || 0;
+      groupFor(row.sku).inbound += quantity;
+      const key = `${row.order_number}:${family}`;
+      inboundByOrderFamily.set(
+        key,
+        (inboundByOrderFamily.get(key) || 0) + quantity,
+      );
+    }
+    for (const row of backorders.rows) {
+      const family = resolveFamily(victronStockSku(row.sku));
+      const key = `${row.order_number}:${family}`;
+      const inboundOverlap = inboundByOrderFamily.get(key) || 0;
+      const backorder = Number(row.quantity) || 0;
+      const effectiveBackorder = backorderQuantityAfterInbound(
+        backorder,
+        inboundOverlap,
+      );
+      const group = groupFor(row.sku);
+      group.backorder += backorder;
+      group.backorderCoverage += effectiveBackorder;
+      inboundByOrderFamily.set(key, Math.max(0, inboundOverlap - backorder));
+    }
     for (const row of provisional.rows)
       groupFor(row.sku).provisional += Number(row.quantity) || 0;
     for (const row of minimums.rows) {
@@ -200,7 +233,10 @@ export async function GET() {
           group.minimumStock,
         );
         const availablePosition =
-          localStock + group.inbound + group.backorder + group.provisional;
+          localStock +
+          group.inbound +
+          group.backorderCoverage +
+          group.provisional;
         const suggestedOrder = wholeUnits(targetStock - availablePosition);
         const status =
           suggestedOrder === 0

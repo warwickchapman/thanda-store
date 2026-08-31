@@ -188,23 +188,106 @@ export async function ensureAuthSchema() {
     `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'inbound'`,
   );
   await pool.query(
+    `ALTER TABLE supplier_inbound_orders ALTER COLUMN created_by_user_id DROP NOT NULL`,
+  );
+  await pool.query(
+    `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS api_managed BOOLEAN NOT NULL DEFAULT false`,
+  );
+  await pool.query(
+    `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS external_order_date DATE`,
+  );
+  await pool.query(
+    `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS external_last_seen_at TIMESTAMPTZ`,
+  );
+  await pool.query(
+    `ALTER TABLE supplier_inbound_orders ADD COLUMN IF NOT EXISTS external_finished BOOLEAN`,
+  );
+  await pool.query(
     `CREATE TABLE IF NOT EXISTS victron_provisional_backorder_lines (sku TEXT PRIMARY KEY, quantity INTEGER NOT NULL CHECK (quantity > 0), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
   );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS victron_provisional_backorders (
       order_number TEXT PRIMARY KEY,
+      order_date DATE,
+      reference TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(
+    `ALTER TABLE victron_provisional_backorders ADD COLUMN IF NOT EXISTS order_date DATE`,
+  );
+  await pool.query(
+    `ALTER TABLE victron_provisional_backorders ADD COLUMN IF NOT EXISTS reference TEXT`,
+  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS victron_provisional_backorder_order_lines (
       order_number TEXT NOT NULL REFERENCES victron_provisional_backorders(order_number) ON DELETE CASCADE,
       sku TEXT NOT NULL,
       description TEXT NOT NULL,
       quantity INTEGER NOT NULL CHECK (quantity > 0),
+      planned_for DATE,
       PRIMARY KEY (order_number, sku)
     )
   `);
+  await pool.query(
+    `ALTER TABLE victron_provisional_backorder_order_lines ADD COLUMN IF NOT EXISTS planned_for DATE`,
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_backorder_ignored_lines (
+      order_number TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      cleared_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (order_number, sku)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_shipment_orders (
+      order_number TEXT PRIMARY KEY,
+      order_date DATE NOT NULL,
+      reference TEXT,
+      finished BOOLEAN NOT NULL DEFAULT false,
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_shipment_invoices (
+      invoice_number TEXT PRIMARY KEY,
+      order_number TEXT NOT NULL REFERENCES victron_shipment_orders(order_number) ON DELETE CASCADE,
+      status TEXT,
+      products_url TEXT NOT NULL,
+      shipment_number TEXT,
+      shipping_date DATE,
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      products_imported_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_shipment_invoice_lines (
+      invoice_number TEXT NOT NULL REFERENCES victron_shipment_invoices(invoice_number) ON DELETE CASCADE,
+      sku TEXT NOT NULL,
+      quantity_ordered INTEGER NOT NULL CHECK (quantity_ordered > 0),
+      PRIMARY KEY (invoice_number, sku)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS victron_order_sync_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      effective_cutover_date DATE,
+      last_started_at TIMESTAMPTZ,
+      last_completed_at TIMESTAMPTZ,
+      last_successful_sync_at TIMESTAMPTZ,
+      next_allowed_at TIMESTAMPTZ,
+      last_error TEXT,
+      last_stats JSONB,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO victron_order_sync_state (id) VALUES (true) ON CONFLICT (id) DO NOTHING`,
+  );
+  await pool.query(
+    `ALTER TABLE victron_order_sync_state ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ`,
+  );
   await pool.query(
     `CREATE INDEX IF NOT EXISTS victron_provisional_backorder_order_lines_sku_idx ON victron_provisional_backorder_order_lines (sku)`,
   );

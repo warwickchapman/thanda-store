@@ -28,9 +28,8 @@ The root README is the operational source of truth. [`thanda-store/README.md`](t
 - **Catalogue:** PostgreSQL `products` records keyed by `(supplier, sku)`. Product details that do not belong in first-class columns are stored in the JSONB `details` field.
 - **Supplier stock and pricing:** Renogy and Victron scripts refresh supplier information. The store never derives a buyer price from a supplier/distributor cost.
 - **Local KZN stock:** Xero Items refresh `details.localStockOnHand` for Victron products and the LoRa placeholder.
-- **Victron inbound stock:** Administrators can prepare an inbound Victron order at `/admin/victron-inbound`, optionally upload/retain its tax-invoice PDFs, and confirm physical receipt per SKU. This creates an operational receiving record only: Xero remains the source of truth for KZN stock, and each receipt requests the existing debounced Xero Items reconciliation rather than writing inventory through the portal.
-- **Victron replenishment:** `/admin/replenishment` uses only local PostgreSQL data: cached Xero sales over 30 and 90 days, KZN stock, unreceived inbound quantities, and configured minimum stock levels. It groups replacement SKU families and recommends the current SKU using the higher daily demand rate, a 5-day supplier lead time, 2 days of safety stock, and a 14-day target cover. A configured minimum is a hard floor for both reorder and target stock, and can be edited directly in the report. Administrators can mark an item Done after handling it in E-Order, undo that marker, or hide completed items while working through the list. The report does not issue live Xero or Victron API calls.
-- **Victron replenishment:** `/admin/replenishment` uses only local PostgreSQL data: cached Xero sales over 30 and 90 days, KZN stock, unreceived inbound quantities, configured minimum stock levels, and an optional provisional E-Order cart. It groups replacement SKU families and recommends the current SKU using the higher daily demand rate, a 5-day supplier lead time, 2 days of safety stock, and a 14-day target cover. A configured minimum is a hard floor for both reorder and target stock, and can be edited directly in the report. Administrators can mark an item Done after handling it in E-Order, undo that marker, or hide completed items while working through the list. A saved E-Order basket HTML upload is parsed into a replaceable, clearable, temporary quantity list; the source HTML is not retained and provisional quantities reduce the remaining suggested order only. On upload, any cart SKU missing from the local catalogue is imported directly from E-Order; an import failure stops the upload rather than silently omitting that line. Exact cart SKUs are matched first; otherwise a provisional cart SKU with a trailing `R` fulfils its non-`R` counterpart, because this indicates retail packaging only. Red **Order** means the line has not been addressed; provisional rows are blue **Satisfied** when they cover the displayed suggestion, otherwise blue **In cart**. The report does not issue live Xero or Victron API calls except for this explicit new-product import during cart upload.
+- **Victron inbound stock:** The hourly E-Order job reads the Shipments and Backorders APIs and stores a local, transient planning snapshot. Billed invoice quantities create or extend expected inbound orders; E-Order status never confirms receipt. Administrators physically count deliveries and use **Confirm all** or **Confirm partial**. Receipt requests the existing debounced Xero Items reconciliation but never writes KZN stock directly. Shipment references containing `RMA` are excluded.
+- **Victron replenishment:** `/admin/replenishment` uses only local PostgreSQL data: cached Xero sales over 30 and 90 days, Xero-sourced KZN stock, unreceived inbound quantities, current Victron backorders, configured minimum stock levels, and an optional provisional E-Order cart. It groups replacement SKU families and recommends the current SKU using the higher daily demand rate, a 5-day supplier lead time, 2 days of safety stock, and a 14-day target cover. Backorder quantities already represented by an open inbound balance on the same order and SKU family are not counted twice. The cart remains a replaceable HTML upload because E-Order exposes no cart API.
 - **Victron stock minima:** `/admin/victron-stock-minima` is the ongoing maintenance screen for minimum KZN stock by current Victron SKU. The initial positive levels were seeded once from the Victron stock-sheet workbook; values are thereafter maintained here, rather than by recurring spreadsheet import.
 - **Authentication:** Email/password plus a Resend-delivered email OTP. Email is the sole portal login identifier. Each buyer organisation must be linked to a Xero contact before a buyer can log in.
 - **Images:** Original supplier image URLs remain in PostgreSQL. The first catalogue response that finds a missing thumbnail starts background WebP generation; the current response falls back to the supplier original.
@@ -65,6 +64,8 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | --- | --- | --- |
 | `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | The VPS runs it every five minutes. |
 | `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | The VPS runs the full paginated E-Order read hourly. Do not add it to a five-minute job. |
+| `npm run sync:victron-orders` | Refresh E-Order shipment invoices and the transient backorder snapshot. | The VPS runs it after the hourly catalogue sync; Admin also offers an explicit manual sync. |
+| `npm run sync:victron:scheduled` | Run the hourly catalogue and order-planning syncs sequentially. | Production systemd use only. |
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | Manual recovery only. Production uses separate timers to protect Victron's API allowance. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
@@ -346,7 +347,7 @@ The export itself contains SKU, description, available stock, in-transit quantit
 Renogy and Victron have different API characteristics and must not share one timer:
 
 - `thanda-store-renogy-sync.timer` runs every five minutes.
-- `thanda-store-victron-sync.timer` runs the full paginated E-Order catalogue read hourly. The sync waits one second between result pages and honours Victron `429 Retry-After` responses through `/var/lib/thanda-store/victron-rate-limit.json`.
+- `thanda-store-victron-sync.timer` runs the full paginated E-Order catalogue read and then the shipment/backorder planning sync hourly. The catalogue sync waits one second between result pages and honours Victron `429 Retry-After` responses through `/var/lib/thanda-store/victron-rate-limit.json`.
 
 Both services load credentials from `/etc/thanda-store-supplier.env`, owned by `root:root` with mode `0600`. Never store supplier or database credentials in unit files, documentation, shell history, or source control.
 
@@ -502,6 +503,34 @@ The Victron sync:
 4. Uses `all_stock_by_warehouse.af_sa_inzuzo` when available for South Africa warehouse stock. A zero quantity is `Out of stock / not available`; E-Order product responses currently do not supply a reliable inbound-shipment ETA.
 5. Stores the Victron account price as distributor cost and calculates recommended retail excluding VAT as `price / VICTRON_THANDA_DISCOUNT_FACTOR`.
 6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`.
+
+### Victron shipment and backorder planning
+
+`npm run sync:victron-orders` makes two normal calls per run: one Shipments
+request and one Backorders request. At the hourly production cadence this is 48
+requests per day, plus one invoice-products request for each invoice not seen
+before. Previously imported invoices are served from PostgreSQL and are not
+requested again. Victron has not published an allowance for this account and
+successful responses currently expose no quota headers, so the job remains
+hourly, uses a 20-second timeout, retries a transient server failure once, and
+stops on `429 Retry-After` rather than polling.
+
+The first successful run chooses its cutover from the earliest E-Order shipment
+matching an already-open local inbound order; if there is no match it starts at
+the current date. `VICTRON_ORDERS_CUTOVER_DATE=YYYY-MM-DD` is an optional
+operator override. The chosen date is persisted. Orders after the cutover and
+any matching open local orders are imported idempotently by order and invoice
+number. Existing received quantities are never reduced or inferred from an API
+status. A newly observed billed quantity above the recorded receipt reopens the
+remaining balance for physical confirmation.
+
+Backorders replace the previous API snapshot on every successful run. A line
+cleared by an administrator stays hidden until Victron stops returning it;
+after it disappears, a future reappearance is treated as new. Replenishment
+subtracts an open inbound balance for the same order and SKU replacement family
+before counting a backorder, preventing the same unit from being counted twice.
+Packing-list PDFs and shipment serials are not used to confirm receipt. RMA
+references are excluded before any expected quantity is imported.
 
 Images and documents come from the heavier `/api/v1/products-extended/<SKU>/` endpoint. Run this intentionally, not every five minutes:
 

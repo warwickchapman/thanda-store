@@ -32,8 +32,10 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   await ensureAuthSchema();
   const result = await pool.query(`
-    SELECT o.id, o.supplier_order_number, o.customer_purchase_order, o.source, o.status, o.created_at, o.received_at,
-      lines.lines, documents.documents
+    SELECT o.id, o.supplier_order_number, o.customer_purchase_order, o.source,
+      o.api_managed, o.external_order_date, o.external_finished,
+      o.external_last_seen_at, o.status, o.created_at, o.received_at,
+      lines.lines, documents.documents, invoices.invoices
     FROM supplier_inbound_orders o
     LEFT JOIN LATERAL (
       SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -47,10 +49,28 @@ export async function GET() {
       SELECT COALESCE(jsonb_agg(jsonb_build_object('id', document.id, 'filename', document.filename) ORDER BY document.id), '[]'::jsonb) AS documents
       FROM supplier_inbound_order_documents document WHERE document.inbound_order_id = o.id
     ) documents ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'invoiceNumber', invoice.invoice_number,
+        'status', invoice.status,
+        'shipmentNumber', invoice.shipment_number,
+        'shippingDate', invoice.shipping_date
+      ) ORDER BY invoice.invoice_number), '[]'::jsonb) AS invoices
+      FROM victron_shipment_invoices invoice
+      WHERE invoice.order_number = o.supplier_order_number
+    ) invoices ON true
     WHERE o.supplier = 'victron'
     ORDER BY CASE WHEN o.status = 'open' THEN 0 ELSE 1 END, CASE WHEN o.source = 'backorder' THEN 0 ELSE 1 END, o.created_at DESC
   `);
-  return NextResponse.json({ orders: result.rows });
+  const syncState = await pool.query(`
+    SELECT effective_cutover_date, last_started_at, last_completed_at,
+      last_successful_sync_at, next_allowed_at, last_error, last_stats
+    FROM victron_order_sync_state WHERE id = true
+  `);
+  return NextResponse.json({
+    orders: result.rows,
+    syncState: syncState.rows[0] || null,
+  });
 }
 
 export async function POST(request: Request) {

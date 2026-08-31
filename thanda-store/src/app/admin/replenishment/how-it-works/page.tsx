@@ -33,7 +33,15 @@ export default function ReplenishmentHowItWorksPage() {
           <p>
             Backorders are confirmed Victron remaining quantities. They count
             toward coverage but are shown separately from ordinary inbound
-            deliveries.
+            deliveries. If the same order and SKU family is already represented
+            by an open inbound balance, that overlap is removed so it is not
+            counted twice.
+          </p>
+          <p>
+            E-Order invoice quantities establish what is expected. Shipment
+            status never confirms receipt: the warehouse records the physical
+            quantity with Confirm all or Confirm partial. KZN stock remains the
+            quantity supplied by Xero.
           </p>
         </div>
       </div>
