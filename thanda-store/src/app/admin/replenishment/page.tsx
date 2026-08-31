@@ -644,7 +644,7 @@ export default function ReplenishmentPage() {
       if (!response.ok)
         throw new Error(data.error || "Unable to check accepted Xero quotes.");
       setMessage(
-        `Checked Xero: ${data.activeQuotes} current accepted quote${data.activeQuotes === 1 ? "" : "s"} now reserve stock.`,
+        `Checked Xero: ${data.activeQuotes} current accepted quote${data.activeQuotes === 1 ? "" : "s"}; matched Victron lines now reserve stock.`,
       );
       await load();
     } catch (cause) {
@@ -741,7 +741,7 @@ export default function ReplenishmentPage() {
                   </p>
                   <p className="mt-2 text-sm font-semibold text-violet-950">
                     {report.acceptedQuotes.stats.activeQuotes || 0} current accepted
-                    quote{report.acceptedQuotes.stats.activeQuotes === 1 ? "" : "s"}
+                    quote{report.acceptedQuotes.stats.activeQuotes === 1 ? "" : "s"} checked
                     {report.acceptedQuotes.lastSuccessfulSyncAt
                       ? ` · checked ${new Date(report.acceptedQuotes.lastSuccessfulSyncAt).toLocaleString()}`
                       : " · not checked yet"}
