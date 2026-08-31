@@ -14,6 +14,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Changed
 
+- Shortened the Replenishment table headers to **Stock**, **Quotes**, **Cart**, and **Cover**, and reduced the table minimum width so the full planning view fits more comfortably on a desktop screen.
 - Replenishment table columns can now be sorted by clicking their headers. KZN stock remains visually highlighted, an administrator can click a Min value to update its saved stock minimum directly, and its floating header row remains opaque while scrolling.
 - The **Provisional E-Order cart** panel now uses the same mustard colour treatment as the Replenishment table's **Provisional** column.
 - Replenishment sales columns no longer inherit the Min highlight. Solid separators now distinguish 90-day sales from Min, Days cover from Suggested, and Suggested from Status; the table header also meets its rounded top corners cleanly.

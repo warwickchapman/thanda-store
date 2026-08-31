@@ -854,7 +854,7 @@ export default function ReplenishmentPage() {
         )}
         <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="overflow-x-auto lg:overflow-visible">
-            <table className="min-w-[1290px] w-full text-sm">
+            <table className="min-w-[1120px] w-full text-sm">
               <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <SortHeader
@@ -892,7 +892,7 @@ export default function ReplenishmentPage() {
                   />
                   <SortHeader
                     column="localStock"
-                    label="KZN stock"
+                    label="Stock"
                     selected={sortKey === "localStock"}
                     direction={sortDirection}
                     onSelect={selectSort}
@@ -900,7 +900,7 @@ export default function ReplenishmentPage() {
                   />
                   <SortHeader
                     column="reserved"
-                    label="Reserved"
+                    label="Quotes"
                     selected={sortKey === "reserved"}
                     direction={sortDirection}
                     onSelect={selectSort}
@@ -924,7 +924,7 @@ export default function ReplenishmentPage() {
                   />
                   <SortHeader
                     column="provisional"
-                    label="Provisional"
+                    label="Cart"
                     selected={sortKey === "provisional"}
                     direction={sortDirection}
                     onSelect={selectSort}
@@ -932,7 +932,7 @@ export default function ReplenishmentPage() {
                   />
                   <SortHeader
                     column="daysCover"
-                    label="Days cover"
+                    label="Cover"
                     selected={sortKey === "daysCover"}
                     direction={sortDirection}
                     onSelect={selectSort}
