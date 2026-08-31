@@ -76,12 +76,15 @@ function XeroContactFields({
   const [contacts, setContacts] = useState<XeroContact[]>([]);
   const [lookupMessage, setLookupMessage] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
+  const [matchedEmail, setMatchedEmail] = useState(initialContactId ? email : '');
+  const [lookupEmail, setLookupEmail] = useState('');
 
   const selectContact = useCallback((contact: XeroContact) => {
     setContactId(contact.id);
     setContactName(contact.name);
+    setMatchedEmail(email);
     onContactSelected?.(contact);
-  }, [onContactSelected]);
+  }, [email, onContactSelected]);
 
   async function findContacts() {
     if (!email) {
@@ -91,6 +94,7 @@ function XeroContactFields({
     setLookingUp(true);
     setLookupMessage('');
     setContacts([]);
+    setLookupEmail(email);
     try {
       const matches = await fetchXeroContacts(email);
       setContacts(matches);
@@ -116,6 +120,7 @@ function XeroContactFields({
     async function lookupAutomatically() {
       setLookingUp(true);
       setLookupMessage('');
+      setLookupEmail(email);
       try {
         const matches = await fetchXeroContacts(email);
         if (!active) return;
@@ -147,11 +152,11 @@ function XeroContactFields({
         {emailInput}
         <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
       </div>}
-      {emailInput ? <input type="hidden" name="xeroContactId" value={contactId} /> : <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-        <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => setContactId(event.target.value)} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+      {emailInput ? <input type="hidden" name="xeroContactId" value={matchedEmail === email ? contactId : ''} /> : <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+        <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => { setContactId(event.target.value); setMatchedEmail(email); }} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
         <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
       </div>}
-      {contacts.length > 1 && (
+      {lookupEmail === email && contacts.length > 1 && (
         <label className="grid gap-1 text-sm font-semibold">Matching Xero contacts
           <select
             defaultValue=""
@@ -166,8 +171,8 @@ function XeroContactFields({
           </select>
         </label>
       )}
-      {emailInput && contactName && <p className="text-sm text-zinc-700">Xero customer: <span className="font-semibold">{contactName}</span></p>}
-      {lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
+      {emailInput && matchedEmail === email && contactName && <p className="text-sm text-zinc-700">Xero customer: <span className="font-semibold">{contactName}</span></p>}
+      {lookupEmail === email && lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
     </div>
   );
 }
@@ -514,7 +519,6 @@ export default function AdminUsersPage() {
             className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6"
           >
             <XeroContactFields
-              key={`invite-${inviteEmail}`}
               email={inviteEmail}
               emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => { setInviteEmail(event.target.value); setInviteContact(null); }} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
               onContactSelected={setInviteContact}

@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Fixed the User Admin invite email field losing focus after every character. Changing the email now clears only any stale Xero contact match while leaving the input mounted and ready for uninterrupted typing.
 - Replenishment now subtracts Victron quantities reserved on current accepted Xero quotes from the available stock position. A cached purple **Reserved** column groups retail and replacement SKU families, identifies the contributing quote/customer on hover, and can be refreshed with **Check accepted quotes**. The production planning timer refreshes the snapshot every 30 minutes; RMA quotes and stale accepted statuses are explicitly excluded and reported.
 - Victron shipment invoices and backorders now synchronize from the E-Order API, replacing inbound PDF and backorder HTML uploads. Imports are idempotent, exclude RMA references, preserve manual full/partial receipt, remove unreceived legacy cart/backorder lines that were never billed for shipment, avoid inbound/backorder double counting, and leave Xero as the only KZN stock authority.
 - Buyers can resend their email login code from the verification step after a 30-second cooldown.
