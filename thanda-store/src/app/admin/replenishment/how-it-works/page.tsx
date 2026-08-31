@@ -27,8 +27,17 @@ export default function ReplenishmentHowItWorksPage() {
           </p>
           <p>
             <b>Suggested</b> is the 14-day Target less KZN stock, ordinary
-            inbound, Victron backorders and the temporary E-Order cart. Values
+            inbound, Victron backorders and the temporary E-Order cart, then
+            adds quantities reserved by current accepted Xero quotes. Values
             are rounded to the nearest whole unit.
+          </p>
+          <p>
+            <b>Reserved</b> contains Victron quantities on accepted Xero quotes.
+            SKU replacements and retail SKUs ending in R use the same stock
+            family. RMA quotes and accepted quotes older than 90 days are
+            excluded so replacement stock and stale quote statuses do not
+            distort today&apos;s order. The age window can be configured with
+            XERO_ACCEPTED_QUOTE_RESERVATION_DAYS.
           </p>
           <p>
             Backorders are confirmed Victron remaining quantities. They count

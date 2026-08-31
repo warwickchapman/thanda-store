@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync Thanda Store local stock from Xero
+Description=Sync Thanda Store planning stock and accepted quote reservations from Xero
 After=network-online.target
 Wants=network-online.target
 
@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/root/thanda-store/thanda-store
 EnvironmentFile=/etc/thanda-store-xero.env
-ExecStart=/usr/bin/npm run sync:xero-stock
+ExecStart=/usr/bin/npm run sync:xero-planning

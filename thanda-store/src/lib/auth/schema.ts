@@ -348,6 +348,47 @@ export async function ensureAuthSchema() {
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_accepted_quotes (
+      quote_id TEXT PRIMARY KEY,
+      quote_number TEXT NOT NULL,
+      contact_id TEXT,
+      contact_name TEXT NOT NULL DEFAULT '',
+      reference TEXT NOT NULL DEFAULT '',
+      quote_date DATE,
+      expiry_date DATE,
+      updated_date_utc DATE,
+      reservation_eligible BOOLEAN NOT NULL DEFAULT false,
+      exclusion_reason TEXT,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_accepted_quote_lines (
+      quote_id TEXT NOT NULL REFERENCES xero_accepted_quotes(quote_id) ON DELETE CASCADE,
+      line_key TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      PRIMARY KEY (quote_id, line_key)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_accepted_quote_sync_state (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      last_started_at TIMESTAMPTZ,
+      last_successful_sync_at TIMESTAMPTZ,
+      last_error TEXT,
+      last_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    "INSERT INTO xero_accepted_quote_sync_state (id) VALUES (true) ON CONFLICT (id) DO NOTHING",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_accepted_quote_lines_sku_idx ON xero_accepted_quote_lines (sku)",
+  );
   // Import only missing SKU settings. Future edits in Inventory planning win
   // permanently and no recurring workbook import is required.
   await pool.query(

@@ -39,6 +39,20 @@ type ProvisionalRow = {
   quantity: string | number;
   uploaded_at: string;
 };
+type AcceptedQuoteRow = {
+  quote_id: string;
+  quote_number: string;
+  contact_name: string;
+  reference: string;
+  sku: string;
+  description: string;
+  quantity: string | number;
+};
+type AcceptedQuoteStateRow = {
+  last_successful_sync_at: string | null;
+  last_error: string | null;
+  last_stats: Record<string, number> | null;
+};
 
 function wholeUnits(value: number) {
   return Math.max(0, Math.round(value));
@@ -60,6 +74,8 @@ export async function GET() {
       minimums,
       notes,
       provisional,
+      acceptedQuotes,
+      acceptedQuoteState,
       successions,
     ] = await Promise.all([
       pool.query<ProductRow>(`
@@ -101,6 +117,18 @@ export async function GET() {
       pool.query<ProvisionalRow>(
         "SELECT UPPER(sku) AS sku, quantity, uploaded_at::text FROM victron_provisional_cart_lines",
       ),
+      pool.query<AcceptedQuoteRow>(`
+        SELECT quote.quote_id, quote.quote_number, quote.contact_name, quote.reference,
+          UPPER(line.sku) AS sku, line.description, line.quantity
+        FROM xero_accepted_quote_lines line
+        JOIN xero_accepted_quotes quote ON quote.quote_id = line.quote_id
+        WHERE quote.reservation_eligible = true
+        ORDER BY quote.quote_date DESC, quote.quote_number, line.line_key
+      `),
+      pool.query<AcceptedQuoteStateRow>(`
+        SELECT last_successful_sync_at::text, last_error, last_stats
+        FROM xero_accepted_quote_sync_state WHERE id = true
+      `),
       pool
         .query<Succession>(
           "SELECT predecessor_sku, successor_sku FROM victron_sku_successions",
@@ -130,6 +158,14 @@ export async function GET() {
         backorder: number;
         backorderCoverage: number;
         provisional: number;
+        reserved: number;
+        acceptedQuoteLines: Array<{
+          quoteId: string;
+          quoteNumber: string;
+          contactName: string;
+          reference: string;
+          quantity: number;
+        }>;
         minimumStock: number;
         lastSoldAt: string | null;
       }
@@ -144,6 +180,8 @@ export async function GET() {
         backorder: 0,
         backorderCoverage: 0,
         provisional: 0,
+        reserved: 0,
+        acceptedQuoteLines: [],
         minimumStock: 0,
         lastSoldAt: null,
       };
@@ -189,6 +227,18 @@ export async function GET() {
     }
     for (const row of provisional.rows)
       groupFor(row.sku).provisional += Number(row.quantity) || 0;
+    for (const row of acceptedQuotes.rows) {
+      const group = groupFor(row.sku);
+      const quantity = Number(row.quantity) || 0;
+      group.reserved += quantity;
+      group.acceptedQuoteLines.push({
+        quoteId: row.quote_id,
+        quoteNumber: row.quote_number,
+        contactName: row.contact_name,
+        reference: row.reference,
+        quantity,
+      });
+    }
     for (const row of minimums.rows) {
       const group = groupFor(row.sku);
       // A replacement family should carry one floor, not accumulate stock for
@@ -205,7 +255,8 @@ export async function GET() {
           !group.products.length ||
           (group.sales90 <= 0 &&
             group.minimumStock <= 0 &&
-            group.provisional <= 0)
+            group.provisional <= 0 &&
+            group.reserved <= 0)
         )
           return [];
         const currentProduct = [...group.products].sort(
@@ -232,22 +283,28 @@ export async function GET() {
           wholeUnits(dailyDemand * TARGET_COVER_DAYS),
           group.minimumStock,
         );
-        const availablePosition =
+        const positionBeforeCart =
           localStock +
           group.inbound +
-          group.backorderCoverage +
-          group.provisional;
-        const suggestedOrder = wholeUnits(targetStock - availablePosition);
+          group.backorderCoverage -
+          group.reserved;
+        const recommendationBeforeCart = wholeUnits(
+          targetStock - positionBeforeCart,
+        );
+        const availablePosition = positionBeforeCart + group.provisional;
+        const suggestedOrder = wholeUnits(
+          recommendationBeforeCart - group.provisional,
+        );
         const status =
           suggestedOrder === 0
-            ? "covered"
-            : group.provisional >= suggestedOrder
+            ? group.provisional > 0 && recommendationBeforeCart > 0
               ? "satisfied"
-              : group.provisional > 0
-                ? "in_cart"
-                : availablePosition <= reorderPoint
-                  ? "order_now"
-                  : "top_up";
+              : "covered"
+            : group.provisional > 0
+              ? "in_cart"
+              : positionBeforeCart <= reorderPoint
+                ? "order_now"
+                : "top_up";
         return [
           {
             family,
@@ -260,6 +317,8 @@ export async function GET() {
             inbound: group.inbound,
             backorder: group.backorder,
             provisional: group.provisional,
+            reserved: group.reserved,
+            acceptedQuoteLines: group.acceptedQuoteLines,
             supplierStock,
             minimumStock: group.minimumStock,
             predecessorSkus: predecessorSkusForFamily(successions.rows, family),
@@ -287,6 +346,20 @@ export async function GET() {
         unmatchedLines: provisional.rows
           .filter((row) => groupFor(row.sku).products.length === 0)
           .map((row) => ({
+            sku: row.sku,
+            quantity: Number(row.quantity) || 0,
+          })),
+      },
+      acceptedQuotes: {
+        lastSuccessfulSyncAt:
+          acceptedQuoteState.rows[0]?.last_successful_sync_at || null,
+        lastError: acceptedQuoteState.rows[0]?.last_error || null,
+        stats: acceptedQuoteState.rows[0]?.last_stats || {},
+        unmatchedLines: acceptedQuotes.rows
+          .filter((row) => groupFor(row.sku).products.length === 0)
+          .filter((row) => /victron/i.test(row.description))
+          .map((row) => ({
+            quoteNumber: row.quote_number,
             sku: row.sku,
             quantity: Number(row.quantity) || 0,
           })),

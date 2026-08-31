@@ -20,6 +20,14 @@ type ReportItem = {
   inbound: number;
   backorder: number;
   provisional: number;
+  reserved: number;
+  acceptedQuoteLines: Array<{
+    quoteId: string;
+    quoteNumber: string;
+    contactName: string;
+    reference: string;
+    quantity: number;
+  }>;
   supplierStock: number;
   minimumStock: number;
   predecessorSkus: string[];
@@ -38,6 +46,19 @@ type Report = {
     uploadedAt: string | null;
     unmatchedLines: { sku: string; quantity: number }[];
   };
+  acceptedQuotes: {
+    lastSuccessfulSyncAt: string | null;
+    lastError: string | null;
+    stats: {
+      acceptedQuotes?: number;
+      activeQuotes?: number;
+      rmaExcluded?: number;
+      staleExcluded?: number;
+      reservableLines?: number;
+      reservationDays?: number;
+    };
+    unmatchedLines: { quoteNumber: string; sku: string; quantity: number }[];
+  };
   policy: {
     leadTimeDays: number;
     safetyStockDays: number;
@@ -50,6 +71,7 @@ type SortKey =
   | "sales90"
   | "minimumStock"
   | "localStock"
+  | "reserved"
   | "inbound"
   | "backorder"
   | "provisional"
@@ -379,6 +401,7 @@ export default function ReplenishmentPage() {
   const [savingNote, setSavingNote] = useState(false);
   const [cartFile, setCartFile] = useState<File | null>(null);
   const [cartBusy, setCartBusy] = useState(false);
+  const [quoteBusy, setQuoteBusy] = useState(false);
   const cancelMinimumEdit = useRef(false);
   const minimumValueRef = useRef("");
   const cartFileInput = useRef<HTMLInputElement>(null);
@@ -608,6 +631,32 @@ export default function ReplenishmentPage() {
       setCartBusy(false);
     }
   }
+  async function checkAcceptedQuotes() {
+    setQuoteBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(
+        "/api/admin/replenishment/accepted-quotes",
+        { method: "POST" },
+      );
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Unable to check accepted Xero quotes.");
+      setMessage(
+        `Checked Xero: ${data.activeQuotes} current accepted quote${data.activeQuotes === 1 ? "" : "s"} now reserve stock.`,
+      );
+      await load();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to check accepted Xero quotes.",
+      );
+    } finally {
+      setQuoteBusy(false);
+    }
+  }
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -679,6 +728,59 @@ export default function ReplenishmentPage() {
                 Refresh
               </button>
             </div>
+            <section className="mb-5 rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <h2 className="font-bold text-violet-950">
+                    Accepted quote reservations
+                  </h2>
+                  <p className="mt-1 text-sm text-violet-900">
+                    Current accepted Xero quotes reserve their Victron quantities
+                    before Suggested is calculated. RMA and stale accepted quotes
+                    are excluded.
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-violet-950">
+                    {report.acceptedQuotes.stats.activeQuotes || 0} current accepted
+                    quote{report.acceptedQuotes.stats.activeQuotes === 1 ? "" : "s"}
+                    {report.acceptedQuotes.lastSuccessfulSyncAt
+                      ? ` · checked ${new Date(report.acceptedQuotes.lastSuccessfulSyncAt).toLocaleString()}`
+                      : " · not checked yet"}
+                    .
+                  </p>
+                  {(report.acceptedQuotes.stats.rmaExcluded ||
+                    report.acceptedQuotes.stats.staleExcluded) && (
+                    <p className="mt-1 text-xs text-violet-800">
+                      Excluded: {report.acceptedQuotes.stats.rmaExcluded || 0} RMA, {" "}
+                      {report.acceptedQuotes.stats.staleExcluded || 0} older than {" "}
+                      {report.acceptedQuotes.stats.reservationDays || 90} days.
+                    </p>
+                  )}
+                  {report.acceptedQuotes.lastError && (
+                    <p className="mt-1 text-xs font-semibold text-red-800">
+                      Last check failed: {report.acceptedQuotes.lastError}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void checkAcceptedQuotes()}
+                  disabled={quoteBusy}
+                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-violet-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${quoteBusy ? "animate-spin" : ""}`} />
+                  {quoteBusy ? "Checking" : "Check accepted quotes"}
+                </button>
+              </div>
+              {report.acceptedQuotes.unmatchedLines.length > 0 && (
+                <p className="mt-3 text-sm font-semibold text-violet-900">
+                  Unmatched Victron quote lines: {" "}
+                  {report.acceptedQuotes.unmatchedLines
+                    .map((line) => `${line.quoteNumber}: ${line.sku} × ${line.quantity}`)
+                    .join(", ")}
+                  . They do not yet affect Suggested.
+                </p>
+              )}
+            </section>
             <section className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
@@ -752,7 +854,7 @@ export default function ReplenishmentPage() {
         )}
         <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="overflow-x-auto lg:overflow-visible">
-            <table className="min-w-[1190px] w-full text-sm">
+            <table className="min-w-[1290px] w-full text-sm">
               <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <SortHeader
@@ -795,6 +897,14 @@ export default function ReplenishmentPage() {
                     direction={sortDirection}
                     onSelect={selectSort}
                     className="bg-sky-100 text-right font-bold text-sky-950"
+                  />
+                  <SortHeader
+                    column="reserved"
+                    label="Reserved"
+                    selected={sortKey === "reserved"}
+                    direction={sortDirection}
+                    onSelect={selectSort}
+                    className="bg-violet-50 text-right font-bold text-violet-900"
                   />
                   <SortHeader
                     column="inbound"
@@ -922,6 +1032,21 @@ export default function ReplenishmentPage() {
                     <td className="bg-sky-50 px-3 py-3 text-right text-base font-bold text-sky-950">
                       {number(item.localStock)}
                     </td>
+                    <td
+                      className="bg-violet-50 px-3 py-3 text-right font-bold text-violet-900"
+                      title={
+                        item.acceptedQuoteLines.length
+                          ? item.acceptedQuoteLines
+                              .map(
+                                (line) =>
+                                  `${line.quoteNumber} · ${line.contactName} · ${line.quantity}${line.reference ? ` · ${line.reference}` : ""}`,
+                              )
+                              .join("\n")
+                          : "No current accepted Xero quote reservation"
+                      }
+                    >
+                      {item.reserved ? number(item.reserved) : "—"}
+                    </td>
                     <td className="bg-green-50 px-3 py-3 text-right font-bold text-green-800">
                       {number(item.inbound)}
                     </td>
@@ -938,7 +1063,7 @@ export default function ReplenishmentPage() {
                     </td>
                     <td
                       className="border-l border-zinc-300 px-3 py-3 text-right font-bold"
-                      title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}`}
+                      title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}; Reserved on accepted quotes: ${item.reserved}`}
                     >
                       {item.suggestedOrder ? number(item.suggestedOrder) : "—"}
                     </td>
@@ -962,7 +1087,7 @@ export default function ReplenishmentPage() {
                 {!loading && !items.length && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-4 py-12 text-center text-sm text-zinc-500"
                     >
                       No Victron sales, provisional cart quantities, or
@@ -973,7 +1098,7 @@ export default function ReplenishmentPage() {
                 {loading && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-4 py-12 text-center text-sm text-zinc-500"
                     >
                       Loading replenishment report…
