@@ -9,6 +9,7 @@ type AdminUser = {
   id: number;
   email: string;
   role: string;
+  can_manage_users: boolean;
   is_active: boolean;
   xero_person_kind: 'manual' | 'primary' | 'additional';
   archived_at: string | null;
@@ -19,6 +20,61 @@ type AdminUser = {
   setup_expires_at: string | null;
   discounts: Record<string, number>;
 };
+
+function UserAccessEditor({
+  user,
+  busy,
+  onSave,
+}: {
+  user: AdminUser;
+  busy: boolean;
+  onSave: (role: 'buyer' | 'admin', canManageUsers: boolean) => void;
+}) {
+  const [role, setRole] = useState<'buyer' | 'admin'>(
+    user.role === 'admin' ? 'admin' : 'buyer',
+  );
+  const [canManageUsers, setCanManageUsers] = useState(user.can_manage_users);
+  return (
+    <div className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+      <label className="grid gap-1 text-sm font-semibold">
+        Access level
+        <select
+          value={role}
+          onChange={(event) => {
+            const nextRole = event.target.value === 'admin' ? 'admin' : 'buyer';
+            setRole(nextRole);
+            if (nextRole === 'buyer') setCanManageUsers(false);
+          }}
+          className="h-10 rounded-md border border-zinc-300 bg-white px-3 font-normal"
+        >
+          <option value="buyer">Buyer</option>
+          <option value="admin">Administrator</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onSave(role, role === 'admin' && canManageUsers)}
+        className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"
+      >
+        Save access
+      </button>
+      <label className="flex items-center gap-2 text-sm font-medium sm:col-span-2">
+        <input
+          type="checkbox"
+          checked={canManageUsers}
+          disabled={role !== 'admin'}
+          onChange={(event) => setCanManageUsers(event.target.checked)}
+        />
+        Manage users
+      </label>
+      <p className="text-xs text-zinc-500 sm:col-span-2">
+        Administrators can access Admin and Inventory. Manage users can invite,
+        change access, and manage user setup.
+      </p>
+    </div>
+  );
+}
 
 type XeroStatus = {
   connected: boolean;
@@ -303,18 +359,22 @@ function XeroLinkEditor({
 export default function AdminUsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [canManageUsers, setCanManageUsers] = useState(false);
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busyUserId, setBusyUserId] = useState<number | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteContact, setInviteContact] = useState<XeroContact | null>(null);
+  const [inviteRole, setInviteRole] = useState<'buyer' | 'admin'>('buyer');
+  const [inviteCanManageUsers, setInviteCanManageUsers] = useState(false);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to load users');
     setUsers(data.users || []);
+    setCanManageUsers(Boolean(data.canManageUsers));
   }
 
   async function loadXeroStatus() {
@@ -338,6 +398,7 @@ export default function AdminUsersPage() {
         if (!xeroResponse.ok) throw new Error(xeroData.error || 'Failed to load Xero status');
         if (active) {
           setUsers(usersData.users || []);
+          setCanManageUsers(Boolean(usersData.canManageUsers));
           setXeroStatus(xeroData);
         }
       } catch (err) {
@@ -359,6 +420,8 @@ export default function AdminUsersPage() {
         body: JSON.stringify({
         email: formData.get('email'),
         xeroContactId: formData.get('xeroContactId'),
+        role: inviteRole,
+        canManageUsers: inviteRole === 'admin' && inviteCanManageUsers,
         victronDiscount: formData.get('victronDiscount'),
         renogyDiscount: formData.get('renogyDiscount'),
       }),
@@ -370,6 +433,27 @@ export default function AdminUsersPage() {
     }
     setMessage(data.inviteSent ? 'User created and account setup email sent.' : 'User created, but the setup email could not be sent. Use Send setup email after resolving Resend.');
     await loadUsers();
+  }
+
+  async function saveAccess(user: AdminUser, role: 'buyer' | 'admin', canManageUsers: boolean) {
+    setBusyUserId(user.id);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setAccess', userId: user.id, role, canManageUsers }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to update access.');
+      setMessage('User access updated.');
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update access.');
+    } finally {
+      setBusyUserId(null);
+    }
   }
 
   async function saveLink(user: AdminUser, formData: FormData): Promise<boolean> {
@@ -508,27 +592,55 @@ export default function AdminUsersPage() {
 
         <section className="mb-8 border-b border-zinc-200 pb-8">
           <div className="mb-4">
-            <h2 className="text-lg font-bold">Invite a buyer</h2>
-            <p className="text-sm text-zinc-500">The buyer chooses their own password from a one-time email link, then signs in with email OTP.</p>
+            <h2 className="text-lg font-bold">Invite a user</h2>
+            <p className="text-sm text-zinc-500">
+              {inviteRole === 'admin'
+                ? 'Administrators are internal Thanda users and do not need a customer Xero contact.'
+                : 'The buyer chooses their own password from a one-time email link, then signs in with email OTP.'}
+            </p>
           </div>
-          <form
+          {canManageUsers ? <form
             onSubmit={(event) => {
               event.preventDefault();
               void createUser(new FormData(event.currentTarget));
             }}
             className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6"
           >
-            <XeroContactFields
+            <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Access level
+              <select
+                value={inviteRole}
+                onChange={(event) => {
+                  const role = event.target.value === 'admin' ? 'admin' : 'buyer';
+                  setInviteRole(role);
+                  setInviteContact(null);
+                  if (role === 'buyer') setInviteCanManageUsers(false);
+                }}
+                className="h-10 rounded-md border border-zinc-300 bg-white px-3 font-normal"
+              >
+                <option value="buyer">Buyer</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </label>
+            {inviteRole === 'buyer' ? <XeroContactFields
               email={inviteEmail}
               emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={inviteEmail} onChange={(event) => { setInviteEmail(event.target.value); setInviteContact(null); }} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
               onContactSelected={setInviteContact}
-            />
-            {inviteContact && <>
+            /> : <>
+              <label className="grid gap-1 text-sm font-semibold lg:col-span-4">Email
+                <input name="email" type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" />
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium lg:col-span-6">
+                <input type="checkbox" checked={inviteCanManageUsers} onChange={(event) => setInviteCanManageUsers(event.target.checked)} />
+                Manage users
+              </label>
+              <div className="flex items-end lg:col-span-6"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
+            </>}
+            {inviteRole === 'buyer' && inviteContact && <>
               <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
               <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
               <div className="flex items-end lg:col-span-4"><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Create and send setup email</button></div>
             </>}
-          </form>
+          </form> : <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500">You can view user accounts, but Manage users permission is required to invite users or change access.</p>}
         </section>
 
         <section>
@@ -542,8 +654,11 @@ export default function AdminUsersPage() {
                 <div className="mb-4 flex flex-col justify-between gap-2 sm:flex-row">
                   <div>
                     <h3 className="font-bold">{user.organisation_name}</h3>
-                    <p className="text-sm text-zinc-500">{user.email} · {user.role}</p>
-                    <p className="mt-1 text-sm text-zinc-500">Discounts: Victron {user.discounts?.victron ?? 0}% · Renogy {user.discounts?.renogy ?? 0}%</p>
+                    <p className="text-sm text-zinc-500">
+                      {user.email} · {user.role}
+                      {user.role === 'admin' && user.can_manage_users ? ' · Manage users' : ''}
+                    </p>
+                    {user.role === 'buyer' && <p className="mt-1 text-sm text-zinc-500">Discounts: Victron {user.discounts?.victron ?? 0}% · Renogy {user.discounts?.renogy ?? 0}%</p>}
                   </div>
                   <div className="flex flex-wrap items-start gap-2">
                     <span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.is_active ? 'Active' : 'Disabled'}</span>
@@ -551,35 +666,43 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void updateEmail(user, new FormData(event.currentTarget));
-                  }}
-                  className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[1fr_auto] sm:items-end"
-                >
-                  <label className="grid gap-1 text-sm font-semibold">Portal email
-                    <input name="email" type="email" defaultValue={user.email} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" />
-                  </label>
-                  <button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Update email</button>
-                  <p className="text-xs text-zinc-500 sm:col-span-2">Changing this email clears the organisation Xero link and signs this user out.</p>
-                </form>
-
-                <XeroLinkEditor user={user} onSave={(formData) => saveLink(user, formData)} />
-
-                {user.xero_contact_id && users.find((candidate) => candidate.organisation_id === user.organisation_id)?.id === user.id && (
-                  <XeroPeopleAccess
-                    organisationId={user.organisation_id}
-                    contactId={user.xero_contact_id}
-                    portalUsers={users.filter((candidate) => candidate.organisation_id === user.organisation_id)}
-                    onEnabled={loadUsers}
+                {canManageUsers && <>
+                  <UserAccessEditor
+                    key={`access-${user.id}-${user.role}-${user.can_manage_users}`}
+                    user={user}
+                    busy={busyUserId === user.id}
+                    onSave={(role, manager) => void saveAccess(user, role, manager)}
                   />
-                )}
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void updateEmail(user, new FormData(event.currentTarget));
+                    }}
+                    className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[1fr_auto] sm:items-end"
+                  >
+                    <label className="grid gap-1 text-sm font-semibold">Portal email
+                      <input name="email" type="email" defaultValue={user.email} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" />
+                    </label>
+                    <button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Update email</button>
+                    <p className="text-xs text-zinc-500 sm:col-span-2">Changing this email clears the organisation Xero link and signs this user out.</p>
+                  </form>
 
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
-                  <button type="button" disabled={busyUserId === user.id} onClick={() => sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">Send setup email</button>
-                  {(user.is_active || user.xero_person_kind === 'manual') && <button type="button" disabled={busyUserId === user.id} onClick={() => setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>}
-                </div>
+                  <XeroLinkEditor user={user} onSave={(formData) => saveLink(user, formData)} />
+
+                  {user.xero_contact_id && users.find((candidate) => candidate.organisation_id === user.organisation_id)?.id === user.id && (
+                    <XeroPeopleAccess
+                      organisationId={user.organisation_id}
+                      contactId={user.xero_contact_id}
+                      portalUsers={users.filter((candidate) => candidate.organisation_id === user.organisation_id)}
+                      onEnabled={loadUsers}
+                    />
+                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
+                    <button type="button" disabled={busyUserId === user.id} onClick={() => sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">Send setup email</button>
+                    {(user.is_active || user.xero_person_kind === 'manual') && <button type="button" disabled={busyUserId === user.id} onClick={() => setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>}
+                  </div>
+                </>}
               </div>
             ))}
           </div>

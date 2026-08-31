@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- User Admin now distinguishes ordinary administrators from administrators with **Manage users** permission. All administrators retain Admin and Inventory access; only user managers can invite people, change roles or user-management permission, edit user setup, or enable/disable accounts. Existing administrators are seeded as user managers during the one-time migration so access cannot be lost.
 - Fixed the User Admin invite email field losing focus after every character. Changing the email now clears only any stale Xero contact match while leaving the input mounted and ready for uninterrupted typing.
 - Replenishment now subtracts Victron quantities reserved on current accepted Xero quotes from the available stock position. A cached purple **Reserved** column groups retail and replacement SKU families, identifies the contributing quote/customer on hover, and can be refreshed with **Check accepted quotes**. The production planning timer refreshes the snapshot every 30 minutes; RMA quotes and stale accepted statuses are explicitly excluded and reported.
 - Victron shipment invoices and backorders now synchronize from the E-Order API, replacing inbound PDF and backorder HTML uploads. Imports are idempotent, exclude RMA references, preserve manual full/partial receipt, remove unreceived legacy cart/backorder lines that were never billed for shipment, avoid inbound/backorder double counting, and leave Xero as the only KZN stock authority.

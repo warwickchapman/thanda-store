@@ -16,6 +16,11 @@ async function requireAdmin() {
   return user;
 }
 
+async function requireUserManager() {
+  const user = await requireAdmin();
+  return user?.canManageUsers ? user : null;
+}
+
 function text(value: unknown) {
   return String(value || '').trim();
 }
@@ -40,6 +45,7 @@ export async function GET() {
       u.id,
       u.email,
       u.role,
+      u.can_manage_users,
       u.is_active,
       u.xero_person_kind,
       u.archived_at,
@@ -65,42 +71,48 @@ export async function GET() {
     ORDER BY o.name, u.email
   `);
 
-  return NextResponse.json({ users: result.rows });
+  return NextResponse.json({ users: result.rows, canManageUsers: admin.canManageUsers });
 }
 
 export async function POST(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  const admin = await requireUserManager();
+  if (!admin) return NextResponse.json({ error: 'Manage users permission required' }, { status: 403 });
   await ensureAuthSchema();
 
   const body = await request.json();
   const email = text(body.email).toLowerCase();
   const xeroContactId = text(body.xeroContactId);
+  const role = body.role === 'admin' ? 'admin' : 'buyer';
+  const canManageUsers = role === 'admin' && body.canManageUsers === true;
   const victronDiscount = discount(body.victronDiscount);
   const renogyDiscount = discount(body.renogyDiscount);
 
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     return NextResponse.json({ error: 'Provide a valid email address.' }, { status: 400 });
   }
-  if (!xeroContactId) {
+  if (role === 'buyer' && !xeroContactId) {
     return NextResponse.json({ error: 'Select a Xero contact before inviting a user.' }, { status: 400 });
   }
-  if (victronDiscount === null || renogyDiscount === null) {
+  if (role === 'buyer' && (victronDiscount === null || renogyDiscount === null)) {
     return NextResponse.json({ error: 'Victron and Renogy discounts must be between 0% and 40%.' }, { status: 400 });
   }
-  const xeroContact = await getXeroContactDetails(xeroContactId);
-  const xeroPrimary = xeroContact.people.find(
-    (person) => person.kind === 'primary' && person.email === email,
-  );
-  if (!xeroPrimary) {
-    return NextResponse.json({ error: 'The portal email must match the selected Xero contact primary email address.' }, { status: 400 });
+  const xeroContact = role === 'buyer'
+    ? await getXeroContactDetails(xeroContactId)
+    : null;
+  if (xeroContact) {
+    const xeroPrimary = xeroContact.people.find(
+      (person) => person.kind === 'primary' && person.email === email,
+    );
+    if (!xeroPrimary) {
+      return NextResponse.json({ error: 'The portal email must match the selected Xero contact primary email address.' }, { status: 400 });
+    }
   }
 
   const client = await pool.connect();
   let user: { id: number; email: string };
   try {
     await client.query('BEGIN');
-    const organisation = await client.query(
+    const organisation = xeroContact ? await client.query(
       `
         INSERT INTO organisations (name, xero_contact_id, xero_contact_name)
         VALUES ($1, $2, $3)
@@ -111,18 +123,33 @@ export async function POST(request: Request) {
         RETURNING id
       `,
       [xeroContact.name, xeroContactId, xeroContact.name],
+    ) : await client.query(
+      `
+        WITH existing AS (
+          SELECT id FROM organisations
+          WHERE xero_contact_id IS NULL AND name = 'Thanda staff'
+          ORDER BY id LIMIT 1
+        ), inserted AS (
+          INSERT INTO organisations (name)
+          SELECT 'Thanda staff'
+          WHERE NOT EXISTS (SELECT 1 FROM existing)
+          RETURNING id
+        )
+        SELECT id FROM existing UNION ALL SELECT id FROM inserted
+      `,
     );
     const unusablePassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
     const insertedUser = await client.query(
       `
-        INSERT INTO portal_users (organisation_id, email, password_hash, role, is_active, xero_person_kind, xero_person_email)
-        VALUES ($1, $2, $3, 'buyer', true, 'primary', $2)
+        INSERT INTO portal_users (organisation_id, email, password_hash, role, can_manage_users, is_active, xero_person_kind, xero_person_email)
+        VALUES ($1, $2, $3, $4, $5, true, $6, $7)
         RETURNING id, email
       `,
-      [organisation.rows[0].id, email, unusablePassword],
+      [organisation.rows[0].id, email, unusablePassword, role, canManageUsers,
+        xeroContact ? 'primary' : 'manual', xeroContact ? email : null],
     );
     user = insertedUser.rows[0];
-    await client.query(
+    if (role === 'buyer') await client.query(
       `
         INSERT INTO user_supplier_discounts (user_id, supplier, discount_percent)
         VALUES ($1, 'victron', $2), ($1, 'renogy', $3)
@@ -150,12 +177,54 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  const admin = await requireUserManager();
+  if (!admin) return NextResponse.json({ error: 'Manage users permission required' }, { status: 403 });
   await ensureAuthSchema();
 
   const body = await request.json();
   const action = text(body.action) || 'linkXero';
+
+  if (action === 'setAccess') {
+    const userId = Number(body.userId);
+    const role = body.role === 'admin' ? 'admin' : 'buyer';
+    const canManageUsers = role === 'admin' && body.canManageUsers === true;
+    if (!Number.isInteger(userId)) {
+      return NextResponse.json({ error: 'A valid user is required.' }, { status: 400 });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const target = await client.query(
+        'SELECT id, role, can_manage_users, is_active FROM portal_users WHERE id = $1 FOR UPDATE',
+        [userId],
+      );
+      const current = target.rows[0];
+      if (!current) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+      }
+      if (current.is_active && current.role === 'admin' && current.can_manage_users && !canManageUsers) {
+        const managers = await client.query(
+          "SELECT COUNT(*)::int AS count FROM portal_users WHERE is_active = true AND role = 'admin' AND can_manage_users = true",
+        );
+        if (Number(managers.rows[0]?.count) <= 1) {
+          await client.query('ROLLBACK');
+          return NextResponse.json({ error: 'Assign Manage users to another active administrator before removing the last user manager.' }, { status: 400 });
+        }
+      }
+      await client.query(
+        'UPDATE portal_users SET role = $2, can_manage_users = $3, updated_at = NOW() WHERE id = $1',
+        [userId, role, canManageUsers],
+      );
+      await client.query('COMMIT');
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 
   if (action === 'updateEmail') {
     const userId = Number(body.userId);
@@ -224,8 +293,16 @@ export async function PATCH(request: Request) {
     if (userId === admin.id && !isActive) {
       return NextResponse.json({ error: 'You cannot disable your own administrator account.' }, { status: 400 });
     }
-    const target = await pool.query('SELECT xero_person_kind FROM portal_users WHERE id = $1', [userId]);
+    const target = await pool.query('SELECT xero_person_kind, role, can_manage_users, is_active FROM portal_users WHERE id = $1', [userId]);
     if (!target.rows[0]) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+    if (!isActive && target.rows[0].is_active && target.rows[0].role === 'admin' && target.rows[0].can_manage_users) {
+      const managers = await pool.query(
+        "SELECT COUNT(*)::int AS count FROM portal_users WHERE is_active = true AND role = 'admin' AND can_manage_users = true",
+      );
+      if (Number(managers.rows[0]?.count) <= 1) {
+        return NextResponse.json({ error: 'Assign Manage users to another active administrator before disabling the last user manager.' }, { status: 400 });
+      }
+    }
     if (isActive && target.rows[0].xero_person_kind !== 'manual') {
       return NextResponse.json({ error: 'Re-enable Xero-managed users from the Xero people list so their eligibility is verified.' }, { status: 400 });
     }
@@ -361,8 +438,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  const admin = await requireUserManager();
+  if (!admin) return NextResponse.json({ error: 'Manage users permission required' }, { status: 403 });
   await ensureAuthSchema();
 
   const body = await request.json();

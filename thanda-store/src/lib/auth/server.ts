@@ -14,6 +14,7 @@ export type PortalUser = {
   id: number;
   email: string;
   role: string;
+  canManageUsers: boolean;
   organisationId: number;
   organisationName: string;
   xeroContactId: string | null;
@@ -188,6 +189,7 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
         u.id,
         u.email,
         u.role,
+        u.can_manage_users,
         o.id AS organisation_id,
         o.name AS organisation_name,
         o.xero_contact_id,
@@ -220,6 +222,7 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
     id: Number(row.id),
     email: row.email,
     role: row.role,
+    canManageUsers: Boolean(row.can_manage_users),
     organisationId: Number(row.organisation_id),
     organisationName: row.organisation_name,
     xeroContactId: row.xero_contact_id,

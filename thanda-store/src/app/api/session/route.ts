@@ -9,6 +9,7 @@ export async function GET() {
     user: {
       email: user.email,
       role: user.role,
+      canManageUsers: user.canManageUsers,
       organisationName: user.organisationName,
       xeroContactId: user.xeroContactId,
       xeroContactName: user.xeroContactName,

@@ -29,6 +29,7 @@ export async function ensureAuthSchema() {
       email TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'buyer',
+      can_manage_users BOOLEAN NOT NULL DEFAULT false,
       is_active BOOLEAN NOT NULL DEFAULT true,
       xero_person_kind TEXT NOT NULL DEFAULT 'manual',
       xero_person_email TEXT,
@@ -41,6 +42,25 @@ export async function ensureAuthSchema() {
   // Pre-launch migration: email is the only login identifier. Keep the Xero
   // person source locally so a reconciliation can revoke removed access.
   await pool.query("ALTER TABLE portal_users DROP COLUMN IF EXISTS username");
+  const managerPermissionExists = await pool.query<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'portal_users'
+        AND column_name = 'can_manage_users'
+    ) AS exists
+  `);
+  if (!managerPermissionExists.rows[0]?.exists) {
+    await pool.query(
+      "ALTER TABLE portal_users ADD COLUMN can_manage_users BOOLEAN NOT NULL DEFAULT false",
+    );
+    // Existing administrators were the only people able to manage users before
+    // this permission existed. Seed them once so the migration cannot remove
+    // the last path to administer access.
+    await pool.query(
+      "UPDATE portal_users SET can_manage_users = true WHERE role = 'admin'",
+    );
+  }
   await pool.query(
     "ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS xero_person_kind TEXT NOT NULL DEFAULT 'manual'",
   );
