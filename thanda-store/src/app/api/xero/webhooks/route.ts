@@ -23,7 +23,7 @@ function validSignature(rawBody: Buffer, signature: string | null, webhookKey: s
 }
 
 function supportedEvent(event: XeroWebhookEvent) {
-  return ['INVOICE', 'CONTACT'].includes(String(event.eventCategory || '').toUpperCase())
+  return ['INVOICE', 'CREDITNOTE', 'CONTACT'].includes(String(event.eventCategory || '').toUpperCase())
     && ['CREATE', 'UPDATE'].includes(String(event.eventType || '').toUpperCase())
     && Boolean(event.resourceId)
     && Boolean(event.tenantId);

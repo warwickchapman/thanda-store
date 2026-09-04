@@ -136,14 +136,14 @@ The OAuth implementation is in [oauth.ts](../thanda-store/src/lib/xero/oauth.ts)
 
 ### Sales history and favourites
 
-The derived table `xero_sales_invoice_lines` stores SKU/quantity rows only for:
+The derived table `xero_sales_invoice_lines` stores positive SKU/quantity rows for:
 
 - `Type = ACCREC`;
 - `Status = AUTHORISED` or `PAID`;
 - a valid Xero Contact ID and invoice date; and
 - the most recent 365 days.
 
-Drafts, voids, quotes, credit notes, and lines without an ItemCode/SKU do not rank products. Catalogue SKU succession is resolved locally; discontinued SKUs no longer in the current catalogue fall out of Home results.
+Drafts, voids, quotes, and lines without an ItemCode/SKU do not rank products. Authorised/paid customer credit notes are stored as negative SKU quantities, offsetting the original sales within the 30- and 90-day demand windows. Catalogue SKU succession is resolved locally; discontinued SKUs no longer in the current catalogue fall out of Home results.
 
 ### Quotes
 

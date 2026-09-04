@@ -13,8 +13,8 @@ For a developer-focused Xero implementation handoff, see [Xero Integration Hando
 - `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
 - `thanda-store/scripts/sync-xero-contact-access.mjs` - Reconciles enabled Xero primary/additional people and archives portal access removed in Xero.
-- `thanda-store/scripts/sync-xero-sales-history.mjs` - Caches eligible Xero sales invoice SKU lines for Home favourites.
-- `thanda-store/scripts/process-xero-webhook-events.mjs` - Processes verified Xero Invoice and Contact webhook events from the durable local queue.
+- `thanda-store/scripts/sync-xero-sales-history.mjs` - Caches net Xero customer sales by SKU: eligible sales invoices less eligible customer credit notes.
+- `thanda-store/scripts/process-xero-webhook-events.mjs` - Processes verified Xero Invoice, Credit Note, and Contact webhook events from the durable local queue.
 - `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
 - `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.

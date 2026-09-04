@@ -146,9 +146,26 @@ export async function ensureAuthSchema() {
       invoice_date DATE NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL,
       sku TEXT NOT NULL,
-      quantity NUMERIC(14, 3) NOT NULL CHECK (quantity > 0),
+      quantity NUMERIC(14, 3) NOT NULL CHECK (quantity <> 0),
       PRIMARY KEY (invoice_id, sku)
     )
+  `);
+  await pool.query(
+    "ALTER TABLE xero_sales_invoice_lines DROP CONSTRAINT IF EXISTS xero_sales_invoice_lines_quantity_check",
+  );
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'xero_sales_invoice_lines'::regclass
+          AND conname = 'xero_sales_invoice_lines_quantity_nonzero_check'
+      ) THEN
+        ALTER TABLE xero_sales_invoice_lines
+          ADD CONSTRAINT xero_sales_invoice_lines_quantity_nonzero_check
+          CHECK (quantity <> 0);
+      END IF;
+    END $$;
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS xero_api_usage (

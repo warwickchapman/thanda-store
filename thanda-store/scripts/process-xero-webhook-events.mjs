@@ -50,7 +50,9 @@ async function usableToken(config, token) {
 
 async function ensureSchema(client) {
   await client.query(`CREATE TABLE IF NOT EXISTS xero_invoice_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_successful_sync_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
-  await client.query(`CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (invoice_id TEXT NOT NULL, contact_id TEXT NOT NULL, invoice_date DATE NOT NULL, updated_at TIMESTAMPTZ NOT NULL, sku TEXT NOT NULL, quantity NUMERIC(14,3) NOT NULL CHECK (quantity > 0), PRIMARY KEY (invoice_id, sku))`);
+  await client.query(`CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (invoice_id TEXT NOT NULL, contact_id TEXT NOT NULL, invoice_date DATE NOT NULL, updated_at TIMESTAMPTZ NOT NULL, sku TEXT NOT NULL, quantity NUMERIC(14,3) NOT NULL CHECK (quantity <> 0), PRIMARY KEY (invoice_id, sku))`);
+  await client.query('ALTER TABLE xero_sales_invoice_lines DROP CONSTRAINT IF EXISTS xero_sales_invoice_lines_quantity_check');
+  await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'xero_sales_invoice_lines'::regclass AND conname = 'xero_sales_invoice_lines_quantity_nonzero_check') THEN ALTER TABLE xero_sales_invoice_lines ADD CONSTRAINT xero_sales_invoice_lines_quantity_nonzero_check CHECK (quantity <> 0); END IF; END $$`);
   await client.query(`CREATE TABLE IF NOT EXISTS xero_api_usage (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), day_limit_remaining INTEGER, minute_limit_remaining INTEGER, app_minute_limit_remaining INTEGER, rate_limit_problem TEXT, retry_after_seconds INTEGER, next_allowed_at TIMESTAMPTZ, source TEXT, observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await client.query(`CREATE TABLE IF NOT EXISTS xero_stock_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), refresh_requested_at TIMESTAMPTZ, last_started_at TIMESTAMPTZ, last_completed_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await client.query('INSERT INTO xero_stock_sync_state (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
@@ -129,6 +131,26 @@ async function cacheInvoice(client, invoice, stats) {
   }
 }
 
+async function cacheCreditNote(client, creditNote, stats) {
+  const creditNoteId = String(creditNote.CreditNoteID || '');
+  if (!creditNoteId) return;
+  await client.query('DELETE FROM xero_sales_invoice_lines WHERE invoice_id = $1', [creditNoteId]);
+  const date = String(creditNote.DateString || creditNote.Date || '').slice(0, 10);
+  const contactId = String(creditNote.Contact?.ContactID || '');
+  const eligible = creditNote.Type === 'ACCRECCREDIT' && ['AUTHORISED', 'PAID'].includes(String(creditNote.Status || '').toUpperCase());
+  if (!eligible || !date || !contactId || date < isoDate(INITIAL_WINDOW_DAYS)) return;
+  const quantities = new Map();
+  for (const line of creditNote.LineItems || []) {
+    const sku = String(line.ItemCode || line.Item?.Code || '').trim().toUpperCase();
+    const quantity = Number(line.Quantity);
+    if (sku && Number.isFinite(quantity) && quantity > 0) quantities.set(sku, (quantities.get(sku) || 0) - quantity);
+  }
+  for (const [sku, quantity] of quantities) {
+    await client.query('INSERT INTO xero_sales_invoice_lines (invoice_id, contact_id, invoice_date, updated_at, sku, quantity) VALUES ($1, $2, $3, NOW(), $4, $5)', [creditNoteId, contactId, date, sku, quantity]);
+    stats.cachedLines += 1;
+  }
+}
+
 async function reconcileContact(client, token, contactId, stats) {
   const payload = await xeroJson(client, token, `/Contacts/${encodeURIComponent(contactId)}`);
   const contact = payload.Contacts?.[0];
@@ -174,7 +196,7 @@ async function main() {
   const config = { clientId: required('XERO_CLIENT_ID'), clientSecret: required('XERO_CLIENT_SECRET'), tokenFile: process.env.XERO_TOKEN_FILE || '/var/lib/thanda-store/xero-token.json' };
   const pool = new pg.Pool({ connectionString: required('DATABASE_URL') });
   const client = await pool.connect();
-  const stats = { invoices: 0, cachedLines: 0, contacts: 0, archivedUsers: 0, stockRefreshRequested: false };
+  const stats = { invoices: 0, creditNotes: 0, cachedLines: 0, contacts: 0, archivedUsers: 0, stockRefreshRequested: false };
   try {
     await ensureSchema(client);
     const lock = await client.query('SELECT pg_try_advisory_lock(742032) AS locked');
@@ -199,26 +221,36 @@ async function main() {
       if (!String(token.scope || '').split(/\s+/).includes('accounting.invoices')) throw new Error('Xero must be reconnected with accounting.invoices before webhook events can sync');
 
       const invoiceEvents = await client.query(`
-        SELECT id, resource_id FROM xero_webhook_events
-        WHERE processed_at IS NULL AND tenant_id = $1 AND event_category = 'INVOICE'
+        SELECT id, resource_id, event_category FROM xero_webhook_events
+        WHERE processed_at IS NULL AND tenant_id = $1 AND event_category IN ('INVOICE', 'CREDITNOTE')
         ORDER BY received_at ASC LIMIT $2
       `, [token.tenant_id, workerBudget]);
       const eventsByInvoice = new Map();
-      for (const event of invoiceEvents.rows) eventsByInvoice.set(String(event.resource_id), [...(eventsByInvoice.get(String(event.resource_id)) || []), Number(event.id)]);
-      for (const invoiceId of eventsByInvoice.keys()) {
-        const eventIds = eventsByInvoice.get(invoiceId) || [];
+      for (const event of invoiceEvents.rows) {
+        const key = `${event.event_category}:${event.resource_id}`;
+        eventsByInvoice.set(key, [...(eventsByInvoice.get(key) || []), Number(event.id)]);
+      }
+      for (const [key, eventIds] of eventsByInvoice.entries()) {
+        const [category, resourceId] = key.split(':', 2);
         try {
-          const payload = await xeroJson(client, token, `/Invoices/${encodeURIComponent(invoiceId)}`);
-          const invoice = payload.Invoices?.[0];
-          if (!invoice || String(invoice.InvoiceID || '') !== invoiceId || !Array.isArray(invoice.LineItems)) {
-            throw new Error(`Xero did not return complete detail for invoice ${invoiceId}`);
+          const creditNote = category === 'CREDITNOTE';
+          const payload = await xeroJson(client, token, `/${creditNote ? 'CreditNotes' : 'Invoices'}/${encodeURIComponent(resourceId)}`);
+          const document = creditNote ? payload.CreditNotes?.[0] : payload.Invoices?.[0];
+          const documentId = creditNote ? document?.CreditNoteID : document?.InvoiceID;
+          if (!document || String(documentId || '') !== resourceId || !Array.isArray(document.LineItems)) {
+            throw new Error(`Xero did not return complete detail for ${creditNote ? 'credit note' : 'invoice'} ${resourceId}`);
           }
-          await cacheInvoice(client, invoice, stats);
-          if (String(invoice.Type || '').toUpperCase() === 'ACCREC') {
+          if (creditNote) {
+            await cacheCreditNote(client, document, stats);
+            stats.creditNotes += 1;
+          } else {
+            await cacheInvoice(client, document, stats);
+            stats.invoices += 1;
+          }
+          if (['ACCREC', 'ACCRECCREDIT'].includes(String(document.Type || '').toUpperCase())) {
             await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NOW(), updated_at = NOW() WHERE id = true');
             stats.stockRefreshRequested = true;
           }
-          stats.invoices += 1;
           await markProcessed(client, eventIds);
         } catch (error) {
           if (error?.code === 'XERO_DAILY_LIMIT') throw error;
