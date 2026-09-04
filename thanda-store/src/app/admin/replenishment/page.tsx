@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   ChevronDown,
   ChevronUp,
+  Copy,
   FileUp,
   RefreshCw,
   Trash2,
@@ -550,6 +551,15 @@ export default function ReplenishmentPage() {
     setEditingNote(item.sku);
     setNoteValue(item.note || "");
   }
+  async function copySku(sku: string) {
+    try {
+      await navigator.clipboard.writeText(sku);
+      setError("");
+      setMessage(`${sku} copied to clipboard.`);
+    } catch {
+      setError("Unable to copy the SKU. Please select and copy it manually.");
+    }
+  }
   async function saveNote(item: ReportItem) {
     setSavingNote(true);
     setError("");
@@ -961,7 +971,18 @@ export default function ReplenishmentPage() {
                 {items.map((item) => (
                   <tr key={item.sku} className="border-t border-zinc-100">
                     <td className="group relative border-r border-zinc-300 px-4 py-3">
-                      <p className="font-bold">{item.sku}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="font-bold">{item.sku}</p>
+                        <button
+                          type="button"
+                          onClick={() => void copySku(item.sku)}
+                          className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-900 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-sky-600 group-hover:opacity-100"
+                          aria-label={`Copy ${item.sku}`}
+                          title="Copy SKU"
+                        >
+                          <Copy className="size-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
                       <p className="text-xs text-zinc-500">
                         {item.name}
                         {item.lastSoldAt
