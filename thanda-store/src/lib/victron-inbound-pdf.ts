@@ -63,7 +63,7 @@ export async function parseVictronInboundPdf(data: Uint8Array): Promise<VictronI
       const quantity = row.filter((item) => item.x >= 75 && item.x < 90).map((item) => item.text).join('').trim();
       const sku = row.filter((item) => item.x >= 90 && item.x < 170).map((item) => item.text).join('').trim().toUpperCase();
       const description = row.filter((item) => item.x >= 175 && item.x < 430).map((item) => item.text).join('').replace(/\s+/g, ' ').trim();
-      if (!/^\d+$/.test(number) || !/^\d+$/.test(quantity) || !/^[A-Z0-9-]{6,}$/.test(sku) || !description) continue;
+      if (!/^\d+$/.test(number) || !/^\d+$/.test(quantity) || !/^[A-Z0-9-]{6,}$/.test(sku) || !description || sku === 'ORDER') continue;
       lines.push({ sku, description, quantity: Number(quantity), isStockItem: !sku.startsWith('SAL') });
     }
   }

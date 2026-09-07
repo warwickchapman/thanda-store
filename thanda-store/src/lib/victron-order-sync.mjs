@@ -284,7 +284,9 @@ async function importInvoiceProducts(client, invoice, products) {
   for (const product of rows(products)) {
     const sku = upper(product?.sku);
     const quantity = positiveInteger(product?.quantity_ordered);
-    if (!sku || !quantity) continue;
+    // ORDER is Victron's order charge, not a deliverable product. It must not
+    // create an inbound receipt line or count toward stock planning.
+    if (!sku || sku === "ORDER" || !quantity) continue;
     bySku.set(sku, (bySku.get(sku) || 0) + quantity);
   }
   await client.query("BEGIN");

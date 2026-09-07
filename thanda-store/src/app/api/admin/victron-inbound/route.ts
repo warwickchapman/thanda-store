@@ -16,6 +16,8 @@ function validLines(value: unknown): SubmittedLine[] | null {
     const sku = clean(item?.sku).toUpperCase();
     const description = clean(item?.description);
     const quantity = Number(item?.quantity);
+    // Victron's ORDER SKU is the order charge, rather than a deliverable line.
+    if (sku === 'ORDER') continue;
     if (!/^[A-Z0-9-]{3,}$/.test(sku) || !description || !Number.isInteger(quantity) || quantity <= 0) return null;
     if (bySku.has(sku)) return null;
     bySku.set(sku, { sku, description, quantity, isStockItem: item?.isStockItem !== false });
