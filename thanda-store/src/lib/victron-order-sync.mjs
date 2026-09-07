@@ -115,6 +115,16 @@ async function ensureSchema(client) {
   await client.query(
     `ALTER TABLE victron_provisional_backorder_order_lines ADD COLUMN IF NOT EXISTS planned_for DATE`,
   );
+  // Earlier imports retained Victron's ORDER charge as a shipment line. It is
+  // neither stock nor a physical item, so remove only unreceived fee lines
+  // while preserving promotional items and every real receipt record.
+  await client.query(
+    `DELETE FROM victron_shipment_invoice_lines WHERE UPPER(sku) = 'ORDER'`,
+  );
+  await client.query(
+    `DELETE FROM supplier_inbound_order_lines
+     WHERE UPPER(sku) = 'ORDER' AND received_quantity = 0`,
+  );
   await client.query(`
     CREATE TABLE IF NOT EXISTS victron_backorder_ignored_lines (
       order_number TEXT NOT NULL,
