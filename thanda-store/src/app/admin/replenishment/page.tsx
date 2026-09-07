@@ -734,7 +734,7 @@ export default function ReplenishmentPage() {
                 <p className="mt-1 text-sm">
                   {report.agedUnreceivedShipments.map((shipment) => (
                     <span key={shipment.orderNumber} className="mr-3 inline-block">
-                      Order {shipment.orderNumber}: {shipment.outstandingUnits} stock unit{shipment.outstandingUnits === 1 ? "" : "s"} outstanding · shipped {new Date(shipment.shipmentDate).toLocaleDateString()} ({shipment.ageDays} days ago)
+                      Order {shipment.orderNumber}: {shipment.outstandingUnits} stock unit{shipment.outstandingUnits === 1 ? "" : "s"} outstanding · shipped {new Date(shipment.shipmentDate).toLocaleDateString()} ({shipment.ageDays} working day{shipment.ageDays === 1 ? "" : "s"} ago)
                     </span>
                   ))}
                 </p>

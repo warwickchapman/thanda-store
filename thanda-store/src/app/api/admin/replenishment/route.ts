@@ -35,7 +35,7 @@ type InboundRow = {
 type AgedUnreceivedShipmentRow = {
   order_number: string;
   shipment_date: string;
-  age_days: string | number;
+  working_days: string | number;
   outstanding_units: string | number;
 };
 type MinimumRow = { sku: string; minimum_stock: string | number };
@@ -148,15 +148,23 @@ export async function GET() {
         SELECT
           inbound.supplier_order_number AS order_number,
           shipment.shipping_date::text AS shipment_date,
-          CURRENT_DATE - shipment.shipping_date AS age_days,
+          age.working_days,
           outstanding.outstanding_units
         FROM supplier_inbound_orders inbound
         JOIN LATERAL (
           SELECT MIN(invoice.shipping_date) AS shipping_date
           FROM victron_shipment_invoices invoice
           WHERE invoice.order_number = inbound.supplier_order_number
-            AND invoice.shipping_date < CURRENT_DATE - INTERVAL '3 days'
         ) shipment ON shipment.shipping_date IS NOT NULL
+        JOIN LATERAL (
+          SELECT COUNT(*)::integer AS working_days
+          FROM generate_series(
+            shipment.shipping_date + 1,
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          ) AS calendar(day)
+          WHERE EXTRACT(ISODOW FROM calendar.day) BETWEEN 1 AND 5
+        ) age ON age.working_days > 3
         JOIN LATERAL (
           SELECT COALESCE(SUM(line.ordered_quantity - line.received_quantity), 0) AS outstanding_units
           FROM supplier_inbound_order_lines line
@@ -398,7 +406,7 @@ export async function GET() {
       agedUnreceivedShipments: agedUnreceivedShipments.rows.map((shipment) => ({
         orderNumber: shipment.order_number,
         shipmentDate: shipment.shipment_date,
-        ageDays: Number(shipment.age_days) || 0,
+        ageDays: Number(shipment.working_days) || 0,
         outstandingUnits: Number(shipment.outstanding_units) || 0,
       })),
       policy: {
