@@ -60,6 +60,12 @@ type Report = {
     };
     unmatchedLines: { quoteNumber: string; sku: string; quantity: number }[];
   };
+  agedUnreceivedShipments: Array<{
+    orderNumber: string;
+    shipmentDate: string;
+    ageDays: number;
+    outstandingUnits: number;
+  }>;
   policy: {
     leadTimeDays: number;
     safetyStockDays: number;
@@ -717,6 +723,33 @@ export default function ReplenishmentPage() {
           <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
             {message}
           </div>
+        )}
+        {report && report.agedUnreceivedShipments.length > 0 && (
+          <section className="mb-5 rounded-lg border border-pink-300 bg-pink-100 px-4 py-3 text-pink-950 shadow-sm">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <h2 className="font-bold">
+                  Confirm overdue Victron shipment{report.agedUnreceivedShipments.length === 1 ? "" : "s"} before ordering
+                </h2>
+                <p className="mt-1 text-sm">
+                  {report.agedUnreceivedShipments.map((shipment) => (
+                    <span key={shipment.orderNumber} className="mr-3 inline-block">
+                      Order {shipment.orderNumber}: {shipment.outstandingUnits} stock unit{shipment.outstandingUnits === 1 ? "" : "s"} outstanding · shipped {new Date(shipment.shipmentDate).toLocaleDateString()} ({shipment.ageDays} days ago)
+                    </span>
+                  ))}
+                </p>
+                <p className="mt-1 text-sm font-medium">
+                  If this stock is already reflected in Xero, leaving it open here causes the replenishment calculation to count it twice.
+                </p>
+              </div>
+              <Link
+                href="/admin/victron-inbound"
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-pink-400 bg-white px-4 text-sm font-semibold text-pink-950 hover:bg-pink-50"
+              >
+                Review Inbound
+              </Link>
+            </div>
+          </section>
         )}
         {report && (
           <>

@@ -32,6 +32,12 @@ type InboundRow = {
   sku: string;
   quantity: string | number;
 };
+type AgedUnreceivedShipmentRow = {
+  order_number: string;
+  shipment_date: string;
+  age_days: string | number;
+  outstanding_units: string | number;
+};
 type MinimumRow = { sku: string; minimum_stock: string | number };
 type NoteRow = { sku: string; note: string };
 type ProvisionalRow = {
@@ -77,6 +83,7 @@ export async function GET() {
       acceptedQuotes,
       acceptedQuoteState,
       successions,
+      agedUnreceivedShipments,
     ] = await Promise.all([
       pool.query<ProductRow>(`
         SELECT sku, name, COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock, stock_on_hand AS supplier_stock
@@ -137,6 +144,30 @@ export async function GET() {
           if (error.code === "42P01") return { rows: [] as Succession[] };
           throw error;
         }),
+      pool.query<AgedUnreceivedShipmentRow>(`
+        SELECT
+          inbound.supplier_order_number AS order_number,
+          shipment.shipping_date::text AS shipment_date,
+          CURRENT_DATE - shipment.shipping_date AS age_days,
+          outstanding.outstanding_units
+        FROM supplier_inbound_orders inbound
+        JOIN LATERAL (
+          SELECT MIN(invoice.shipping_date) AS shipping_date
+          FROM victron_shipment_invoices invoice
+          WHERE invoice.order_number = inbound.supplier_order_number
+            AND invoice.shipping_date < CURRENT_DATE - INTERVAL '3 days'
+        ) shipment ON shipment.shipping_date IS NOT NULL
+        JOIN LATERAL (
+          SELECT COALESCE(SUM(line.ordered_quantity - line.received_quantity), 0) AS outstanding_units
+          FROM supplier_inbound_order_lines line
+          WHERE line.inbound_order_id = inbound.id
+            AND line.is_stock_item = true
+        ) outstanding ON outstanding.outstanding_units > 0
+        WHERE inbound.supplier = 'victron'
+          AND inbound.source = 'inbound'
+          AND inbound.status = 'open'
+        ORDER BY shipment.shipping_date, inbound.supplier_order_number
+      `),
     ]);
     const resolveFamily = victronSkuFamilyResolver(successions.rows);
     const predecessorSkus = new Set(
@@ -364,6 +395,12 @@ export async function GET() {
             quantity: Number(row.quantity) || 0,
           })),
       },
+      agedUnreceivedShipments: agedUnreceivedShipments.rows.map((shipment) => ({
+        orderNumber: shipment.order_number,
+        shipmentDate: shipment.shipment_date,
+        ageDays: Number(shipment.age_days) || 0,
+        outstandingUnits: Number(shipment.outstanding_units) || 0,
+      })),
       policy: {
         salesWindows: SALES_WINDOWS,
         leadTimeDays: LEAD_TIME_DAYS,
