@@ -69,6 +69,10 @@ export default function VictronInboundPage() {
   );
   const [receivingLine, setReceivingLine] = useState<number | null>(null);
   const [receivingOrder, setReceivingOrder] = useState<number | null>(null);
+  const [showCompletedOrders, setShowCompletedOrders] = useState(false);
+  const [showCompletedLines, setShowCompletedLines] = useState<
+    Record<number, boolean>
+  >({});
 
   async function loadOrders() {
     const [inboundResponse, backorderResponse] = await Promise.all([
@@ -283,6 +287,24 @@ export default function VictronInboundPage() {
     }
   }
 
+  const activeOrders = orders.filter((order) => order.status === "open");
+  const completedOrders = orders.filter((order) => order.status === "received");
+  const visibleOrders = [
+    ...activeOrders,
+    ...(showCompletedOrders ? completedOrders : []),
+  ];
+  const completedLineCount = (order: InboundOrder) =>
+    order.lines.filter((line) => line.receivedQuantity >= line.orderedQuantity)
+      .length;
+  const visibleLines = (order: InboundOrder) => {
+    if (order.status !== "open" || showCompletedLines[order.id]) {
+      return order.lines;
+    }
+    return order.lines.filter(
+      (line) => line.receivedQuantity < line.orderedQuantity,
+    );
+  };
+
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -470,7 +492,7 @@ export default function VictronInboundPage() {
                 </div>
               </article>
             ))}
-            {orders.map((order) => (
+            {visibleOrders.map((order) => (
               <article
                 key={order.id}
                 className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm"
@@ -538,7 +560,7 @@ export default function VictronInboundPage() {
                   </div>
                 </div>
                 <div className="divide-y divide-zinc-100 border-t border-zinc-100">
-                  {order.lines.map((line) => (
+                  {visibleLines(order).map((line) => (
                     <div
                       key={line.id}
                       className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
@@ -593,10 +615,41 @@ export default function VictronInboundPage() {
                       )}
                     </div>
                   ))}
+                  {order.status === "open" && completedLineCount(order) > 0 && (
+                    <div className="py-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowCompletedLines((current) => ({
+                            ...current,
+                            [order.id]: !current[order.id],
+                          }))
+                        }
+                        className="text-sm font-semibold text-zinc-600 hover:text-zinc-950"
+                      >
+                        {showCompletedLines[order.id]
+                          ? "Hide completed items"
+                          : `Show ${completedLineCount(order)} completed item${completedLineCount(order) === 1 ? "" : "s"}`}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </article>
             ))}
-            {!backorders.length && !orders.length && (
+            {completedOrders.length > 0 && (
+              <div className="rounded-lg border border-zinc-200 bg-zinc-100 p-4">
+                <button
+                  type="button"
+                  onClick={() => setShowCompletedOrders((current) => !current)}
+                  className="text-sm font-bold text-zinc-700 hover:text-zinc-950"
+                >
+                  {showCompletedOrders
+                    ? "Hide completed orders"
+                    : `Show ${completedOrders.length} completed order${completedOrders.length === 1 ? "" : "s"}`}
+                </button>
+              </div>
+            )}
+            {!backorders.length && !activeOrders.length && !completedOrders.length && (
               <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
                 No Victron shipments or backorders are currently expected.
               </div>
