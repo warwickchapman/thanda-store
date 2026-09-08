@@ -49,7 +49,7 @@ The current starter-plan design assumes a tenant allowance of 1,000 requests per
 Use a Xero Web App. The configured production redirect URI is:
 
 ```text
-https://oc.sensible.co.za/api/xero/callback
+https://store.thanda.solar/api/xero/callback
 ```
 
 ### Required environment variables
@@ -60,7 +60,7 @@ These are stored in the root-owned `/etc/thanda-store-xero.env` on the VPS. They
 DATABASE_URL=...
 XERO_CLIENT_ID=...
 XERO_CLIENT_SECRET=...
-XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
+XERO_REDIRECT_URI=https://store.thanda.solar/api/xero/callback
 XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
 XERO_CONNECT_SECRET=...
 XERO_WEBHOOK_KEY=...
@@ -106,7 +106,7 @@ The OAuth implementation is in [oauth.ts](../thanda-store/src/lib/xero/oauth.ts)
 | OAuth and common Accounting fetch | [oauth.ts](../thanda-store/src/lib/xero/oauth.ts) | OAuth URLs, token refresh/persistence, tenant headers, exact contact lookup. |
 | OAuth start/callback | [connect route](../thanda-store/src/app/api/xero/connect/route.ts), [callback route](../thanda-store/src/app/api/xero/callback/route.ts) | Secure consent lifecycle. |
 | Web receiver | [webhooks route](../thanda-store/src/app/api/xero/webhooks/route.ts) | HMAC verification, dedupe, fast durable queue insert. |
-| Webhook worker | [process-xero-webhook-events.mjs](../thanda-store/scripts/process-xero-webhook-events.mjs) | Changed Invoice and Contact record processing. |
+| Webhook worker | [process-xero-webhook-events.mjs](../thanda-store/scripts/process-xero-webhook-events.mjs) | Changed Invoice, Credit Note, and Contact record processing. |
 | Local stock sync | [sync-xero-stock.mjs](../thanda-store/scripts/sync-xero-stock.mjs) | Xero Item read and KZN stock write-back. |
 | Favourites safety-net sync | [sync-xero-sales-history.mjs](../thanda-store/scripts/sync-xero-sales-history.mjs) | Incremental 12-month invoice-line cache. |
 | Contact safety-net sync | [sync-xero-contact-access.mjs](../thanda-store/scripts/sync-xero-contact-access.mjs) | Removes portal access for people removed from Xero. |
@@ -165,8 +165,9 @@ It creates a draft only. Do not change this to auto-accept, invoice, email, or f
 The Xero Developer app must subscribe to:
 
 - Invoice `CREATE` and `UPDATE`;
+- Credit Note `CREATE` and `UPDATE`;
 - Contact `CREATE` and `UPDATE`;
-- delivery URL: `https://oc.sensible.co.za/api/xero/webhooks`.
+- delivery URL: `https://store.thanda.solar/api/xero/webhooks`.
 
 The receiver:
 
@@ -193,7 +194,7 @@ All production services use `/etc/thanda-store-xero.env`. The templates are in `
 
 | Unit/timer | Cadence | Xero call behaviour |
 | --- | --- | --- |
-| `thanda-store-xero-webhooks` | Every 5 minutes | Zero calls with an empty queue. Otherwise changed Invoice/Contact detail reads, capped as above. |
+| `thanda-store-xero-webhooks` | Every 5 minutes | Zero calls with an empty queue. Otherwise changed Invoice, Credit Note, and Contact detail reads, capped as above. |
 | `thanda-store-xero-stock-webhook` | Every 5 minutes | Zero calls unless a processed customer invoice requested local stock refresh. One full Items read when requested. |
 | `thanda-store-xero-stock` | Every 30 minutes | Runs planning sync: one full Items read plus accepted-quote snapshot. |
 | Accepted quote snapshot | After 30-minute stock sync | `Status=ACCEPTED`, pages of 100. With one page, 48 calls/day; each additional page adds 48/day. |
@@ -230,7 +231,7 @@ User Admin displays the cached allowance. It must never make an API request mere
 
 ### Configure or repair webhooks
 
-1. In [Xero Developer app management](https://developer.xero.com/app/manage), configure the delivery URL and Invoice/Contact create/update event categories.
+1. In [Xero Developer app management](https://developer.xero.com/app/manage), configure `https://store.thanda.solar/api/xero/webhooks` and Invoice, Credit Note, and Contact create/update event categories.
 2. Copy the webhook key only into protected server environment. It is not an OAuth credential.
 3. Restart PM2 with its environment refreshed, then verify User Admin reports the webhook receiver key as configured.
 4. Use Xero's `Intent to receive` action. The endpoint must return success before relying on events.

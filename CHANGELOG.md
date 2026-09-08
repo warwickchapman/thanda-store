@@ -48,6 +48,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Added
 
+- Buyers can request a one-use password-reset link from the sign-in page without exposing whether an email address has a portal account.
 - Dealer portal authentication with password plus Resend email OTP.
 - Internal user administration for linking buyer organisations to Xero contacts.
 - Admin-managed buyer invitations: buyers set their own passwords from a one-use email link, then use email OTP at sign-in.

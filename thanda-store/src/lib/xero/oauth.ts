@@ -19,7 +19,7 @@ export const XERO_SCOPES = [
 export function xeroConfig() {
   const clientId = process.env.XERO_CLIENT_ID;
   const clientSecret = process.env.XERO_CLIENT_SECRET;
-  const redirectUri = process.env.XERO_REDIRECT_URI || 'https://oc.sensible.co.za/api/xero/callback';
+  const redirectUri = process.env.XERO_REDIRECT_URI || 'https://store.thanda.solar/api/xero/callback';
   const tokenFile = process.env.XERO_TOKEN_FILE || '/var/lib/thanda-store/xero-token.json';
   const connectSecret = process.env.XERO_CONNECT_SECRET;
 

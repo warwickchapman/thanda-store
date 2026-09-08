@@ -119,6 +119,9 @@ function LoginForm() {
                 autoComplete="current-password"
                 className="h-11 w-full rounded-md border border-zinc-300 px-3 text-base outline-none focus:border-zinc-950"
               />
+              <a href={`/forgot-password?email=${encodeURIComponent(email)}`} className="mt-2 inline-block text-sm font-semibold text-zinc-600 hover:text-zinc-950">
+                Forgot password?
+              </a>
             </div>
           ) : (
             <div>

@@ -26,14 +26,14 @@ For a developer-focused Xero implementation handoff, see [Xero Integration Hando
 
 ## Architecture
 
-- **Storefront:** Next.js application in `thanda-store/`, served by PM2 behind Nginx at `https://oc.sensible.co.za`.
+- **Storefront:** Next.js application in `thanda-store/`, served by PM2 behind Nginx at `https://store.thanda.solar`.
 - **Catalogue:** PostgreSQL `products` records keyed by `(supplier, sku)`. Product details that do not belong in first-class columns are stored in the JSONB `details` field.
 - **Supplier stock and pricing:** Renogy and Victron scripts refresh supplier information. The store never derives a buyer price from a supplier/distributor cost.
 - **Local KZN stock:** Xero Items refresh `details.localStockOnHand` for Victron products and the LoRa placeholder.
 - **Victron inbound stock:** The hourly E-Order job reads the Shipments and Backorders APIs and stores a local, transient planning snapshot. Billed invoice quantities create or extend expected inbound orders; E-Order status never confirms receipt. Administrators physically count deliveries and use **Confirm all** or **Confirm partial**. Receipt requests the existing debounced Xero Items reconciliation but never writes KZN stock directly. Shipment references containing `RMA` are excluded.
 - **Victron replenishment:** `/admin/replenishment` uses only local PostgreSQL data: cached Xero sales over 30 and 90 days, Xero-sourced KZN stock, unreceived inbound quantities, current Victron backorders, configured minimum stock levels, and an optional provisional E-Order cart. It groups replacement SKU families and recommends the current SKU using the higher daily demand rate, a 5-day supplier lead time, 2 days of safety stock, and a 14-day target cover. Backorder quantities already represented by an open inbound balance on the same order and SKU family are not counted twice. The cart remains a replaceable HTML upload because E-Order exposes no cart API.
 - **Victron stock minima:** `/admin/victron-stock-minima` is the ongoing maintenance screen for minimum KZN stock by current Victron SKU. The initial positive levels were seeded once from the Victron stock-sheet workbook; values are thereafter maintained here, rather than by recurring spreadsheet import.
-- **Authentication:** Email/password plus a Resend-delivered email OTP. Email is the sole portal login identifier. Each buyer organisation must be linked to a Xero contact before a buyer can log in.
+- **Authentication:** Email/password plus a Resend-delivered email OTP. Email is the sole portal login identifier. Each buyer organisation must be linked to a Xero contact before a buyer can log in. A buyer can request a new one-use password setup link from `/forgot-password`.
 - **Images:** Original supplier image URLs remain in PostgreSQL. The first catalogue response that finds a missing thumbnail starts background WebP generation; the current response falls back to the supplier original.
 
 Generated local data files such as CSV exports, Excel reports, `node_modules`, and Next.js build output are intentionally ignored.
@@ -94,7 +94,7 @@ VICTRON_EORDER_API_KEY=...
 VICTRON_THANDA_DISCOUNT_FACTOR=0.525
 XERO_CLIENT_ID=...
 XERO_CLIENT_SECRET=...
-XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
+XERO_REDIRECT_URI=https://store.thanda.solar/api/xero/callback
 XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
 XERO_CONNECT_SECRET=...
 XERO_WEBHOOK_KEY=... # Xero Developer app webhook key; required by the PM2 Next.js process
@@ -102,7 +102,7 @@ DEFAULT_B2B_DISCOUNT_PERCENT=30
 WAREHOUSE_CSV=/absolute/path/to/warehouse_inventory.csv
 RESEND_API_KEY=re_...
 OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
-PORTAL_BASE_URL=https://oc.sensible.co.za
+PORTAL_BASE_URL=https://store.thanda.solar
 PRODUCT_THUMBNAIL_SIZE=600
 PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE=520
 PRODUCT_THUMBNAIL_QUALITY=80
@@ -116,7 +116,7 @@ Renogy production authentication uses the cached bearer token in `RENOGY_TOKEN_C
 `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are OAuth app credentials from Xero. `XERO_CONNECT_SECRET` protects the one-off `/api/xero/connect` URL because API routes are not behind the storefront Basic Auth middleware. `XERO_WEBHOOK_KEY` is distinct from OAuth credentials and must be configured in the PM2 environment that serves Next.js, not only in the systemd worker environment.
 `DEFAULT_B2B_DISCOUNT_PERCENT` is the fallback discount when a user has no supplier-specific discount. The API clamps it to a maximum of 40% off list price.
 `RESEND_API_KEY` enables email OTP delivery through Resend. `OTP_FROM_EMAIL` defaults to `Thanda Store <sales@thanda.solar>`.
-`PORTAL_BASE_URL` is the public portal URL used in account setup and password-reset emails. It defaults to `https://oc.sensible.co.za`.
+`PORTAL_BASE_URL` is the public portal URL used in account setup and password-reset emails. It defaults to `https://store.thanda.solar`.
 `PRODUCT_THUMBNAIL_SIZE`, `PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE`, and `PRODUCT_THUMBNAIL_QUALITY` control generated WebP framing. The defaults are appropriate for the current product cards; change them only when redesigning the image treatment.
 
 ## Pricing rules
@@ -147,7 +147,7 @@ Administrators with **Manage users** manage users at `/admin/users`:
 2. The portal emails a single-use account setup link that expires after seven days.
 3. The buyer chooses their own password, then signs in with their email, password, and a short-lived email OTP. The verification step lets them resend a code after 30 seconds.
 
-The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Disable an account to block future session checks without deleting its audit trail.
+The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Buyers can also use the **Forgot password?** link on the sign-in page. It always returns the same confirmation message, whether or not the email address belongs to an active account, and sends a new one-use seven-day setup link only for a login-eligible user. Reset emails are limited to one per account per minute. Disable an account to block future session checks without deleting its audit trail.
 
 When an admin opens User Admin, each unlinked user is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
 
@@ -164,7 +164,7 @@ For email OTP, configure Resend:
 ```bash
 RESEND_API_KEY=re_...
 OTP_FROM_EMAIL='Thanda Store <sales@thanda.solar>'
-PORTAL_BASE_URL=https://oc.sensible.co.za
+PORTAL_BASE_URL=https://store.thanda.solar
 ```
 
 Keep the Resend key in environment only. Do not commit it.
@@ -289,7 +289,7 @@ Do not run this every five minutes. Xero has daily request limits, and local sto
 Xero uses OAuth 2.0 rather than a static API key. Create a Xero Web App with this redirect URI:
 
 ```text
-https://oc.sensible.co.za/api/xero/callback
+https://store.thanda.solar/api/xero/callback
 ```
 
 Configure these environment variables on the VPS:
@@ -297,7 +297,7 @@ Configure these environment variables on the VPS:
 ```bash
 XERO_CLIENT_ID=...
 XERO_CLIENT_SECRET=...
-XERO_REDIRECT_URI=https://oc.sensible.co.za/api/xero/callback
+XERO_REDIRECT_URI=https://store.thanda.solar/api/xero/callback
 XERO_TOKEN_FILE=/var/lib/thanda-store/xero-token.json
 XERO_CONNECT_SECRET=<random admin-only secret>
 ```
@@ -305,7 +305,7 @@ XERO_CONNECT_SECRET=<random admin-only secret>
 Then visit:
 
 ```text
-https://oc.sensible.co.za/api/xero/connect?secret=<XERO_CONNECT_SECRET>
+https://store.thanda.solar/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 ```
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
@@ -409,8 +409,8 @@ The sales-history and contact-access timers now run once per day as recovery rec
 
 Manage the Thanda Store Xero API integration at [Xero Developer app management](https://developer.xero.com/app/manage).
 
-1. In the Xero Developer app, create a webhook subscription with endpoint `https://oc.sensible.co.za/api/xero/webhooks`.
-2. Subscribe only to **Invoice** `CREATE` and `UPDATE`, and **Contact** `CREATE` and `UPDATE`.
+1. In the Xero Developer app, create a webhook subscription with endpoint `https://store.thanda.solar/api/xero/webhooks`.
+2. Subscribe to **Invoice**, **Credit note**, and **Contact** `CREATE` and `UPDATE` events.
 3. Copy the Xero **Webhook Key** into the production PM2 environment as `XERO_WEBHOOK_KEY`, then restart PM2 with its environment refreshed. Do not put this value in Git or expose it in the admin UI.
 4. Install and enable the worker unit below. The User Admin Xero panel confirms whether the web receiver key is present, but intentionally never displays it.
 
@@ -452,12 +452,12 @@ sudo systemctl enable --now thanda-store-xero-sales-history.timer
 
 ## Deployment and operations
 
-Production is hosted at `https://oc.sensible.co.za`.
+Production is hosted at `https://store.thanda.solar`.
 
 - **Application checkout:** `/root/thanda-store`
 - **Next.js working directory:** `/root/thanda-store/thanda-store`
 - **Process manager:** PM2 process `thanda-store` (currently process id `0`)
-- **Reverse proxy and TLS:** Nginx with the Certbot-managed `oc.sensible.co.za` certificate
+- **Reverse proxy and TLS:** Nginx with the Certbot-managed `store.thanda.solar` certificate
 - **Supplier timers:** `thanda-store-renogy-sync.timer`, every five minutes; `thanda-store-victron-sync.timer`, hourly
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
 - **Xero invoice-stock timer:** `thanda-store-xero-stock-webhook.timer`, every five minutes and no external call when no invoice refresh is pending
@@ -481,7 +481,7 @@ Verify after deployment:
 
 ```bash
 pm2 status thanda-store
-curl -I https://oc.sensible.co.za/login
+curl -I https://store.thanda.solar/login
 journalctl -u thanda-store-sync.service -n 50 --no-pager
 journalctl -u thanda-store-xero-stock.service -n 50 --no-pager
 ```

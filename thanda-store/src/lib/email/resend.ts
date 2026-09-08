@@ -51,7 +51,7 @@ export async function sendOtpEmail({ to, otp }: SendOtpEmailInput) {
 }
 
 export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmailInput) {
-  const baseUrl = (process.env.PORTAL_BASE_URL || 'https://oc.sensible.co.za').replace(/\/$/, '');
+  const baseUrl = (process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/, '');
   const setupUrl = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
