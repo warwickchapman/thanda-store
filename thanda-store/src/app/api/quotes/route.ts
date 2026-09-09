@@ -1,9 +1,26 @@
 import { NextResponse } from 'next/server';
+import crypto from 'node:crypto';
 import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
+
+function currentQuoteDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function validationMessages(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return [];
+  const elements = Array.isArray((payload as { Elements?: unknown }).Elements)
+    ? (payload as { Elements: Array<{ ValidationErrors?: unknown }> }).Elements
+    : [];
+  return elements.flatMap((element) => Array.isArray(element.ValidationErrors)
+    ? element.ValidationErrors
+      .map((error) => typeof error === 'object' && error && 'Message' in error ? String(error.Message) : '')
+      .filter(Boolean)
+    : []);
+}
 
 export async function POST() {
   try {
@@ -37,11 +54,23 @@ export async function POST() {
         DiscountRate: product.b2b_discount_percent,
       };
     });
+    const quoteDate = currentQuoteDate();
+    // A retry of this unchanged checkout must not create a second Xero draft.
+    const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({
+      userId: user.id,
+      contactId: user.xeroContactId,
+      quoteDate,
+      lineItems,
+    })).digest('hex');
     const response = await xeroAccountingFetch('/Quotes', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
       body: JSON.stringify({ Quotes: [{
         Contact: { ContactID: user.xeroContactId },
+        Date: quoteDate,
         Status: 'DRAFT',
         LineAmountTypes: 'Exclusive',
         Reference: `Thanda Store cart for ${user.email}`,
@@ -50,7 +79,12 @@ export async function POST() {
     });
     const payload = await response.json();
     if (!response.ok) {
-      console.error('Xero quote error:', response.status, payload);
+      console.error('Xero quote error:', {
+        status: response.status,
+        type: typeof payload === 'object' && payload ? (payload as { Type?: unknown }).Type : null,
+        message: typeof payload === 'object' && payload ? (payload as { Message?: unknown }).Message : null,
+        validationMessages: validationMessages(payload),
+      });
       return NextResponse.json({ error: 'Xero could not create the draft quote. The cart has been kept unchanged.' }, { status: 502 });
     }
     const quote = payload.Quotes?.[0];

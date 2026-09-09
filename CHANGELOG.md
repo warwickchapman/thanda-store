@@ -18,6 +18,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ### Changed
 
+- Draft-quote requests now send an explicit quote date and a stable idempotency key to Xero. Retrying an unchanged checkout cannot create a duplicate draft, and rejected quote validation details are recorded safely in the server log for diagnosis.
+- Login-code emails now include the six-digit code in the subject line for easier copying from an email notification.
 - Shortened the Replenishment table headers to **Stock**, **Quotes**, **Cart**, and **Cover**, and reduced the table minimum width so the full planning view fits more comfortably on a desktop screen.
 - Replenishment table columns can now be sorted by clicking their headers. KZN stock remains visually highlighted, an administrator can click a Min value to update its saved stock minimum directly, and its floating header row remains opaque while scrolling.
 - The **Provisional E-Order cart** panel now uses the same mustard colour treatment as the Replenishment table's **Provisional** column.

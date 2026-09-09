@@ -39,7 +39,7 @@ async function sendEmail(payload: { to: string; subject: string; html: string; t
 export async function sendOtpEmail({ to, otp }: SendOtpEmailInput) {
   return sendEmail({
     to,
-    subject: 'Your Thanda Store login code',
+    subject: `Your Thanda Store login code: ${otp}`,
     html: `
       <p>Hello,</p>
       <p>Your Thanda Store login code is:</p>
