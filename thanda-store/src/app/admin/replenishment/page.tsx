@@ -1139,7 +1139,10 @@ export default function ReplenishmentPage() {
                               {number(item.priceBreakQty)}
                             </span>
                           )}
-                          <span title={`Unit price R${money(item.unitPrice)}`}>
+                          <span
+                            className="ml-auto"
+                            title={`Unit price R${money(item.unitPrice)}`}
+                          >
                             {number(item.suggestedOrder)}
                           </span>
                         </span>
