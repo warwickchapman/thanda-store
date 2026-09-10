@@ -1,4 +1,5 @@
 const DEFAULT_RESERVATION_DAYS = 90;
+const NON_STOCK_QUOTE_SKUS = new Set(['VEW']);
 
 function text(value) {
   return String(value || '').trim();
@@ -9,6 +10,10 @@ function isoDate(value) {
   if (!raw) return null;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function isPurchasingLineSku(sku) {
+  return !NON_STOCK_QUOTE_SKUS.has(sku);
 }
 
 export function acceptedQuoteReservationDays() {
@@ -32,7 +37,12 @@ export function normalizeAcceptedQuote(quote, { now = new Date(), reservationDay
       description: text(line?.Description),
       quantity: Number(line?.Quantity),
     }))
-    .filter((line) => line.sku && Number.isInteger(line.quantity) && line.quantity > 0);
+    .filter((line) =>
+      line.sku &&
+      Number.isInteger(line.quantity) &&
+      line.quantity > 0 &&
+      isPurchasingLineSku(line.sku),
+    );
   return {
     quoteId: text(quote?.QuoteID),
     quoteNumber: text(quote?.QuoteNumber),

@@ -52,3 +52,13 @@ test('comment, zero and fractional stock lines are ignored', () => {
   }), { now, reservationDays: 90 });
   assert.deepEqual(result.lines, []);
 });
+
+test('Victron Extended Warranty is not a stock reservation', () => {
+  const result = normalizeAcceptedQuote(quote({
+    LineItems: [
+      { LineItemID: 'warranty', ItemCode: 'VEW', Description: 'Victron Extended Warranty', Quantity: 1 },
+      { LineItemID: 'stock', ItemCode: 'SCC123', Description: 'Victron controller', Quantity: 1 },
+    ],
+  }), { now, reservationDays: 90 });
+  assert.deepEqual(result.lines.map((line) => line.sku), ['SCC123']);
+});

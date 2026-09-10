@@ -55,7 +55,8 @@ export default function ReplenishmentHowItWorksPage() {
             <p className="mt-2 text-zinc-700">
               The quote snapshot refreshes every 30 minutes after the stock sync;
               use <b>Check accepted quotes</b>{" "}on Replenishment when you need an
-              immediate refresh. RMA quotes and quotes older than 90 days are
+              immediate refresh. RMA quotes, Victron Extended Warranty ({" "}
+              <code>VEW</code>) service lines, and quotes older than 90 days are
               excluded. The age window is configurable with
               {" "}<code>XERO_ACCEPTED_QUOTE_RESERVATION_DAYS</code>.
             </p>
