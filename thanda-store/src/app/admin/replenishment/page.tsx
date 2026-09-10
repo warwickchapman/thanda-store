@@ -1130,18 +1130,18 @@ export default function ReplenishmentPage() {
                       title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}; Reserved on accepted quotes: ${item.reserved}`}
                     >
                       {item.suggestedOrder ? (
-                        <span className="inline-flex items-baseline gap-1">
-                          <span title={`Unit price R${money(item.unitPrice)}`}>
-                            {number(item.suggestedOrder)}
-                          </span>
+                        <span className="flex w-full items-baseline justify-between gap-2">
                           {item.priceBreakQty && (
                             <span
                               className="font-medium text-zinc-400"
                               title={`Price break ${number(item.priceBreakQty)} units at R${money(item.priceBreakPrice)}`}
                             >
-                              | {number(item.priceBreakQty)}
+                              {number(item.priceBreakQty)}
                             </span>
                           )}
+                          <span title={`Unit price R${money(item.unitPrice)}`}>
+                            {number(item.suggestedOrder)}
+                          </span>
                         </span>
                       ) : (
                         "—"
