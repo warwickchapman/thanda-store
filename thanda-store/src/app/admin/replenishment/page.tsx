@@ -30,6 +30,9 @@ type ReportItem = {
     quantity: number;
   }>;
   supplierStock: number;
+  unitPrice: number;
+  priceBreakQty: number | null;
+  priceBreakPrice: number | null;
   minimumStock: number;
   predecessorSkus: string[];
   note: string | null;
@@ -89,6 +92,13 @@ type SortKey =
 type SortDirection = "asc" | "desc";
 const number = (value: number, maximumFractionDigits = 0) =>
   new Intl.NumberFormat("en-ZA", { maximumFractionDigits }).format(value);
+const money = (value: number | null) =>
+  value === null
+    ? "—"
+    : new Intl.NumberFormat("en-ZA", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(value);
 
 function SortHeader({
   column,
@@ -1119,7 +1129,23 @@ export default function ReplenishmentPage() {
                       className="border-l border-zinc-300 px-3 py-3 text-right font-bold"
                       title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}; Reserved on accepted quotes: ${item.reserved}`}
                     >
-                      {item.suggestedOrder ? number(item.suggestedOrder) : "—"}
+                      {item.suggestedOrder ? (
+                        <span className="inline-flex items-baseline gap-1">
+                          <span title={`Unit price R${money(item.unitPrice)}`}>
+                            {number(item.suggestedOrder)}
+                          </span>
+                          {item.priceBreakQty && (
+                            <span
+                              className="font-medium text-zinc-400"
+                              title={`Price break ${number(item.priceBreakQty)} units at R${money(item.priceBreakPrice)}`}
+                            >
+                              | {number(item.priceBreakQty)}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="border-l border-zinc-300 px-4 py-3">
                       <span

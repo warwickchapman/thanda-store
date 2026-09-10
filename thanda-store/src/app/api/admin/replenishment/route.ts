@@ -18,8 +18,11 @@ type Succession = { predecessor_sku: string; successor_sku: string };
 type ProductRow = {
   sku: string;
   name: string;
+  price: string | number;
   local_stock: string | number | null;
   supplier_stock: string | number;
+  price_break_qty: string | number | null;
+  price_break_price: string | number | null;
 };
 type SaleRow = {
   sku: string;
@@ -86,7 +89,11 @@ export async function GET() {
       agedUnreceivedShipments,
     ] = await Promise.all([
       pool.query<ProductRow>(`
-        SELECT sku, name, COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock, stock_on_hand AS supplier_stock
+        SELECT sku, name, price,
+          COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock,
+          stock_on_hand AS supplier_stock,
+          NULLIF(details->>'priceBreakQty', '')::numeric AS price_break_qty,
+          NULLIF(details->>'priceBreakPrice', '')::numeric AS price_break_price
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
       `),
       pool.query<SaleRow>(`
@@ -359,6 +366,12 @@ export async function GET() {
             reserved: group.reserved,
             acceptedQuoteLines: group.acceptedQuoteLines,
             supplierStock,
+            unitPrice: Number(currentProduct.price) || 0,
+            priceBreakQty: Number(currentProduct.price_break_qty) || null,
+            priceBreakPrice:
+              currentProduct.price_break_price === null
+                ? null
+                : Number(currentProduct.price_break_price),
             minimumStock: group.minimumStock,
             predecessorSkus: predecessorSkusForFamily(successions.rows, family),
             note: notesBySku.get(family) || null,
