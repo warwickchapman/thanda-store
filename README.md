@@ -141,7 +141,7 @@ The storefront uses internal portal users with email OTP verification. Passwords
 
 Administrators can view User Admin at `/admin/users`, while only an administrator with **Manage users** permission can invite people, alter roles or permissions, edit account setup, or enable and disable accounts. This avoids granting customer/account-management powers to every administrator. A user manager can create an internal administrator without a Xero customer contact; those internal accounts are kept in the local **Thanda staff** organisation. Buyer invitations remain linked to a Xero customer contact.
 
-Administrators with **Manage users** manage users at `/admin/users`:
+Administrators with **Manage users** manage users from the searchable directory at `/admin/users`. Select **Edit** for a dedicated account page; the directory remains compact and does not render every account's controls at once. From that page they can:
 
 1. Search Xero by the buyer primary contact email and select the customer contact. The company name is read from Xero; it is not entered in the portal.
 2. The portal emails a single-use account setup link that expires after seven days.
@@ -149,7 +149,7 @@ Administrators with **Manage users** manage users at `/admin/users`:
 
 The admin never sets, stores, or communicates the buyer password. **Send setup email** can be used to issue a new password-reset link. Buyers can also use the **Forgot password?** link on the sign-in page. It always returns the same confirmation message, whether or not the email address belongs to an active account, and sends a new one-use seven-day setup link only for a login-eligible user. Reset emails are limited to one per account per minute. Disable an account to block future session checks without deleting its audit trail.
 
-When an admin opens User Admin, each unlinked user is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID and Contact Name fields remain available for manual correction or no-match cases.
+When an admin opens an unlinked user on its edit page, it is automatically checked with an exact Xero contact-email lookup. One active match is selected automatically; multiple exact matches are shown in a dropdown and require an explicit choice. **Find in Xero** remains available to retry a lookup or search the email entered in the invite form. The Contact ID field remains available for manual correction or no-match cases.
 
 After a Xero link is saved, User Admin shows a compact locked contact summary. Use **Edit Xero link** to deliberately reopen the linking fields; an unchanged saved link is not exposed as an editable form.
 

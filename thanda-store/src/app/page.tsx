@@ -1,5 +1,6 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
+import Link from 'next/link';
 import { Search, Package, ShoppingCart, Info, LogOut } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 import { CartDrawer } from '@/components/cart-drawer';
@@ -319,10 +320,10 @@ export default function Home() {
                     <Package className="h-4 w-4" />
                     Inventory
                   </a>
-                  <a href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                  <Link href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                     <Info className="h-4 w-4" />
                     Admin
-                  </a>
+                  </Link>
                 </>
               )}
               <button onClick={() => setCartOpen(true)} className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">

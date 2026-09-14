@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- User Admin is now a searchable user directory with a dedicated edit page for each account. The directory no longer renders every account's access, Xero-link, email, and people-management controls at once; invitations remain available to user managers below the listing.
 - Replenishment demand now uses net invoiced quantities: authorised/paid customer credit notes offset their matching SKU sales within the 30- and 90-day windows. The first deployment backfills the prior year of credit notes; future changes are handled incrementally and, where configured in Xero, through `CREDITNOTE` webhooks.
 - Added a developer Xero integration handoff covering OAuth, webhooks, schedules, cache ownership, rate-limit discipline, quote creation, recovery procedures, and unimplemented workflow boundaries.
 - User Admin now distinguishes ordinary administrators from administrators with **Manage users** permission. All administrators retain Admin and Inventory access; only user managers can invite people, change roles or user-management permission, edit user setup, or enable/disable accounts. Existing administrators are seeded as user managers during the one-time migration so access cannot be lost.
