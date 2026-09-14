@@ -265,6 +265,10 @@ Authenticated buyers can open **Accounts** from the store header. The view provi
 
 Only a Xero quote in `SENT` status can be accepted from the portal. An `ACCEPTED` quote can be marked unaccepted, which returns it to `SENT`; the portal never rewrites it to a draft. Both operations re-fetch the individual quote, verify it belongs to the logged-in company's Xero contact, then update the status and refresh the snapshot. The Accounts feature requires the `accounting.reports.read` consent scope for future statement/report support, so reconnect Xero after deployment to grant it.
 
+The Quotes tab offers **Copy to new quote**. It opens a review screen populated from the original quote's SKU lines. A retired Victron SKU is replaced only when the succession table identifies a live successor; live source SKUs remain unchanged. Buyers can change quantities, remove lines, and progressively search the current catalogue to add products. Saving recalculates the buyer's current price and supplier discount, re-applies the stock-aware Victron fulfilment rule, and creates a new Xero `DRAFT` quote only. The original quote is never changed.
+
+The generic **Credit available** card is intentionally not shown. Xero's public Accounting API exposes Contact sales payment terms but not a contact credit-limit field, so the portal cannot truthfully determine whether a customer has both an explicitly configured credit limit and period. Add an explicit local credit-management setting before exposing it again.
+
 ## Xero stock sync
 
 Xero is the source of truth for Thanda/KZN stock, not supplier warehouse stock. Supplier warehouse quantities still come from Renogy and Victron.

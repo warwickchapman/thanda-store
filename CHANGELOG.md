@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Quotes can now be copied to a reviewed new draft quote. The quote-only editor resolves retired Victron SKU lines through the replacement table, supports quantity edits and progressive current-catalogue SKU search, then recalculates current customer pricing and stock-aware fulfilment before creating a new Xero draft. The original quote remains unchanged and each copy action is audited.
+- Accounts tabs now read Current, Quotes, Invoices, Credit notes. Removed the generic Credit available card because the Xero contact API does not provide sufficient credit-limit data to show it truthfully.
 - Accounts now pages customer documents newest-first instead of rendering the entire history. It shows 25 rows per page and offers progressive partial search across document numbers and references, using the local protected snapshot rather than additional Xero calls.
 - Added a buyer **Accounts** dashboard with protected company-scoped Xero quotes, invoices and credit notes, authenticated document PDFs, and a CSV statement download. It caches each customer snapshot for 15 minutes, rate-paces refreshes, retains the shared Xero allowance reserve, and records account listings, document views, statement downloads, and quote actions in the portal activity log.
 - Buyers can accept only `SENT` Xero quotes and can return an `ACCEPTED` quote to `SENT` from Accounts. The server re-checks the quote's Xero contact before every status change.

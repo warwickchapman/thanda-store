@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatCurrency } from '@/lib/utils';
 
@@ -39,7 +39,6 @@ export default function AccountsPage() {
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [openInvoices, setOpenInvoices] = useState(0);
-  const [creditAvailable, setCreditAvailable] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
@@ -61,7 +60,6 @@ export default function AccountsPage() {
       setPage(data.page || requestedPage);
       setPageSize(data.pageSize || 25);
       setOpenInvoices(data.openInvoices || 0);
-      setCreditAvailable(data.creditAvailable || 0);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to load account documents.');
     } finally {
@@ -117,14 +115,10 @@ export default function AccountsPage() {
           <Link href="/" className="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 px-4 text-sm font-semibold hover:bg-white">Back to store</Link>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2">
+        <section className="mt-6">
           <div className="border border-zinc-300 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Open invoices</p>
               <p className="mt-1 text-2xl font-bold">{formatCurrency(openInvoices)}</p>
-          </div>
-          <div className="border border-zinc-300 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Credit available</p>
-            <p className="mt-1 text-2xl font-bold">{formatCurrency(creditAvailable)}</p>
           </div>
         </section>
 
@@ -132,7 +126,7 @@ export default function AccountsPage() {
           <div className="flex flex-col gap-3 border-b border-zinc-300 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex overflow-x-auto" role="tablist" aria-label="Account documents">
               {([
-                ['current', 'Current'], ['invoice', 'Invoices'], ['quote', 'Quotes'], ['credit_note', 'Credit notes'],
+                ['current', 'Current'], ['quote', 'Quotes'], ['invoice', 'Invoices'], ['credit_note', 'Credit notes'],
               ] as Array<[Tab, string]>).map(([value, label]) => (
                 <button key={value} role="tab" aria-selected={tab === value} onClick={() => { setTab(value); setPage(1); }} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${tab === value ? 'border-zinc-900 text-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-900'}`}>{label}</button>
               ))}
@@ -165,6 +159,7 @@ export default function AccountsPage() {
                   <a href={`/api/account/documents/${document.type}/${encodeURIComponent(document.id)}/pdf`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50"><FileText className="h-4 w-4" />PDF <ExternalLink className="h-3.5 w-3.5" /></a>
                   {document.type === 'quote' && document.status === 'SENT' && <button disabled={busyQuoteId === document.id} onClick={() => void updateQuote(document, true)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-zinc-900 px-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"><Check className="h-4 w-4" />Accept quote</button>}
                   {document.type === 'quote' && document.status === 'ACCEPTED' && <button disabled={busyQuoteId === document.id} onClick={() => void updateQuote(document, false)} className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50 disabled:opacity-50">Mark unaccepted</button>}
+                  {document.type === 'quote' && <Link href={`/accounts/quotes/${encodeURIComponent(document.id)}/copy`} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50"><Copy className="h-4 w-4" />Copy to new quote</Link>}
                 </article>
               ))}
             </div>

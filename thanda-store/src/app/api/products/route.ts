@@ -24,11 +24,15 @@ function queueMissingThumbnails(products: Array<{ id: number; image_url?: string
   } catch { ids.forEach((id) => thumbnailQueuedAt.delete(id)); }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    const products = await currentCatalogue(user.discounts);
+    const query = new URL(request.url).searchParams.get('query')?.trim().toLowerCase() || '';
+    const allProducts = await currentCatalogue(user.discounts);
+    const products = query
+      ? allProducts.filter((product) => product.sku.toLowerCase().includes(query) || product.name.toLowerCase().includes(query)).slice(0, 12)
+      : allProducts;
     queueMissingThumbnails(products);
     return NextResponse.json(products);
   } catch (error) {
