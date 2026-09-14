@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Download, ExternalLink, FileText, RefreshCw } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { formatCurrency } from '@/lib/utils';
 
 type DocumentType = 'quote' | 'invoice' | 'credit_note';
@@ -33,20 +33,35 @@ function money(document: CustomerDocument, amount: number) {
 export default function AccountsPage() {
   const [documents, setDocuments] = useState<CustomerDocument[]>([]);
   const [tab, setTab] = useState<Tab>('current');
+  const [search, setSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+  const [openInvoices, setOpenInvoices] = useState(0);
+  const [creditAvailable, setCreditAvailable] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
   const [busyQuoteId, setBusyQuoteId] = useState<string | null>(null);
 
-  async function load(refresh = false) {
+  async function load(refresh = false, requestedPage = page) {
     if (refresh) setRefreshing(true);
     else setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`/api/account/documents${refresh ? '?refresh=1' : ''}`);
+      const params = new URLSearchParams({ page: String(requestedPage), view: tab });
+      if (searchTerm) params.set('query', searchTerm);
+      if (refresh) params.set('refresh', '1');
+      const response = await fetch(`/api/account/documents?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to load account documents.');
       setDocuments(data.documents || []);
+      setTotal(data.total || 0);
+      setPage(data.page || requestedPage);
+      setPageSize(data.pageSize || 25);
+      setOpenInvoices(data.openInvoices || 0);
+      setCreditAvailable(data.creditAvailable || 0);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to load account documents.');
     } finally {
@@ -56,16 +71,19 @@ export default function AccountsPage() {
   }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load(); }, 0);
+    const timer = window.setTimeout(() => {
+      setSearchTerm(search.trim());
+      setPage(1);
+    }, 250);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [search]);
 
-  const filtered = useMemo(() => documents.filter((document) => {
-    if (tab === 'current') return (document.type === 'invoice' && document.due > 0) || (document.type === 'quote' && ['SENT', 'ACCEPTED'].includes(document.status));
-    return document.type === tab;
-  }), [documents, tab]);
-  const openInvoices = documents.filter((document) => document.type === 'invoice').reduce((total, document) => total + document.due, 0);
-  const creditAvailable = documents.filter((document) => document.type === 'credit_note').reduce((total, document) => total + document.due, 0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(false, page); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [page, tab, searchTerm]);
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   async function updateQuote(document: CustomerDocument, accept: boolean) {
     const action = accept ? 'accept' : 'mark unaccepted';
@@ -102,7 +120,7 @@ export default function AccountsPage() {
         <section className="mt-6 grid gap-3 sm:grid-cols-2">
           <div className="border border-zinc-300 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Open invoices</p>
-            <p className="mt-1 text-2xl font-bold">{formatCurrency(openInvoices)}</p>
+              <p className="mt-1 text-2xl font-bold">{formatCurrency(openInvoices)}</p>
           </div>
           <div className="border border-zinc-300 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Credit available</p>
@@ -116,18 +134,25 @@ export default function AccountsPage() {
               {([
                 ['current', 'Current'], ['invoice', 'Invoices'], ['quote', 'Quotes'], ['credit_note', 'Credit notes'],
               ] as Array<[Tab, string]>).map(([value, label]) => (
-                <button key={value} role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${tab === value ? 'border-zinc-900 text-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-900'}`}>{label}</button>
+                <button key={value} role="tab" aria-selected={tab === value} onClick={() => { setTab(value); setPage(1); }} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${tab === value ? 'border-zinc-900 text-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-900'}`}>{label}</button>
               ))}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <a href="/api/account/statement" className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50"><Download className="h-4 w-4" />Statement CSV</a>
               <button onClick={() => void load(true)} disabled={refreshing} className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />Refresh</button>
             </div>
           </div>
+          <div className="flex flex-col gap-2 border-b border-zinc-300 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search reference or document number..." className="h-10 w-full rounded-lg border border-zinc-300 bg-white pl-10 pr-3 text-sm outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900" />
+            </div>
+            <p className="text-sm text-zinc-500">{total.toLocaleString()} {total === 1 ? 'document' : 'documents'}</p>
+          </div>
           {message && <p className="border-b border-zinc-300 bg-amber-50 px-4 py-3 text-sm text-zinc-800" role="status">{message}</p>}
-          {loading ? <p className="p-8 text-sm text-zinc-500">Loading account documents...</p> : filtered.length === 0 ? <p className="p-8 text-sm text-zinc-500">No documents in this view.</p> : (
+          {loading ? <p className="p-8 text-sm text-zinc-500">Loading account documents...</p> : documents.length === 0 ? <p className="p-8 text-sm text-zinc-500">No documents in this view.</p> : (
             <div className="divide-y divide-zinc-200">
-              {filtered.map((document) => (
+              {documents.map((document) => (
                 <article key={`${document.type}-${document.id}`} className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -144,6 +169,13 @@ export default function AccountsPage() {
               ))}
             </div>
           )}
+          {!loading && total > 0 && <div className="flex items-center justify-between border-t border-zinc-300 p-4">
+            <p className="text-sm text-zinc-500">Page {page} of {pageCount}</p>
+            <div className="flex gap-2">
+              <button onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50 disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Newer</button>
+              <button onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page >= pageCount} className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50 disabled:opacity-40">Older<ChevronRight className="h-4 w-4" /></button>
+            </div>
+          </div>}
         </section>
       </div>
     </main>

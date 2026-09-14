@@ -261,7 +261,7 @@ Invoice history supplies only ranking. Cards always show the buyer's current pri
 
 ## Customer accounts
 
-Authenticated buyers can open **Accounts** from the store header. The view provides current and historical company-scoped Xero quotes, invoices and credit notes, with authenticated PDF retrieval. It has no public document links. A CSV statement download includes invoices and credit notes only; it is generated from the same protected, cached snapshot.
+Authenticated buyers can open **Accounts** from the store header. The view provides current and historical company-scoped Xero quotes, invoices and credit notes, with authenticated PDF retrieval. It has no public document links. A CSV statement download includes invoices and credit notes only; it is generated from the same protected, cached snapshot. Accounts returns 25 documents at a time, newest first. The **Newer** and **Older** controls page the local snapshot, while progressive partial search matches document number or reference without making a Xero request.
 
 Only a Xero quote in `SENT` status can be accepted from the portal. An `ACCEPTED` quote can be marked unaccepted, which returns it to `SENT`; the portal never rewrites it to a draft. Both operations re-fetch the individual quote, verify it belongs to the logged-in company's Xero contact, then update the status and refresh the snapshot. The Accounts feature requires the `accounting.reports.read` consent scope for future statement/report support, so reconnect Xero after deployment to grant it.
 

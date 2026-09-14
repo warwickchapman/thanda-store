@@ -30,6 +30,17 @@ export type CustomerDocument = {
   due: number;
 };
 
+export type CustomerDocumentView = 'current' | 'invoice' | 'quote' | 'credit_note';
+
+export type CustomerDocumentsPage = {
+  documents: CustomerDocument[];
+  total: number;
+  page: number;
+  pageSize: number;
+  openInvoices: number;
+  creditAvailable: number;
+};
+
 function dateValue(value: unknown) {
   const text = String(value || '');
   return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : null;
@@ -195,6 +206,66 @@ export async function customerDocuments(user: PortalUser, refresh = false) {
     reference: row.reference, currency: row.currency_code, total: numberValue(row.total),
     paid: numberValue(row.amount_paid), due: numberValue(row.amount_due),
   })) as CustomerDocument[];
+}
+
+export async function customerDocumentsPage(
+  user: PortalUser,
+  options: { refresh?: boolean; page?: number; pageSize?: number; query?: string; view?: CustomerDocumentView } = {},
+): Promise<CustomerDocumentsPage> {
+  await ensureAuthSchema();
+  if (!user.xeroContactId) throw new Error('Your account is not linked to a Xero customer.');
+
+  const page = Math.max(1, Math.floor(options.page || 1));
+  const pageSize = Math.min(50, Math.max(10, Math.floor(options.pageSize || 25)));
+  const query = String(options.query || '').trim().slice(0, 100);
+  const view = options.view || 'current';
+  const state = await pool.query('SELECT last_successful_sync_at FROM xero_customer_document_sync_state WHERE contact_id = $1', [user.xeroContactId]);
+  const lastSync = state.rows[0]?.last_successful_sync_at ? Date.parse(state.rows[0].last_successful_sync_at) : 0;
+  const shouldRefresh = !lastSync || Date.now() - lastSync > CACHE_TTL_MS;
+  const forcedRefreshAllowed = options.refresh && (!lastSync || Date.now() - lastSync > FORCED_REFRESH_COOLDOWN_MS);
+  if (shouldRefresh || forcedRefreshAllowed) await refreshCustomerDocuments(user);
+
+  const conditions = ['contact_id = $1'];
+  const values: unknown[] = [user.xeroContactId];
+  if (view === 'current') {
+    conditions.push("((document_type = 'invoice' AND amount_due > 0) OR (document_type = 'quote' AND status IN ('SENT', 'ACCEPTED'))) ");
+  } else {
+    values.push(view);
+    conditions.push(`document_type = $${values.length}`);
+  }
+  if (query) {
+    values.push(`%${query}%`);
+    conditions.push(`(document_number ILIKE $${values.length} OR reference ILIKE $${values.length})`);
+  }
+  const where = conditions.join(' AND ');
+  const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM xero_customer_documents WHERE ${where}`, values);
+  values.push(pageSize, (page - 1) * pageSize);
+  const result = await pool.query(`
+    SELECT document_type, document_id, document_number, status, document_date, due_date, reference,
+           currency_code, total, amount_paid, amount_due
+    FROM xero_customer_documents
+    WHERE ${where}
+    ORDER BY document_date DESC NULLS LAST, document_number DESC
+    LIMIT $${values.length - 1} OFFSET $${values.length}
+  `, values);
+  const summary = await pool.query(`
+    SELECT
+      COALESCE(SUM(amount_due) FILTER (WHERE document_type = 'invoice'), 0) AS open_invoices,
+      COALESCE(SUM(amount_due) FILTER (WHERE document_type = 'credit_note'), 0) AS credit_available
+    FROM xero_customer_documents WHERE contact_id = $1
+  `, [user.xeroContactId]);
+  return {
+    documents: result.rows.map((row) => ({
+      type: row.document_type, id: row.document_id, number: row.document_number, status: row.status,
+      date: row.document_date ? String(row.document_date).slice(0, 10) : null,
+      dueDate: row.due_date ? String(row.due_date).slice(0, 10) : null,
+      reference: row.reference, currency: row.currency_code, total: numberValue(row.total),
+      paid: numberValue(row.amount_paid), due: numberValue(row.amount_due),
+    })) as CustomerDocument[],
+    total: numberValue(countResult.rows[0]?.total), page, pageSize,
+    openInvoices: numberValue(summary.rows[0]?.open_invoices),
+    creditAvailable: numberValue(summary.rows[0]?.credit_available),
+  };
 }
 
 export async function customerDocument(user: PortalUser, type: CustomerDocument['type'], id: string) {
