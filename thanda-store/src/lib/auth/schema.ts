@@ -426,6 +426,46 @@ export async function ensureAuthSchema() {
   await pool.query(
     "CREATE INDEX IF NOT EXISTS xero_accepted_quote_lines_sku_idx ON xero_accepted_quote_lines (sku)",
   );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_customer_documents (
+      contact_id TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK (document_type IN ('quote', 'invoice', 'credit_note')),
+      document_id TEXT NOT NULL,
+      document_number TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT '',
+      document_date DATE,
+      due_date DATE,
+      reference TEXT NOT NULL DEFAULT '',
+      currency_code TEXT NOT NULL DEFAULT 'ZAR',
+      total NUMERIC(14, 2) NOT NULL DEFAULT 0,
+      amount_paid NUMERIC(14, 2) NOT NULL DEFAULT 0,
+      amount_due NUMERIC(14, 2) NOT NULL DEFAULT 0,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      xero_updated_at TIMESTAMPTZ,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (contact_id, document_type, document_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_customer_document_sync_state (
+      contact_id TEXT PRIMARY KEY,
+      last_successful_sync_at TIMESTAMPTZ,
+      last_error TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS portal_activity_log (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES portal_users(id) ON DELETE CASCADE,
+      organisation_id BIGINT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      resource_type TEXT,
+      resource_id TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   // Import only missing SKU settings. Future edits in Inventory planning win
   // permanently and no recurring workbook import is required.
   await pool.query(
@@ -476,5 +516,11 @@ export async function ensureAuthSchema() {
   );
   await pool.query(
     "CREATE INDEX IF NOT EXISTS supplier_inbound_order_lines_order_idx ON supplier_inbound_order_lines (inbound_order_id)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_customer_documents_contact_date_idx ON xero_customer_documents (contact_id, document_date DESC)",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS portal_activity_log_user_created_idx ON portal_activity_log (user_id, created_at DESC)",
   );
 }

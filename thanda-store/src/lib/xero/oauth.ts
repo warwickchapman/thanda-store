@@ -14,6 +14,7 @@ export const XERO_SCOPES = [
   'accounting.settings.read',
   'accounting.contacts.read',
   'accounting.invoices',
+  'accounting.reports.read',
 ].join(' ');
 
 export function xeroConfig() {

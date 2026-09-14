@@ -1,7 +1,7 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
 import Link from 'next/link';
-import { Search, Package, ShoppingCart, Info, LogOut } from "lucide-react";
+import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 import { CartDrawer } from '@/components/cart-drawer';
 
@@ -313,6 +313,12 @@ export default function Home() {
                 <div className="flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
                   {sessionUser.organisationName}
                 </div>
+              )}
+              {sessionUser && (
+                <Link href="/accounts" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                  <ReceiptText className="h-4 w-4" />
+                  Accounts
+                </Link>
               )}
               {sessionUser?.role === 'admin' && (
                 <>

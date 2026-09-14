@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added a buyer **Accounts** dashboard with protected company-scoped Xero quotes, invoices and credit notes, authenticated document PDFs, and a CSV statement download. It caches each customer snapshot for 15 minutes, rate-paces refreshes, retains the shared Xero allowance reserve, and records account listings, document views, statement downloads, and quote actions in the portal activity log.
+- Buyers can accept only `SENT` Xero quotes and can return an `ACCEPTED` quote to `SENT` from Accounts. The server re-checks the quote's Xero contact before every status change.
 - User Admin is now a searchable user directory with a dedicated edit page for each account. The directory no longer renders every account's access, Xero-link, email, and people-management controls at once; invitations remain available to user managers below the listing.
 - Replenishment demand now uses net invoiced quantities: authorised/paid customer credit notes offset their matching SKU sales within the 30- and 90-day windows. The first deployment backfills the prior year of credit notes; future changes are handled incrementally and, where configured in Xero, through `CREDITNOTE` webhooks.
 - Added a developer Xero integration handoff covering OAuth, webhooks, schedules, cache ownership, rate-limit discipline, quote creation, recovery procedures, and unimplemented workflow boundaries.
