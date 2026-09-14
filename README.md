@@ -267,7 +267,7 @@ Only a Xero quote in `SENT` status can be accepted from the portal. An `ACCEPTED
 
 The Quotes tab offers **Copy to new quote**. It opens a review screen populated from the original quote's SKU lines. A retired Victron SKU is replaced only when the succession table identifies a live successor; live source SKUs remain unchanged. Buyers can change quantities, remove lines, and progressively search the current catalogue to add products. Saving recalculates the buyer's current price and supplier discount, re-applies the stock-aware Victron fulfilment rule, and creates a new Xero `DRAFT` quote only. The original quote is never changed.
 
-The generic **Credit available** card is intentionally not shown. Xero's public Accounting API exposes Contact sales payment terms but not a contact credit-limit field, so the portal cannot truthfully determine whether a customer has both an explicitly configured credit limit and period. Add an explicit local credit-management setting before exposing it again.
+The generic **Credit available** card is intentionally hidden for now. Xero's public Accounting API exposes Contact sales payment terms but not a contact credit-limit field, so any future credit-limit and payment-period values must be maintained explicitly in the portal rather than inferred from Xero.
 
 ## Xero stock sync
 

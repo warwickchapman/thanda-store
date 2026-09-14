@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Account document and due dates now show an explicit year, avoiding ambiguity for customers with multi-year purchase histories.
 - Quotes can now be copied to a reviewed new draft quote. The quote-only editor resolves retired Victron SKU lines through the replacement table, supports quantity edits and progressive current-catalogue SKU search, then recalculates current customer pricing and stock-aware fulfilment before creating a new Xero draft. The original quote remains unchanged and each copy action is audited.
 - Accounts tabs now read Current, Quotes, Invoices, Credit notes. Removed the generic Credit available card because the Xero contact API does not provide sufficient credit-limit data to show it truthfully.
 - Accounts now pages customer documents newest-first instead of rendering the entire history. It shows 25 rows per page and offers progressive partial search across document numbers and references, using the local protected snapshot rather than additional Xero calls.

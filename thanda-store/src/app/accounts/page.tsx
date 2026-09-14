@@ -30,6 +30,13 @@ function money(document: CustomerDocument, amount: number) {
   return document.currency === 'ZAR' ? formatCurrency(amount) : `${document.currency} ${amount.toFixed(2)}`;
 }
 
+function accountDate(value: string | null) {
+  if (!value) return 'No date';
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
 export default function AccountsPage() {
   const [documents, setDocuments] = useState<CustomerDocument[]>([]);
   const [tab, setTab] = useState<Tab>('current');
@@ -153,7 +160,7 @@ export default function AccountsPage() {
                       <p className="font-bold">{document.number || 'Unnumbered document'}</p>
                       <span className="border border-zinc-300 px-2 py-0.5 text-xs font-semibold">{titleCase(document.status || document.type)}</span>
                     </div>
-                    <p className="mt-1 text-sm text-zinc-600">{document.date || 'No date'}{document.dueDate ? ` · Due ${document.dueDate}` : ''}{document.reference ? ` · ${document.reference}` : ''}</p>
+                    <p className="mt-1 text-sm text-zinc-600">{accountDate(document.date)}{document.dueDate ? ` · Due ${accountDate(document.dueDate)}` : ''}{document.reference ? ` · ${document.reference}` : ''}</p>
                     <p className="mt-1 text-sm text-zinc-600">{titleCase(document.type)} · Total {money(document, document.total)}{document.type === 'invoice' && ` · Open ${money(document, document.due)}`}</p>
                   </div>
                   <a href={`/api/account/documents/${document.type}/${encodeURIComponent(document.id)}/pdf`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-300 px-3 text-sm font-semibold hover:bg-zinc-50"><FileText className="h-4 w-4" />PDF <ExternalLink className="h-3.5 w-3.5" /></a>
