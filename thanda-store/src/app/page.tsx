@@ -237,7 +237,7 @@ export default function Home() {
 
   const isVisibleProduct = (product: Product) => {
     if (product.supplier.toLowerCase() !== 'renogy') return true;
-    return ['battery', 'batteries', 'solar panel', 'solar panels'].includes(product.category.trim().toLowerCase());
+    return ['battery', 'batteries', 'solar panel', 'solar panels', 'solar_panel', 'solar_panels'].includes(product.category.trim().toLowerCase());
   };
   const visibleProducts = products.filter(isVisibleProduct);
   const filteredProducts = visibleProducts.filter((product) => {
