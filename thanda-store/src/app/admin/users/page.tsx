@@ -22,6 +22,7 @@ export default function AdminUsersPage() {
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
+  const [resendingUserId, setResendingUserId] = useState<number | null>(null);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -36,6 +37,25 @@ export default function AdminUsersPage() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to load Xero status.');
     setXeroStatus(data);
+  }
+
+  async function resendInvite(user: PortalUser) {
+    setResendingUserId(user.id);
+    setError('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to resend invite.');
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend invite.');
+    } finally {
+      setResendingUserId(null);
+    }
   }
 
   useEffect(() => {
@@ -94,8 +114,11 @@ export default function AdminUsersPage() {
               <div><p className="font-semibold">{user.organisation_name}</p>{user.xero_contact_name && user.xero_contact_name !== user.organisation_name && <p className="mt-1 text-xs text-zinc-500">Xero: {user.xero_contact_name}</p>}</div>
               <p className="break-all text-sm text-zinc-600">{user.email}</p>
               <p className="text-sm text-zinc-600">{user.role === 'admin' ? user.can_manage_users ? 'Admin · Users' : 'Administrator' : 'Buyer'}</p>
-              <div className="flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.is_active ? 'Active' : 'Disabled'}</span>{user.setup_expires_at && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Setup pending</span>}</div>
-              <Link href={`/admin/users/${user.id}`} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 lg:justify-self-end">Edit</Link>
+              <div className="flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.setup_expires_at ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.setup_expires_at ? 'Setup pending' : user.is_active ? 'Active' : 'Disabled'}</span></div>
+              <div className="flex flex-wrap gap-2 lg:justify-self-end">
+                {canManageUsers && user.setup_expires_at && <button type="button" disabled={resendingUserId === user.id} onClick={() => void resendInvite(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resendingUserId === user.id ? 'Sending...' : 'Resend invite'}</button>}
+                <Link href={`/admin/users/${user.id}`} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit</Link>
+              </div>
             </div>)}
             {users.length === 0 && <p className="p-4 text-sm text-zinc-500">Loading users...</p>}
             {users.length > 0 && filteredUsers.length === 0 && <p className="p-4 text-sm text-zinc-500">No users match that search.</p>}

@@ -683,7 +683,7 @@ export function UserEditorPage({ userId }: { userId: number }) {
               <XeroPeopleAccess organisationId={user.organisation_id} contactId={user.xero_contact_id} portalUsers={users.filter((candidate) => candidate.organisation_id === user.organisation_id)} onEnabled={loadUsers} />
             )}
             <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
-              <button type="button" disabled={busyUserId === user.id} onClick={() => void sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">Send setup email</button>
+              <button type="button" disabled={busyUserId === user.id} onClick={() => void sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.setup_expires_at ? 'Resend invite' : 'Send setup email'}</button>
               {(user.is_active || user.xero_person_kind === 'manual') && <button type="button" disabled={busyUserId === user.id} onClick={() => void setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>}
             </div>
           </> : <p className="text-sm text-zinc-500">You can view this account, but Manage users permission is required to make changes.</p>}
