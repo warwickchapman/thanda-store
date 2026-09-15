@@ -42,6 +42,8 @@ Before changing any Xero call, check the official OpenAPI contract first. Do not
 
 The current starter-plan design assumes a tenant allowance of 1,000 requests per day and 60 requests per minute. Headers from actual responses are authoritative and are persisted locally. Reconfirm plan limits in the Xero Developer portal before changing schedules.
 
+For OAuth scope names and capability decisions, the OAuth scopes reference above is the exclusive authority. Do not derive a scope from a historic token, an OAuth error, an SDK constant, OpenAPI annotations, or a third-party example.
+
 ## 3. OAuth connection
 
 ### App type and redirect URI
@@ -88,7 +90,7 @@ Their current use is:
 | `accounting.contacts.read` | Contact matching and primary/additional-person access reconciliation. |
 | `accounting.invoices` | Sales-history reads and draft Quote creation in the present implementation. |
 
-If a changed capability needs more access, add only the necessary documented scope, deploy, and reconnect. Scope changes do not affect the old consent until an administrator reconnects Xero.
+If a changed capability needs more access, first verify the exact scope in Xero's official [OAuth 2.0 scopes reference](https://developer.xero.com/documentation/guides/oauth2/scopes/), then add only that documented scope, deploy, and reconnect. Scope changes do not affect the old consent until an administrator reconnects Xero.
 
 ### Connection flow
 

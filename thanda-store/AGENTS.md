@@ -29,6 +29,7 @@ External API calls are a constrained production resource. Minimise them by defau
 ### Xero-specific contract and efficiency rules
 
 - Before changing any Xero request, consult the official [Xero OpenAPI 3 specification repository](https://github.com/XeroAPI/Xero-OpenAPI). Do not infer unsupported query parameters, request shapes, or batching behaviour from SDK snippets, older examples, or memory.
+- For OAuth scope selection and validation, use only Xero's official [OAuth 2.0 scopes reference](https://developer.xero.com/documentation/guides/oauth2/scopes/). Do not infer scope names, availability, or permissions from old tokens, error messages, SDK constants, OpenAPI annotations, or third-party examples.
 - Follow Xero's [API Call Efficiencies](https://developer.xero.com/documentation/getting-started-guide/) guidance as a design requirement: webhooks where available, derived local data for portal reads, smart filtering, `If-Modified-Since`, pagination, caching, and deliberate low-frequency reconciliation.
 - Confirm a proposed Xero request against the applicable OpenAPI operation before deployment. Record the endpoint, supported parameters, expected calls per run/day, and fallback behaviour in the relevant README section or code comment.
 - Treat the Xero tenant allowance as shared across webhooks, stock, history, contact access, quote creation, and admin actions. Preserve the configured reserve; do not spend it on speculative probes or repeated recovery attempts.
