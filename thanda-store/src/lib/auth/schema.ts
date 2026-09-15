@@ -183,6 +183,41 @@ export async function ensureAuthSchema() {
   await pool.query(
     "ALTER TABLE xero_api_usage ADD COLUMN IF NOT EXISTS next_allowed_at TIMESTAMPTZ",
   );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xero_api_usage_log (
+      id BIGSERIAL PRIMARY KEY,
+      source TEXT,
+      day_limit_remaining INTEGER,
+      minute_limit_remaining INTEGER,
+      app_minute_limit_remaining INTEGER,
+      rate_limit_problem TEXT,
+      retry_after_seconds INTEGER,
+      observed_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS xero_api_usage_log_observed_at_idx ON xero_api_usage_log (observed_at DESC)",
+  );
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION log_xero_api_usage() RETURNS TRIGGER AS $$
+    BEGIN
+      INSERT INTO xero_api_usage_log (
+        source, day_limit_remaining, minute_limit_remaining, app_minute_limit_remaining,
+        rate_limit_problem, retry_after_seconds, observed_at
+      ) VALUES (
+        NEW.source, NEW.day_limit_remaining, NEW.minute_limit_remaining, NEW.app_minute_limit_remaining,
+        NEW.rate_limit_problem, NEW.retry_after_seconds, NEW.observed_at
+      );
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  await pool.query("DROP TRIGGER IF EXISTS xero_api_usage_log_trigger ON xero_api_usage");
+  await pool.query(`
+    CREATE TRIGGER xero_api_usage_log_trigger
+    AFTER INSERT OR UPDATE ON xero_api_usage
+    FOR EACH ROW EXECUTE FUNCTION log_xero_api_usage()
+  `);
 
   // Xero webhooks are acknowledged immediately and processed by a separate
   // worker. Keeping the queue in PostgreSQL makes delivery retries harmless

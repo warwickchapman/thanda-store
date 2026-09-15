@@ -96,7 +96,7 @@ async function recordUsage(response: Response, source: string) {
   ]);
 }
 
-async function xeroJson(pathname: string, source: string, ifModifiedSince: string | null = null) {
+async function assertXeroReadAllowance() {
   const usage = await pool.query('SELECT day_limit_remaining, next_allowed_at FROM xero_api_usage WHERE id = true');
   const currentUsage = usage.rows[0];
   if (currentUsage?.next_allowed_at && new Date(currentUsage.next_allowed_at).getTime() > Date.now()) {
@@ -105,6 +105,10 @@ async function xeroJson(pathname: string, source: string, ifModifiedSince: strin
   if (typeof currentUsage?.day_limit_remaining === 'number' && currentUsage.day_limit_remaining <= MIN_DAY_ALLOWANCE) {
     throw new Error('Xero API allowance is being reserved for operational updates. Please try again later.');
   }
+}
+
+async function xeroJson(pathname: string, source: string, ifModifiedSince: string | null = null) {
+  await assertXeroReadAllowance();
   const waitFor = Math.max(0, lastXeroRequestAt + MIN_XERO_REQUEST_GAP_MS - Date.now());
   if (waitFor) await wait(waitFor);
   const response = await xeroAccountingFetch(pathname, {
@@ -190,9 +194,9 @@ export async function refreshCustomerDocuments(user: PortalUser) {
   const ifModifiedSince = replaceSnapshot ? null : lastSync!.toUTCString();
   // Initial setup imports a bounded snapshot. Every later refresh asks Xero
   // only for documents changed since the previous successful sync.
-  const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-accounts', ifModifiedSince);
-  const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-accounts', ifModifiedSince);
-  const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-accounts', ifModifiedSince);
+  const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-documents:quotes', ifModifiedSince);
+  const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-documents:invoices', ifModifiedSince);
+  const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-documents:credit-notes', ifModifiedSince);
   const documents = [
     ...quotes.map((raw) => ({ raw, document: documentFromXero('quote', raw) })),
     ...invoices.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCREC').map((raw) => ({ raw, document: documentFromXero('invoice', raw) })),
@@ -323,6 +327,7 @@ export async function updateQuoteAcceptance(user: PortalUser, quoteId: string, a
 export async function customerDocumentPdf(user: PortalUser, type: CustomerDocument['type'], id: string) {
   const cached = await customerDocument(user, type, id);
   if (!cached) throw new Error('Document not found for your company.');
+  await assertXeroReadAllowance();
   const path = type === 'quote' ? `/Quotes/${id}/pdf` : type === 'invoice' ? `/Invoices/${id}/pdf` : `/CreditNotes/${id}/pdf`;
   const response = await xeroAccountingFetch(path, { headers: { Accept: 'application/pdf' } });
   await recordUsage(response, 'customer-document-pdf');
