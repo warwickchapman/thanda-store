@@ -55,13 +55,23 @@ export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmail
   const setupUrl = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
-    subject: 'Set up your Thanda Store account',
+    subject: 'Welcome to Thanda Store - set up your account',
     html: `
       <p>Hello,</p>
-      <p>Your Thanda Store account is ready. Set your password to finish setup.</p>
+      <p>Your Thanda Store account is ready.</p>
+      <p>Thanda Store gives trade customers access to our current catalogue of Victron energy products, including charging, inverter, monitoring and system accessories, together with Renogy solar panels and batteries.</p>
+      <p>Once signed in, you can:</p>
+      <ul>
+        <li>Browse current pricing, KZN stock and supplier availability.</li>
+        <li>Use <strong>My favourites</strong> and <strong>Popular</strong> to find commonly purchased products quickly.</li>
+        <li>Add products to your cart and use <strong>Quote me!</strong> to create a draft quote for your company.</li>
+        <li>View company quotes, invoices and credit notes, download documents, and export a statement from <strong>Accounts</strong>.</li>
+      </ul>
+      <p>Set your password to finish setup:</p>
       <p><a href="${setupUrl}">Set your password</a></p>
-      <p>This link expires in 7 days and can be used once.</p>
+      <p>This one-time link expires in 7 days. After setup, sign in with your email address and password.</p>
+      <p>Regards,<br />Thanda Store</p>
     `,
-    text: `Set up your Thanda Store account: ${setupUrl}\n\nThis link expires in 7 days and can be used once.`,
+    text: `Welcome to Thanda Store.\n\nThanda Store gives trade customers access to our current catalogue of Victron energy products, including charging, inverter, monitoring and system accessories, together with Renogy solar panels and batteries.\n\nOnce signed in, you can browse current pricing, KZN stock and supplier availability; use My favourites and Popular to find commonly purchased products; add products to your cart and use Quote me! to create a draft company quote; and view company quotes, invoices and credit notes, download documents, and export a statement from Accounts.\n\nSet your password: ${setupUrl}\n\nThis one-time link expires in 7 days. After setup, sign in with your email address and password.\n\nRegards,\nThanda Store`,
   });
 }

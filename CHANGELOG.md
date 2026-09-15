@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Expanded buyer setup emails with an accurate overview of the Victron catalogue, Renogy solar panels and batteries, and the portal's catalogue, favourites, quote, and Accounts features.
+
 - Added a zero-Xero-call five-minute allowance monitor. It writes a durable VPS-local `runtime/CODEX_ALERTS.md` with `OK`, `WARNING`, or `CRITICAL` status and a source breakdown for future Codex production work.
 
 - Reduced Xero customer-document refreshes from a 15-minute browser-triggered cache to a six-hour safety-net cache, with a 30-minute per-customer manual refresh cooldown. Invoice and credit-note webhooks remain the primary freshness path.
