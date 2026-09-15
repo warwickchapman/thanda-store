@@ -235,7 +235,12 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleGlobalSearch);
   }, []);
 
-  const filteredProducts = products.filter((product) => {
+  const isVisibleProduct = (product: Product) => {
+    if (product.supplier.toLowerCase() !== 'renogy') return true;
+    return ['battery', 'batteries', 'solar panel', 'solar panels'].includes(product.category.trim().toLowerCase());
+  };
+  const visibleProducts = products.filter(isVisibleProduct);
+  const filteredProducts = visibleProducts.filter((product) => {
     const search = query.trim().toLowerCase();
     if (!search) return true;
     return product.sku.toLowerCase().includes(search)
@@ -249,7 +254,7 @@ export default function Home() {
     groups[supplier].push(product);
     return groups;
   }, {});
-  const allSuppliers = Array.from(new Set(products.map((product) => product.supplier || 'unknown')));
+  const allSuppliers = Array.from(new Set(visibleProducts.map((product) => product.supplier || 'unknown')));
   const supplierTabs = allSuppliers.map((supplier) => ({
     supplier,
     count: supplierProducts[supplier]?.length || 0,
@@ -277,7 +282,7 @@ export default function Home() {
     ? activeCategory
     : visibleCategories[0]?.category || '';
   const selectedProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : [];
-  const selectedHomeProducts = homeTab === 'mine' ? favourites.mine : favourites.thanda;
+  const selectedHomeProducts = (homeTab === 'mine' ? favourites.mine : favourites.thanda).filter(isVisibleProduct);
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
