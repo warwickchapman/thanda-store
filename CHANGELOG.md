@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Corrected the Xero consent requirement for authenticated customer-document PDFs to `accounting.transactions`, with a clear reconnect message when Xero denies PDF access.
+
 - Accounts refreshes now retain the local historical snapshot and use Xero `If-Modified-Since` reads to fetch only changed customer quotes, invoices, and credit notes. Changed statuses are upserted locally, so documents move in and out of Current without reloading the full historic account.
 - Account document and due dates now show an explicit year, avoiding ambiguity for customers with multi-year purchase histories.
 - Quotes can now be copied to a reviewed new draft quote. The quote-only editor resolves retired Victron SKU lines through the replacement table, supports quantity edits and progressive current-catalogue SKU search, then recalculates current customer pricing and stock-aware fulfilment before creating a new Xero draft. The original quote remains unchanged and each copy action is audited.

@@ -326,7 +326,13 @@ export async function customerDocumentPdf(user: PortalUser, type: CustomerDocume
   const path = type === 'quote' ? `/Quotes/${id}/pdf` : type === 'invoice' ? `/Invoices/${id}/pdf` : `/CreditNotes/${id}/pdf`;
   const response = await xeroAccountingFetch(path, { headers: { Accept: 'application/pdf' } });
   await recordUsage(response, 'customer-document-pdf');
-  if (!response.ok) throw new Error('Xero could not retrieve this PDF.');
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Xero denied access to this PDF. An administrator must reconnect Xero to grant document permissions.');
+    }
+    if (response.status === 404) throw new Error('Xero no longer has a PDF for this document. Refresh Accounts and try again.');
+    throw new Error('Xero could not retrieve this PDF.');
+  }
   await auditAccountAction(user, 'document_viewed', type, id, { documentNumber: cached.document_number });
   return { response, number: String(cached.document_number || id) };
 }

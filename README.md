@@ -323,9 +323,9 @@ https://store.thanda.solar/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.invoices`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. `accounting.invoices` permits the sales-history read cache and creation of draft quotes. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.transactions accounting.reports.read`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. `accounting.transactions` permits the sales-history read cache, draft-quote creation, and authenticated quote, invoice, and credit-note PDF retrieval. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
 
-After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in User Admin. The connection status identifies any missing permission. Do not run sales-history sync or create quotes until `accounting.invoices` has been approved.
+After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in User Admin. The connection status identifies any missing permission. Do not run sales-history sync, create quotes, or use document PDFs until `accounting.transactions` has been approved.
 
 User Admin also shows the latest Xero API allowance observed by the sales-history sync: remaining daily and minute calls, when it was observed, and any recorded `Retry-After` deadline. Opening that page does not make an extra Xero request. If the daily allowance is exhausted, the timer records the reset deadline and later runs exit without calling Xero until then.
 
