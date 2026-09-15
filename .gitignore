@@ -5,3 +5,4 @@ node_modules/
 *.csv
 *.xlsx
 .renogy-token.json
+runtime/

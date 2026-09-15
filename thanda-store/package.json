@@ -23,6 +23,7 @@
     "sync:xero-contact-access": "node scripts/sync-xero-contact-access.mjs",
     "sync:xero-sales-history": "node scripts/sync-xero-sales-history.mjs",
     "sync:xero-webhooks": "node scripts/process-xero-webhook-events.mjs",
+    "monitor:xero-allowance": "node scripts/monitor-xero-allowance.mjs",
     "images:thumbnails": "node scripts/generate-product-thumbnails.mjs",
     "sync:all": "npm run sync:renogy && npm run sync:victron"
   },

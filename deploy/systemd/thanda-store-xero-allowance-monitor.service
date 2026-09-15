@@ -1,0 +1,10 @@
+[Unit]
+Description=Write Thanda Store Xero allowance alert file for Codex
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store-xero.env
+ExecStart=/usr/bin/npm run monitor:xero-allowance

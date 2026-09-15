@@ -49,6 +49,8 @@ For Xero specifically, the current starter limit is 1,000 calls per tenant per d
 
 Every update to the current allowance also appends a row to `xero_api_usage_log`, retaining the call source and returned allowance headers for diagnosis. This is the operational audit trail for Xero call volume; use it to investigate consumption rather than infer it from the single current-usage row. Customer-account reads, including PDFs, stop before the protected daily reserve is crossed.
 
+`thanda-store-xero-allowance-monitor.timer` reads that local ledger every five minutes and writes `/root/thanda-store/runtime/CODEX_ALERTS.md`. It makes no Xero request. Every Codex production Xero task must read this file before a deploy, recovery, manual sync, or investigation; `WARNING` and `CRITICAL` block non-essential Xero work until investigated.
+
 Customer Accounts uses separate per-contact document snapshots. The first view imports a bounded full snapshot. Later stale or permitted manual refreshes request only Quotes, Invoices and Credit Notes changed since the last successful snapshot using Xero's `If-Modified-Since` header, then upsert those records locally. This preserves historical documents without re-reading them on each account view. A status update such as `SENT` to `INVOICED`, or back to a current status, is therefore reflected in the relevant tab after the next incremental refresh. Requests are sequential, paged deliberately, and spaced by at least 1.1 seconds. A successful snapshot is valid for six hours; manual refreshes are server-limited to one per 30 minutes per contact. Account reads stop before the shared Xero allowance falls below the retained operational reserve. Account listing views, PDF document views, statement downloads, and quote acceptance/unacceptance are written to `portal_activity_log`.
 
 Every Xero integration change must be checked against the official [Xero OpenAPI 3 specification repository](https://github.com/XeroAPI/Xero-OpenAPI) before implementation. OAuth scope selection and validation must use only Xero's official [OAuth 2.0 scopes reference](https://developer.xero.com/documentation/guides/oauth2/scopes/); never infer a scope from historic tokens, OAuth errors, SDK constants, OpenAPI annotations, or examples. Follow Xero's [API Call Efficiencies guidance](https://developer.xero.com/documentation/getting-started-guide/) as a mandatory design rule: prefer webhooks where Xero supports them, cache derived portal data, use supported filters and `If-Modified-Since`, paginate deliberately, and retain a low-frequency reconciliation path. Do not invent request parameters or assume batch support. Every new or changed API feature requires a documented budget: request paths, cold-cache/backfill cost, scheduled daily cost, retry behaviour, cache invalidation source, reserve impact, and stop threshold. Unbounded customer-triggered API work must be redesigned before deployment. The local Xero usage ledger records response allowance headers by source and User Admin displays the daily breakdown without consuming Xero allowance.
@@ -457,12 +459,15 @@ sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.service /et
 sudo install -m 0644 deploy/systemd/thanda-store-xero-contact-access.timer /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.service /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/thanda-store-xero-sales-history.timer /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-allowance-monitor.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-xero-allowance-monitor.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now thanda-store-xero-webhooks.timer
 sudo systemctl enable --now thanda-store-xero-stock.timer
 sudo systemctl enable --now thanda-store-xero-stock-webhook.timer
 sudo systemctl enable --now thanda-store-xero-contact-access.timer
 sudo systemctl enable --now thanda-store-xero-sales-history.timer
+sudo systemctl enable --now thanda-store-xero-allowance-monitor.timer
 ```
 
 ## Deployment and operations

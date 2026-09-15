@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added a zero-Xero-call five-minute allowance monitor. It writes a durable VPS-local `runtime/CODEX_ALERTS.md` with `OK`, `WARNING`, or `CRITICAL` status and a source breakdown for future Codex production work.
+
 - Reduced Xero customer-document refreshes from a 15-minute browser-triggered cache to a six-hour safety-net cache, with a 30-minute per-customer manual refresh cooldown. Invoice and credit-note webhooks remain the primary freshness path.
 - Hardened concurrent authentication-schema initialisation and added a local, zero-Xero-call daily API-usage breakdown to User Admin.
 - Added a mandatory external-API budget review rule covering cold-cache, backfill, scheduled, retry, cache-invalidation, reserve, and stop-threshold costs.

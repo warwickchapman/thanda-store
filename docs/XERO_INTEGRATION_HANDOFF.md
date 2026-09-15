@@ -220,6 +220,8 @@ The webhook worker preserves a 150-call daily reserve for stock, administration,
 
 User Admin displays the cached allowance. It must never make an API request merely to refresh that display.
 
+The `thanda-store-xero-allowance-monitor.timer` reads the same local ledger every five minutes and writes `/root/thanda-store/runtime/CODEX_ALERTS.md`; it does not call Xero. Before a production Xero deployment, recovery, manual sync, or investigation, Codex must read this file. `WARNING` or `CRITICAL` means non-essential Xero work is blocked pending investigation.
+
 ## 8. Operational procedures
 
 ### Reconnect after expiry or changed scopes
