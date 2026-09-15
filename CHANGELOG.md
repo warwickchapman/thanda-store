@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Restored global Xero connection status and **Reconnect Xero** to the User Admin directory for every authenticated administrator; user-management actions remain permission-gated.
 - Corrected the Xero consent requirement for authenticated customer-document PDFs to `accounting.transactions`, with a clear reconnect message when Xero denies PDF access.
 
 - Accounts refreshes now retain the local historical snapshot and use Xero `If-Modified-Since` reads to fetch only changed customer quotes, invoices, and credit notes. Changed statuses are upserted locally, so documents move in and out of Current without reloading the full historic account.

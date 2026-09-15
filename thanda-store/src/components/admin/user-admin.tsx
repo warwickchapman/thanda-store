@@ -76,7 +76,7 @@ function UserAccessEditor({
   );
 }
 
-type XeroStatus = {
+export type XeroStatus = {
   connected: boolean;
   tenantName: string | null;
   grantedScopes: string[];
@@ -356,7 +356,7 @@ function XeroLinkEditor({
   );
 }
 
-function XeroStatusPanel({
+export function XeroStatusPanel({
   xeroStatus,
   onRefresh,
 }: {
@@ -389,7 +389,7 @@ function XeroStatusPanel({
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <button type="button" onClick={onRefresh} className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900">Refresh status</button>
-          {(!xeroStatus.connected || xeroStatus.reconnectRequired) && <a href="/api/admin/xero/connect" className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Reconnect Xero</a>}
+          <a href="/api/admin/xero/connect" className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Reconnect Xero</a>
         </div>
       </div>
     </div>

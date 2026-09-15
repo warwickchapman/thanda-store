@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { InviteUserForm } from '@/components/admin/user-admin';
+import { InviteUserForm, type XeroStatus, XeroStatusPanel } from '@/components/admin/user-admin';
 
 type PortalUser = {
   id: number;
@@ -19,6 +19,7 @@ type PortalUser = {
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [canManageUsers, setCanManageUsers] = useState(false);
+  const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
 
@@ -30,11 +31,18 @@ export default function AdminUsersPage() {
     setCanManageUsers(Boolean(data.canManageUsers));
   }
 
+  async function loadXeroStatus() {
+    const response = await fetch('/api/admin/xero/status', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to load Xero status.');
+    setXeroStatus(data);
+  }
+
   useEffect(() => {
     let active = true;
     async function loadInitialUsers() {
       try {
-        await loadUsers();
+        await Promise.all([loadUsers(), loadXeroStatus()]);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : 'Failed to load users.');
       }
@@ -63,6 +71,7 @@ export default function AdminUsersPage() {
         </div>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+        {xeroStatus && <XeroStatusPanel xeroStatus={xeroStatus} onRefresh={() => void loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status.'))} />}
 
         <section>
           <div className="mb-4 flex flex-col justify-between gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end">

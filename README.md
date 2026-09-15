@@ -142,7 +142,7 @@ Authenticated users can have supplier-specific discounts in `user_supplier_disco
 
 The storefront uses internal portal users with email OTP verification. Passwords are hashed in PostgreSQL and OTPs are stored as hashes with a short expiry.
 
-Administrators can view User Admin at `/admin/users`, while only an administrator with **Manage users** permission can invite people, alter roles or permissions, edit account setup, or enable and disable accounts. This avoids granting customer/account-management powers to every administrator. A user manager can create an internal administrator without a Xero customer contact; those internal accounts are kept in the local **Thanda staff** organisation. Buyer invitations remain linked to a Xero customer contact.
+Administrators can view User Admin at `/admin/users`, including the global Xero connection and allowance panel. Any portal administrator can reconnect Xero because the integration is global; only an administrator with **Manage users** permission can invite people, alter roles or permissions, edit account setup, or enable and disable accounts. This avoids granting customer/account-management powers to every administrator. A user manager can create an internal administrator without a Xero customer contact; those internal accounts are kept in the local **Thanda staff** organisation. Buyer invitations remain linked to a Xero customer contact.
 
 Administrators with **Manage users** manage users from the searchable directory at `/admin/users`. Select **Edit** for a dedicated account page; the directory remains compact and does not render every account's controls at once. From that page they can:
 
