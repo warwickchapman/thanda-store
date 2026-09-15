@@ -96,7 +96,7 @@ async function recordUsage(response: Response, source: string) {
   ]);
 }
 
-async function xeroJson(pathname: string, source: string) {
+async function xeroJson(pathname: string, source: string, ifModifiedSince: string | null = null) {
   const usage = await pool.query('SELECT day_limit_remaining, next_allowed_at FROM xero_api_usage WHERE id = true');
   const currentUsage = usage.rows[0];
   if (currentUsage?.next_allowed_at && new Date(currentUsage.next_allowed_at).getTime() > Date.now()) {
@@ -107,19 +107,22 @@ async function xeroJson(pathname: string, source: string) {
   }
   const waitFor = Math.max(0, lastXeroRequestAt + MIN_XERO_REQUEST_GAP_MS - Date.now());
   if (waitFor) await wait(waitFor);
-  const response = await xeroAccountingFetch(pathname);
+  const response = await xeroAccountingFetch(pathname, {
+    headers: ifModifiedSince ? { 'If-Modified-Since': ifModifiedSince } : undefined,
+  });
   lastXeroRequestAt = Date.now();
   await recordUsage(response, source);
+  if (response.status === 304) return {};
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Xero document request failed: ${response.status}`);
   return payload as Record<string, unknown>;
 }
 
-async function fetchPages(pathname: string, key: string, source: string) {
+async function fetchPages(pathname: string, key: string, source: string, ifModifiedSince: string | null = null) {
   const records: Record<string, unknown>[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const separator = pathname.includes('?') ? '&' : '?';
-    const payload = await xeroJson(`${pathname}${separator}page=${page}&pageSize=${PAGE_SIZE}`, source);
+    const payload = await xeroJson(`${pathname}${separator}page=${page}&pageSize=${PAGE_SIZE}`, source, ifModifiedSince);
     const pageRecords = Array.isArray(payload[key]) ? payload[key] as Record<string, unknown>[] : [];
     records.push(...pageRecords);
     if (pageRecords.length < PAGE_SIZE) break;
@@ -127,17 +130,30 @@ async function fetchPages(pathname: string, key: string, source: string) {
   return records;
 }
 
-async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>) {
+async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>, replaceSnapshot: boolean) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM xero_customer_documents WHERE contact_id = $1', [contactId]);
+    if (replaceSnapshot) await client.query('DELETE FROM xero_customer_documents WHERE contact_id = $1', [contactId]);
     for (const { document, raw } of documents) {
       await client.query(`
         INSERT INTO xero_customer_documents (
           contact_id, document_type, document_id, document_number, status, document_date, due_date,
           reference, currency_code, total, amount_paid, amount_due, payload, xero_updated_at
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
+        ON CONFLICT (contact_id, document_type, document_id) DO UPDATE SET
+          document_number = EXCLUDED.document_number,
+          status = EXCLUDED.status,
+          document_date = EXCLUDED.document_date,
+          due_date = EXCLUDED.due_date,
+          reference = EXCLUDED.reference,
+          currency_code = EXCLUDED.currency_code,
+          total = EXCLUDED.total,
+          amount_paid = EXCLUDED.amount_paid,
+          amount_due = EXCLUDED.amount_due,
+          payload = EXCLUDED.payload,
+          xero_updated_at = EXCLUDED.xero_updated_at,
+          synced_at = NOW()
       `, [contactId, document.type, document.id, document.number, document.status, document.date, document.dueDate,
         document.reference, document.currency, document.total, document.paid, document.due,
         JSON.stringify(raw), null]);
@@ -167,11 +183,16 @@ export async function auditAccountAction(user: PortalUser, action: string, resou
 export async function refreshCustomerDocuments(user: PortalUser) {
   if (!user.xeroContactId) throw new Error('Your account is not linked to a Xero customer.');
   const contactId = user.xeroContactId;
-  // Customer pages are deliberately sequential and throttled. Xero's customer
-  // documents endpoints are cached below, so browsing does not create a burst.
-  const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-accounts');
-  const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-accounts');
-  const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-accounts');
+  const state = await pool.query('SELECT last_successful_sync_at FROM xero_customer_document_sync_state WHERE contact_id = $1', [contactId]);
+  const lastSync = state.rows[0]?.last_successful_sync_at ? new Date(state.rows[0].last_successful_sync_at) : null;
+  const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id = $1 LIMIT 1', [contactId]);
+  const replaceSnapshot = !lastSync || !cached.rowCount;
+  const ifModifiedSince = replaceSnapshot ? null : lastSync!.toUTCString();
+  // Initial setup imports a bounded snapshot. Every later refresh asks Xero
+  // only for documents changed since the previous successful sync.
+  const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-accounts', ifModifiedSince);
+  const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-accounts', ifModifiedSince);
+  const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-accounts', ifModifiedSince);
   const documents = [
     ...quotes.map((raw) => ({ raw, document: documentFromXero('quote', raw) })),
     ...invoices.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCREC').map((raw) => ({ raw, document: documentFromXero('invoice', raw) })),
@@ -180,7 +201,7 @@ export async function refreshCustomerDocuments(user: PortalUser) {
     const entryContactId = String((entry.raw.Contact as { ContactID?: unknown } | undefined)?.ContactID || '');
     return entryContactId === contactId;
   }).filter((entry): entry is { raw: Record<string, unknown>; document: CustomerDocument } => Boolean(entry.document));
-  await writeDocuments(contactId, documents);
+  await writeDocuments(contactId, documents, replaceSnapshot);
   return documents.length;
 }
 
