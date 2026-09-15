@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Removed the unused Xero Reports permission; customer statements are generated from the protected local document snapshot.
 - Added a durable Xero API-usage ledger by source and protected customer-document PDF retrieval with the same daily reserve used by account refreshes.
 - Restored global Xero connection status and **Reconnect Xero** to the User Admin directory for every authenticated administrator; user-management actions remain permission-gated.
 - Added clearer reconnect handling and safe Xero correlation logging when authenticated customer-document PDF retrieval fails.
