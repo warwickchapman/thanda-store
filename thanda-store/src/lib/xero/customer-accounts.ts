@@ -327,8 +327,14 @@ export async function customerDocumentPdf(user: PortalUser, type: CustomerDocume
   const response = await xeroAccountingFetch(path, { headers: { Accept: 'application/pdf' } });
   await recordUsage(response, 'customer-document-pdf');
   if (!response.ok) {
+    console.error('Xero customer document PDF request failed', {
+      type,
+      documentId: id,
+      status: response.status,
+      xeroCorrelationId: response.headers.get('xero-correlation-id'),
+    });
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Xero denied access to this PDF. An administrator must reconnect Xero to grant document permissions.');
+      throw new Error('Xero denied access to this PDF. An administrator must reconnect Xero.');
     }
     if (response.status === 404) throw new Error('Xero no longer has a PDF for this document. Refresh Accounts and try again.');
     throw new Error('Xero could not retrieve this PDF.');
