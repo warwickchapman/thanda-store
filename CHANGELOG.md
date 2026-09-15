@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Reduced Xero customer-document refreshes from a 15-minute browser-triggered cache to a six-hour safety-net cache, with a 30-minute per-customer manual refresh cooldown. Invoice and credit-note webhooks remain the primary freshness path.
+- Hardened concurrent authentication-schema initialisation and added a local, zero-Xero-call daily API-usage breakdown to User Admin.
+- Added a mandatory external-API budget review rule covering cold-cache, backfill, scheduled, retry, cache-invalidation, reserve, and stop-threshold costs.
+
 - Declared Xero's official OAuth scopes reference as the sole authority for scope selection and validation. Historic tokens, OAuth errors, SDK constants, OpenAPI annotations, and examples must not be used to infer permissions.
 
 - Removed the unused Xero Reports permission; customer statements are generated from the protected local document snapshot.

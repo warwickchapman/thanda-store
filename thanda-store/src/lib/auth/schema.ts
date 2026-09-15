@@ -1,7 +1,9 @@
 import pool from "@/lib/db";
 import { INITIAL_VICTRON_STOCK_MINIMA } from "@/lib/victron-stock-minima";
 
-export async function ensureAuthSchema() {
+let schemaPromise: Promise<void> | null = null;
+
+async function ensureAuthSchemaOnce() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS organisations (
       id BIGSERIAL PRIMARY KEY,
@@ -558,4 +560,18 @@ export async function ensureAuthSchema() {
   await pool.query(
     "CREATE INDEX IF NOT EXISTS portal_activity_log_user_created_idx ON portal_activity_log (user_id, created_at DESC)",
   );
+}
+
+// Next.js can begin several authenticated requests concurrently. PostgreSQL's
+// CREATE TABLE IF NOT EXISTS is not sufficient to protect concurrent catalog
+// creation, so initialise once per application process and let all callers
+// share the same migration promise.
+export function ensureAuthSchema() {
+  if (!schemaPromise) {
+    schemaPromise = ensureAuthSchemaOnce().catch((error) => {
+      schemaPromise = null;
+      throw error;
+    });
+  }
+  return schemaPromise;
 }

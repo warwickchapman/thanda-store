@@ -34,6 +34,20 @@ export async function GET() {
              retry_after_seconds, next_allowed_at, source, observed_at
       FROM xero_api_usage WHERE id = true
     `);
+    const usageHistory = await pool.query(`
+      SELECT source, day_limit_remaining, observed_at
+      FROM xero_api_usage_log
+      WHERE observed_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Johannesburg') AT TIME ZONE 'Africa/Johannesburg'
+      ORDER BY observed_at DESC
+      LIMIT 100
+    `);
+    const usageBySource = await pool.query(`
+      SELECT source, COUNT(*)::int AS calls, MIN(day_limit_remaining) AS lowest_remaining
+      FROM xero_api_usage_log
+      WHERE observed_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Johannesburg') AT TIME ZONE 'Africa/Johannesburg'
+      GROUP BY source
+      ORDER BY calls DESC, source ASC
+    `);
 
     return xeroStatusResponse({
       connected: Boolean(token.tenant_id && token.refresh_token),
@@ -46,6 +60,10 @@ export async function GET() {
       reconnectRequired: missingScopes.length > 0,
       webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY),
       usage: usageResult.rows[0] || null,
+      usageToday: {
+        callsObserved: usageHistory.rowCount,
+        bySource: usageBySource.rows,
+      },
     });
   } catch {
     return xeroStatusResponse({

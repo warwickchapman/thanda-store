@@ -92,6 +92,10 @@ export type XeroStatus = {
     source: string | null;
     observed_at: string;
   } | null;
+  usageToday?: {
+    callsObserved: number;
+    bySource: Array<{ source: string | null; calls: number; lowest_remaining: number | null }>;
+  };
 };
 
 type XeroContact = {
@@ -381,6 +385,14 @@ export function XeroStatusPanel({
             <p className="mt-2 text-xs font-medium">
               Xero API allowance: {xeroStatus.usage.day_limit_remaining ?? 'unknown'} calls left today; {xeroStatus.usage.minute_limit_remaining ?? 'unknown'} this minute. Last observed {new Date(xeroStatus.usage.observed_at).toLocaleString()} by {xeroStatus.usage.source || 'Xero sync'}.
               {xeroStatus.usage.next_allowed_at && ` Daily limit reached; next attempt after ${new Date(xeroStatus.usage.next_allowed_at).toLocaleString()}.`}
+            </p>
+          )}
+          {xeroStatus.usageToday && (
+            <p className="mt-2 text-xs font-medium">
+              Today&apos;s observed Xero calls: {xeroStatus.usageToday.callsObserved || 0}
+              {xeroStatus.usageToday.bySource.length
+                ? ` (${xeroStatus.usageToday.bySource.map((entry) => `${entry.source || 'unknown'}: ${entry.calls}`).join('; ')})`
+                : '. The source ledger will begin recording with the next Xero response.'}
             </p>
           )}
           <p className="mt-2 text-xs font-medium">

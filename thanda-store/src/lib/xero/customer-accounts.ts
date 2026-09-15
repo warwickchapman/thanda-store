@@ -3,8 +3,11 @@ import { ensureAuthSchema } from '@/lib/auth/schema';
 import type { PortalUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 
-const CACHE_TTL_MS = 15 * 60_000;
-const FORCED_REFRESH_COOLDOWN_MS = 60_000;
+// Customer documents are a local snapshot. Invoice and credit-note changes
+// arrive through webhooks; a six-hour collection refresh is only the safety
+// net for quote changes and missed deliveries, not a browser-page side effect.
+const CACHE_TTL_MS = 6 * 60 * 60_000;
+const FORCED_REFRESH_COOLDOWN_MS = 30 * 60_000;
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
 const MIN_XERO_REQUEST_GAP_MS = 1_100;
