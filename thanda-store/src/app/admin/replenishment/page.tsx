@@ -800,8 +800,10 @@ export default function ReplenishmentPage() {
                       : " · not checked yet"}
                     .
                   </p>
-                  {(report.acceptedQuotes.stats.rmaExcluded ||
-                    report.acceptedQuotes.stats.staleExcluded) && (
+                  {Boolean(
+                    report.acceptedQuotes.stats.rmaExcluded ||
+                      report.acceptedQuotes.stats.staleExcluded,
+                  ) && (
                     <p className="mt-1 text-xs text-violet-800">
                       Excluded: {report.acceptedQuotes.stats.rmaExcluded || 0} RMA, {" "}
                       {report.acceptedQuotes.stats.staleExcluded || 0} older than {" "}
