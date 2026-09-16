@@ -149,6 +149,7 @@ export default function Home() {
   const [activeSupplier, setActiveSupplier] = useState('home');
   const [activeCategory, setActiveCategory] = useState('');
   const [homeTab, setHomeTab] = useState<'mine' | 'thanda'>('mine');
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[] }>({ mine: [], thanda: [] });
   const [cart, setCart] = useState<Cart>(emptyCart);
   const [cartOpen, setCartOpen] = useState(false);
@@ -239,7 +240,11 @@ export default function Home() {
     if (product.supplier.toLowerCase() !== 'renogy') return true;
     return ['battery', 'batteries', 'solar panel', 'solar panels', 'solar_panel', 'solar_panels'].includes(product.category.trim().toLowerCase());
   };
-  const visibleProducts = products.filter(isVisibleProduct);
+  const catalogueProducts = products.filter(isVisibleProduct);
+  const unavailableProductCount = catalogueProducts.filter(isUnavailable).length;
+  const visibleProducts = catalogueProducts.filter(
+    (product) => showUnavailable || !isUnavailable(product),
+  );
   const filteredProducts = visibleProducts.filter((product) => {
     const search = query.trim().toLowerCase();
     if (!search) return true;
@@ -282,7 +287,9 @@ export default function Home() {
     ? activeCategory
     : visibleCategories[0]?.category || '';
   const selectedProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : [];
-  const selectedHomeProducts = (homeTab === 'mine' ? favourites.mine : favourites.thanda).filter(isVisibleProduct);
+  const selectedHomeProducts = (homeTab === 'mine' ? favourites.mine : favourites.thanda)
+    .filter(isVisibleProduct)
+    .filter((product) => showUnavailable || !isUnavailable(product));
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 
   return (
@@ -442,14 +449,25 @@ export default function Home() {
             </div>}
 
             <section className="space-y-4">
-              <div className="flex items-end justify-between border-b border-zinc-200 pb-3">
+              <div className="flex items-end justify-between gap-3 border-b border-zinc-200 pb-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
                   <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : displayLabel(selectedCategory)}</h2>
                 </div>
-                <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
-                  {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
-                </span>
+                <div className="flex items-center gap-3">
+                  {unavailableProductCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowUnavailable((current) => !current)}
+                      className="text-xs font-semibold text-zinc-500 underline decoration-zinc-300 underline-offset-4 transition-colors hover:text-zinc-900"
+                    >
+                      {showUnavailable ? "Hide" : "Show"} unavailable ({unavailableProductCount})
+                    </button>
+                  )}
+                  <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+                    {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (
