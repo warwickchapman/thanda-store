@@ -38,7 +38,7 @@ test("retail and successor SKUs reconcile within the same planning family", () =
 test("EPX waybills are extracted from Victron tracking pages", () => {
   assert.equal(
     epxWaybillFromTrackingPage(
-      "Fill in your Waybill number: <strong>VIC26069628</strong>",
+      "Visit https://epx.pperfect.com and fill in your Waybill number: <strong>VIC26069628</strong>",
     ),
     "VIC26069628",
   );
@@ -47,6 +47,10 @@ test("EPX waybills are extracted from Victron tracking pages", () => {
     "https://epx.pperfect.com/?w=VIC26069628",
   );
   assert.equal(epxWaybillFromTrackingPage("No waybill is available"), null);
+  assert.equal(
+    epxWaybillFromTrackingPage("Waybill VIC26069628 on another courier"),
+    null,
+  );
   assert.equal(epxTrackingUrl("8805772/26069628"), null);
 });
 

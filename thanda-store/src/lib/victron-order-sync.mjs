@@ -25,7 +25,9 @@ function httpsUrl(value) {
 }
 
 export function epxWaybillFromTrackingPage(page) {
-  const match = String(page || "").match(/\bVIC\d+\b/i);
+  const content = String(page || "");
+  if (!/https:\/\/epx\.pperfect\.com\b/i.test(content)) return null;
+  const match = content.match(/\bVIC\d+\b/i);
   return match ? upper(match[0]) : null;
 }
 
@@ -223,8 +225,7 @@ async function fetchText(url, { fetchImpl, timeoutMs }) {
 }
 
 async function resolvedTrackingUrl(invoice, fetchOptions) {
-  if (upper(invoice.carrier) !== "EPX" || !invoice.trackingUrl)
-    return invoice.trackingUrl;
+  if (!invoice.trackingUrl) return invoice.trackingUrl;
   try {
     const page = await fetchText(invoice.trackingUrl, fetchOptions);
     return epxTrackingUrl(epxWaybillFromTrackingPage(page)) || invoice.trackingUrl;
