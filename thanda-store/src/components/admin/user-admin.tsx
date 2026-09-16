@@ -644,7 +644,9 @@ export function UserEditorPage({ userId }: { userId: number }) {
     }
   }
 
-  const user = users.find((candidate) => candidate.id === userId);
+  // PostgreSQL BIGINT values are serialized as strings by node-postgres.
+  // Route parameters are numbers, so normalize before locating the editor target.
+  const user = users.find((candidate) => Number(candidate.id) === userId);
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
