@@ -8,6 +8,20 @@ type SendAccountSetupEmailInput = {
   token: string;
 };
 
+type SendSalesQuoteNotificationInput = {
+  companyName: string;
+  buyerEmail: string;
+  quoteNumber: string | null;
+  quoteId: string | null;
+  source: 'cart' | 'quote_copy';
+};
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] || character);
+}
+
 function resendConfig() {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error('RESEND_API_KEY is not configured');
@@ -73,5 +87,24 @@ export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmail
       <p>Regards,<br />Thanda Store</p>
     `,
     text: `Welcome to Thanda Store.\n\nThanda Store gives trade customers access to our current catalogue of Victron energy products, including charging, inverter, monitoring and system accessories, together with Renogy solar panels and batteries.\n\nOnce signed in, you can browse current pricing, KZN stock and supplier availability; use My favourites and Popular to find commonly purchased products; add products to your cart and use Quote me! to create a draft company quote; and view company quotes, invoices and credit notes, download documents, and export a statement from Accounts.\n\nSet your password: ${setupUrl}\n\nThis one-time link expires in 7 days. After setup, sign in with your email address and password.\n\nRegards,\nThanda Store`,
+  });
+}
+
+export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source }: SendSalesQuoteNotificationInput) {
+  const company = companyName.trim() || 'Unknown company';
+  const quote = quoteNumber || quoteId || 'pending Xero number';
+  const sourceLabel = source === 'quote_copy' ? 'a copied quote' : 'their cart';
+  const recipient = process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar';
+  return sendEmail({
+    to: recipient,
+    subject: `New Thanda Store quote ${quote} - ${company}`,
+    html: `
+      <p>A Thanda Store customer has created ${sourceLabel} as a draft quote in Xero.</p>
+      <p><strong>Company:</strong> ${escapeHtml(company)}<br />
+      <strong>Portal user:</strong> ${escapeHtml(buyerEmail)}<br />
+      <strong>Xero quote:</strong> ${escapeHtml(quote)}</p>
+      <p>Please review the draft in Xero and contact the customer about accepting it.</p>
+    `,
+    text: `A Thanda Store customer has created ${sourceLabel} as a draft quote in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}\n\nPlease review the draft in Xero and contact the customer about accepting it.`,
   });
 }

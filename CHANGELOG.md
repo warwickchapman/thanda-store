@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Creating a customer quote now emails `sales@thanda.solar` with the company, portal user, and Xero quote reference. This covers both cart quotes and copied quotes. The notification never prevents a successfully created Xero draft from completing.
+
 - Expanded buyer setup emails with an accurate overview of the Victron catalogue, Renogy solar panels and batteries, and the portal's catalogue, favourites, quote, and Accounts features.
 
 - Added a zero-Xero-call five-minute allowance monitor. It writes a durable VPS-local `runtime/CODEX_ALERTS.md` with `OK`, `WARNING`, or `CRITICAL` status and a source breakdown for future Codex production work.

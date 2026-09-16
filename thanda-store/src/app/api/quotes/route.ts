@@ -5,6 +5,7 @@ import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
+import { sendSalesQuoteNotification } from '@/lib/email/resend';
 
 function currentQuoteDate() {
   return new Date().toISOString().slice(0, 10);
@@ -89,10 +90,24 @@ export async function POST() {
     }
     const quote = payload.Quotes?.[0];
     await pool.query('DELETE FROM portal_cart_lines WHERE user_id = $1', [user.id]);
+    let salesNotified = true;
+    try {
+      await sendSalesQuoteNotification({
+        companyName: user.organisationName,
+        buyerEmail: user.email,
+        quoteNumber: quote?.QuoteNumber || null,
+        quoteId: quote?.QuoteID || null,
+        source: 'cart',
+      });
+    } catch (error) {
+      salesNotified = false;
+      console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
+    }
     return NextResponse.json({
       quoteNumber: quote?.QuoteNumber || null,
       quoteId: quote?.QuoteID || null,
       message: 'Draft quote created in Xero.',
+      salesNotified,
       cart: { lines: [], itemCount: 0, subtotalExVat: 0 },
     });
   } catch (error) {

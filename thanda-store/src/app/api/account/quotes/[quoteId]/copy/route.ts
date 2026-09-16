@@ -6,6 +6,7 @@ import pool from '@/lib/db';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
+import { sendSalesQuoteNotification } from '@/lib/email/resend';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
 
@@ -111,7 +112,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!response.ok) return NextResponse.json({ error: 'Xero could not create the copied draft quote.' }, { status: 502 });
     const quote = Array.isArray(payload.Quotes) ? payload.Quotes[0] as { QuoteID?: string; QuoteNumber?: string } : null;
     await auditAccountAction(user, 'quote_copied_to_draft', 'quote', quoteId, { sourceQuoteNumber: source.QuoteNumber || null, newQuoteId: quote?.QuoteID || null, newQuoteNumber: quote?.QuoteNumber || null, lineCount: lineItems.length });
-    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null });
+    let salesNotified = true;
+    try {
+      await sendSalesQuoteNotification({
+        companyName: user.organisationName,
+        buyerEmail: user.email,
+        quoteNumber: quote?.QuoteNumber || null,
+        quoteId: quote?.QuoteID || null,
+        source: 'quote_copy',
+      });
+    } catch (error) {
+      salesNotified = false;
+      console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
+    }
+    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, salesNotified });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create copied draft quote.' }, { status: 500 });
   }
