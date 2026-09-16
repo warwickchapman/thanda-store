@@ -56,7 +56,9 @@ export async function GET() {
         'invoiceNumber', invoice.invoice_number,
         'status', invoice.status,
         'shipmentNumber', invoice.shipment_number,
-        'shippingDate', invoice.shipping_date
+        'shippingDate', invoice.shipping_date,
+        'trackingUrl', invoice.tracking_url,
+        'carrier', invoice.carrier
       ) ORDER BY invoice.invoice_number), '[]'::jsonb) AS invoices
       FROM victron_shipment_invoices invoice
       WHERE invoice.order_number = o.supplier_order_number

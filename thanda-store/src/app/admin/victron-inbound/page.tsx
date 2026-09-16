@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { PackageCheck, RefreshCw } from "lucide-react";
+import { ExternalLink, PackageCheck, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type InboundLine = {
@@ -31,6 +31,8 @@ type InboundOrder = {
     status: string | null;
     shipmentNumber: string | null;
     shippingDate: string | null;
+    trackingUrl: string | null;
+    carrier: string | null;
   }>;
 };
 type Backorder = {
@@ -511,9 +513,26 @@ export default function VictronInboundPage() {
                         : `Created ${new Date(order.created_at).toLocaleDateString()}`}
                     </p>
                     {order.invoices.length > 0 && (
-                      <p className="mt-1 text-xs text-zinc-500">
-                        E-Order invoices: {order.invoices.map((invoice) => invoice.invoiceNumber).join(", ")}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                        <span>
+                          E-Order invoices: {order.invoices.map((invoice) => invoice.invoiceNumber).join(", ")}
+                        </span>
+                        {order.invoices
+                          .filter((invoice) => invoice.trackingUrl)
+                          .map((invoice) => (
+                            <a
+                              key={invoice.invoiceNumber}
+                              href={invoice.trackingUrl!}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 font-semibold text-blue-700 underline hover:text-blue-900"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Track{invoice.carrier ? ` ${invoice.carrier}` : " shipment"}
+                              {invoice.shipmentNumber ? ` ${invoice.shipmentNumber}` : ""}
+                            </a>
+                          ))}
+                      </div>
                     )}
                     {order.documents.length > 0 && (
                       <p className="mt-1 text-xs text-zinc-500">

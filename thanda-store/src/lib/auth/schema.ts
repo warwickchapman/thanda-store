@@ -331,10 +331,18 @@ async function ensureAuthSchemaOnce() {
       products_url TEXT NOT NULL,
       shipment_number TEXT,
       shipping_date DATE,
+      tracking_url TEXT,
+      carrier TEXT,
       last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       products_imported_at TIMESTAMPTZ
     )
   `);
+  await pool.query(
+    `ALTER TABLE victron_shipment_invoices ADD COLUMN IF NOT EXISTS tracking_url TEXT`,
+  );
+  await pool.query(
+    `ALTER TABLE victron_shipment_invoices ADD COLUMN IF NOT EXISTS carrier TEXT`,
+  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS victron_shipment_invoice_lines (
       invoice_number TEXT NOT NULL REFERENCES victron_shipment_invoices(invoice_number) ON DELETE CASCADE,

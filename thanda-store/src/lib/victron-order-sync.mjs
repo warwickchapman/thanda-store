@@ -19,6 +19,11 @@ function upper(value) {
   return clean(value).toUpperCase();
 }
 
+function httpsUrl(value) {
+  const url = clean(value);
+  return /^https:\/\//i.test(url) ? url : null;
+}
+
 function rows(value) {
   if (Array.isArray(value)) return value;
   return Array.isArray(value?.results) ? value.results : [];
@@ -75,6 +80,8 @@ async function ensureSchema(client) {
       products_url TEXT NOT NULL,
       shipment_number TEXT,
       shipping_date DATE,
+      tracking_url TEXT,
+      carrier TEXT,
       last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       products_imported_at TIMESTAMPTZ
     )
@@ -114,6 +121,12 @@ async function ensureSchema(client) {
   );
   await client.query(
     `ALTER TABLE victron_provisional_backorder_order_lines ADD COLUMN IF NOT EXISTS planned_for DATE`,
+  );
+  await client.query(
+    `ALTER TABLE victron_shipment_invoices ADD COLUMN IF NOT EXISTS tracking_url TEXT`,
+  );
+  await client.query(
+    `ALTER TABLE victron_shipment_invoices ADD COLUMN IF NOT EXISTS carrier TEXT`,
   );
   // Earlier imports retained Victron's ORDER charge as a shipment line. It is
   // neither stock nor a physical item, so remove only unreceived fee lines
@@ -198,6 +211,8 @@ function normalizedShipment(raw) {
           status: clean(invoice?.status) || null,
           shipmentNumber: clean(invoice?.shipment?.shipment_number) || null,
           shippingDate: clean(invoice?.shipment?.shipping_date) || null,
+          trackingUrl: httpsUrl(invoice?.shipment?.tracking_link),
+          carrier: clean(invoice?.shipment?.carrier) || null,
         };
       })
       .filter(Boolean),
@@ -518,14 +533,16 @@ export async function syncVictronOrders({
         await client.query(
           `INSERT INTO victron_shipment_invoices
             (invoice_number, order_number, status, products_url,
-             shipment_number, shipping_date, last_seen_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             shipment_number, shipping_date, tracking_url, carrier, last_seen_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
            ON CONFLICT (invoice_number) DO UPDATE SET
              order_number = EXCLUDED.order_number,
              status = EXCLUDED.status,
              products_url = EXCLUDED.products_url,
              shipment_number = EXCLUDED.shipment_number,
              shipping_date = EXCLUDED.shipping_date,
+             tracking_url = EXCLUDED.tracking_url,
+             carrier = EXCLUDED.carrier,
              last_seen_at = NOW()`,
           [
             invoice.invoiceNumber,
@@ -534,6 +551,8 @@ export async function syncVictronOrders({
             invoice.productsUrl,
             invoice.shipmentNumber,
             invoice.shippingDate,
+            invoice.trackingUrl,
+            invoice.carrier,
           ],
         );
       }
