@@ -5,7 +5,7 @@ import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
-import { sendSalesQuoteNotification } from '@/lib/email/resend';
+import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
 
 function currentQuoteDate() {
   return new Date().toISOString().slice(0, 10);
@@ -103,11 +103,24 @@ export async function POST() {
       salesNotified = false;
       console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
     }
+    let buyerAcknowledged = true;
+    try {
+      await sendQuoteRequestReceipt({
+        to: user.email,
+        companyName: user.organisationName,
+        quoteNumber: quote?.QuoteNumber || null,
+        items: lineItems.map((line) => ({ sku: line.ItemCode, description: line.Description, quantity: line.Quantity })),
+      });
+    } catch (error) {
+      buyerAcknowledged = false;
+      console.error('Buyer quote acknowledgement failed:', error instanceof Error ? error.message : error);
+    }
     return NextResponse.json({
       quoteNumber: quote?.QuoteNumber || null,
       quoteId: quote?.QuoteID || null,
       message: 'Draft quote created in Xero.',
       salesNotified,
+      buyerAcknowledged,
       cart: { lines: [], itemCount: 0, subtotalExVat: 0 },
     });
   } catch (error) {

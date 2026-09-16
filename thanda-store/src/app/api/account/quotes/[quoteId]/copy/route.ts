@@ -6,7 +6,7 @@ import pool from '@/lib/db';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
-import { sendSalesQuoteNotification } from '@/lib/email/resend';
+import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
 
@@ -125,7 +125,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       salesNotified = false;
       console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
     }
-    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, salesNotified });
+    let buyerAcknowledged = true;
+    try {
+      await sendQuoteRequestReceipt({
+        to: user.email,
+        companyName: user.organisationName,
+        quoteNumber: quote?.QuoteNumber || null,
+        items: lineItems.map((line) => ({ sku: line.ItemCode, description: line.Description, quantity: line.Quantity })),
+      });
+    } catch (error) {
+      buyerAcknowledged = false;
+      console.error('Buyer quote acknowledgement failed:', error instanceof Error ? error.message : error);
+    }
+    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, salesNotified, buyerAcknowledged });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create copied draft quote.' }, { status: 500 });
   }

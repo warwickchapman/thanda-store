@@ -16,6 +16,13 @@ type SendSalesQuoteNotificationInput = {
   source: 'cart' | 'quote_copy';
 };
 
+type SendQuoteRequestReceiptInput = {
+  to: string;
+  companyName: string;
+  quoteNumber: string | null;
+  items: Array<{ sku?: string; description: string; quantity: number }>;
+};
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -31,7 +38,7 @@ function resendConfig() {
   };
 }
 
-async function sendEmail(payload: { to: string; subject: string; html: string; text: string }) {
+async function sendEmail(payload: { to: string; subject: string; html: string; text: string }, fromOverride?: string) {
   const { apiKey, from } = resendConfig();
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -39,7 +46,7 @@ async function sendEmail(payload: { to: string; subject: string; html: string; t
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from, ...payload }),
+    body: JSON.stringify({ from: fromOverride || from, ...payload }),
   });
 
   if (!response.ok) {
@@ -107,4 +114,30 @@ export async function sendSalesQuoteNotification({ companyName, buyerEmail, quot
     `,
     text: `A Thanda Store customer has created ${sourceLabel} as a draft quote in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}\n\nPlease review the draft in Xero and contact the customer about accepting it.`,
   });
+}
+
+export async function sendQuoteRequestReceipt({ to, companyName, quoteNumber, items }: SendQuoteRequestReceiptInput) {
+  const company = companyName.trim() || 'there';
+  const quote = quoteNumber ? ` (${quoteNumber})` : '';
+  const itemRows = items.map((item) => {
+    const sku = item.sku?.trim() ? ` (${item.sku.trim()})` : '';
+    return `<li>${item.quantity} x ${escapeHtml(item.description)}${escapeHtml(sku)}</li>`;
+  }).join('');
+  const textItems = items.map((item) => {
+    const sku = item.sku?.trim() ? ` (${item.sku.trim()})` : '';
+    return `- ${item.quantity} x ${item.description}${sku}`;
+  }).join('\n');
+  return sendEmail({
+    to,
+    subject: `We received your Thanda Store quote request${quote}`,
+    html: `
+      <p>Hello,</p>
+      <p>Thank you for your quote request${quote} for ${escapeHtml(company)}.</p>
+      <p>You requested:</p>
+      <ul>${itemRows}</ul>
+      <p>The Thanda sales team will send the final quotation shortly and confirm acceptance with you.</p>
+      <p>Regards,<br />Thanda Sales</p>
+    `,
+    text: `Hello,\n\nThank you for your quote request${quote} for ${company}.\n\nYou requested:\n${textItems}\n\nThe Thanda sales team will send the final quotation shortly and confirm acceptance with you.\n\nRegards,\nThanda Sales`,
+  }, 'Thanda Store <sales@thanda.solar>');
 }
