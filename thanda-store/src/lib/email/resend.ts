@@ -15,12 +15,14 @@ type SendSalesQuoteNotificationInput = {
   quoteId: string | null;
   source: 'cart' | 'quote_copy';
   quoteStatus: 'DRAFT' | 'SENT';
+  quoteReference?: string | null;
 };
 
 type SendQuoteRequestReceiptInput = {
   to: string;
   companyName: string;
   quoteNumber: string | null;
+  quoteReference?: string | null;
   items: Array<{ sku?: string; description: string; quantity: number }>;
 };
 
@@ -98,7 +100,7 @@ export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmail
   });
 }
 
-export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source, quoteStatus }: SendSalesQuoteNotificationInput) {
+export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source, quoteStatus, quoteReference }: SendSalesQuoteNotificationInput) {
   const company = companyName.trim() || 'Unknown company';
   const quote = quoteNumber || quoteId || 'pending Xero number';
   const sourceLabel = source === 'quote_copy' ? 'a copied quote' : 'their cart';
@@ -111,14 +113,14 @@ export async function sendSalesQuoteNotification({ companyName, buyerEmail, quot
       <p>A Thanda Store customer has created ${sourceLabel} as ${statusLabel} in Xero.</p>
       <p><strong>Company:</strong> ${escapeHtml(company)}<br />
       <strong>Portal user:</strong> ${escapeHtml(buyerEmail)}<br />
-      <strong>Xero quote:</strong> ${escapeHtml(quote)}</p>
+      <strong>Xero quote:</strong> ${escapeHtml(quote)}${quoteReference ? `<br /><strong>Customer reference:</strong> ${escapeHtml(quoteReference)}` : ''}</p>
       <p>Please review the quote in Xero and contact the customer about accepting it.</p>
     `,
-    text: `A Thanda Store customer has created ${sourceLabel} as ${statusLabel} in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}\n\nPlease review the quote in Xero and contact the customer about accepting it.`,
+    text: `A Thanda Store customer has created ${sourceLabel} as ${statusLabel} in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}${quoteReference ? `\nCustomer reference: ${quoteReference}` : ''}\n\nPlease review the quote in Xero and contact the customer about accepting it.`,
   });
 }
 
-export async function sendQuoteRequestReceipt({ to, companyName, quoteNumber, items }: SendQuoteRequestReceiptInput) {
+export async function sendQuoteRequestReceipt({ to, companyName, quoteNumber, quoteReference, items }: SendQuoteRequestReceiptInput) {
   const company = companyName.trim() || 'there';
   const quote = quoteNumber ? ` (${quoteNumber})` : '';
   const itemRows = items.map((item) => {
@@ -135,11 +137,12 @@ export async function sendQuoteRequestReceipt({ to, companyName, quoteNumber, it
     html: `
       <p>Hello,</p>
       <p>Thank you for your quote request${quote} for ${escapeHtml(company)}.</p>
+      ${quoteReference ? `<p><strong>Your reference:</strong> ${escapeHtml(quoteReference)}</p>` : ''}
       <p>You requested:</p>
       <ul>${itemRows}</ul>
       <p>The Thanda sales team will send the final quotation shortly and confirm acceptance with you.</p>
       <p>Regards,<br />Thanda Sales</p>
     `,
-    text: `Hello,\n\nThank you for your quote request${quote} for ${company}.\n\nYou requested:\n${textItems}\n\nThe Thanda sales team will send the final quotation shortly and confirm acceptance with you.\n\nRegards,\nThanda Sales`,
+    text: `Hello,\n\nThank you for your quote request${quote} for ${company}.${quoteReference ? `\nYour reference: ${quoteReference}` : ''}\n\nYou requested:\n${textItems}\n\nThe Thanda sales team will send the final quotation shortly and confirm acceptance with you.\n\nRegards,\nThanda Sales`,
   }, 'Thanda Store <sales@thanda.solar>');
 }

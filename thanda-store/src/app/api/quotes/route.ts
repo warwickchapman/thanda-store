@@ -24,11 +24,15 @@ function validationMessages(payload: unknown) {
     : []);
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     if (!user.xeroContactId) return NextResponse.json({ error: 'Your account must be linked to a Xero customer before a quote can be created.' }, { status: 409 });
+    const body = await request.json().catch(() => null);
+    const quoteReference = typeof body?.quoteReference === 'string' ? body.quoteReference.trim() : '';
+    if (!quoteReference) return NextResponse.json({ error: 'A quote reference is required.' }, { status: 400 });
+    if (quoteReference.length > 255) return NextResponse.json({ error: 'Quote reference must be 255 characters or fewer.' }, { status: 400 });
 
     const cart = await pool.query('SELECT product_id, quantity FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
     if (!cart.rowCount) return NextResponse.json({ error: 'Your cart is empty.' }, { status: 400 });
@@ -64,6 +68,7 @@ export async function POST() {
       contactId: user.xeroContactId,
       quoteDate,
       quoteStatus,
+      quoteReference,
       lineItems,
     })).digest('hex');
     const response = await xeroAccountingFetch('/Quotes', {
@@ -77,7 +82,7 @@ export async function POST() {
         Date: quoteDate,
         Status: quoteStatus,
         LineAmountTypes: 'Exclusive',
-        Reference: `Thanda Store cart for ${user.email}`,
+        Reference: quoteReference,
         LineItems: lineItems,
       }] }),
     });
@@ -102,6 +107,7 @@ export async function POST() {
         quoteId: quote?.QuoteID || null,
         source: 'cart',
         quoteStatus,
+        quoteReference,
       });
     } catch (error) {
       salesNotified = false;
@@ -113,6 +119,7 @@ export async function POST() {
         to: user.email,
         companyName: user.organisationName,
         quoteNumber: quote?.QuoteNumber || null,
+        quoteReference,
         items: lineItems.map((line) => ({ sku: line.ItemCode, description: line.Description, quantity: line.Quantity })),
       });
     } catch (error) {
@@ -123,6 +130,7 @@ export async function POST() {
       quoteNumber: quote?.QuoteNumber || null,
       quoteId: quote?.QuoteID || null,
       quoteStatus,
+      quoteReference,
       message: quoteStatus === 'DRAFT' ? 'Draft quote created in Xero.' : 'Quote created in Xero as sent.',
       salesNotified,
       buyerAcknowledged,

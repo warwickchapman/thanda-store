@@ -18,6 +18,7 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
   onChange: (cart: Cart) => void;
 }) {
   const [quoteMessage, setQuoteMessage] = useState('');
+  const [quoteReference, setQuoteReference] = useState('');
   const [creatingQuote, setCreatingQuote] = useState(false);
   async function update(productId: number, quantity?: number) {
     const response = await fetch(quantity ? '/api/cart' : `/api/cart?productId=${productId}`, {
@@ -29,15 +30,25 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
   }
 
   async function createQuote() {
+    const reference = quoteReference.trim();
+    if (!reference) {
+      setQuoteMessage('Enter your quote reference before requesting a quote.');
+      return;
+    }
     setCreatingQuote(true);
     setQuoteMessage('');
     try {
-      const response = await fetch('/api/quotes', { method: 'POST' });
+      const response = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteReference: reference }),
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to create draft quote');
       onChange(data.cart);
-      const quoteLabel = data.quoteStatus === 'SENT' ? 'Quote' : 'Draft quote';
-      setQuoteMessage(data.quoteNumber ? `${quoteLabel} ${data.quoteNumber} has been created in Xero.` : `${quoteLabel} has been created in Xero.`);
+      const params = new URLSearchParams({ reference });
+      if (data.quoteNumber) params.set('quoteNumber', data.quoteNumber);
+      window.location.assign(`/quotes/confirmation?${params.toString()}`);
     } catch (error) {
       setQuoteMessage(error instanceof Error ? error.message : 'Unable to create draft quote');
     } finally { setCreatingQuote(false); }
@@ -71,11 +82,23 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
         </div>
         <div className="border-t border-zinc-200 p-5">
           <div className="flex items-center justify-between text-sm"><span className="font-semibold">Subtotal excl. VAT</span><span className="text-lg font-black text-amber-600">{formatCurrency(cart.subtotalExVat)}</span></div>
+          <label className="mt-4 block text-sm font-semibold text-zinc-800" htmlFor="quote-reference">
+            Your quote reference
+            <input
+              id="quote-reference"
+              value={quoteReference}
+              onChange={(event) => setQuoteReference(event.target.value)}
+              maxLength={255}
+              required
+              placeholder="e.g. your PO or project reference"
+              className="mt-1 h-10 w-full rounded-md border border-zinc-300 px-3 text-sm font-normal outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600"
+            />
+          </label>
           {quoteMessage && <p className="mt-3 text-xs font-medium text-zinc-700">{quoteMessage}</p>}
           <button disabled={cart.lines.length === 0 || creatingQuote} onClick={createQuote} className="mt-4 h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">
             {creatingQuote ? 'Creating draft quote...' : 'Quote me!'}
           </button>
-          <p className="mt-2 text-xs text-zinc-500">This creates a draft quote in Xero. Your cart is kept if Xero rejects the request.</p>
+          <p className="mt-2 text-xs text-zinc-500">This creates a draft quote in Xero using your reference. Your cart is kept if Xero rejects the request.</p>
         </div>
       </aside>
     </div>
