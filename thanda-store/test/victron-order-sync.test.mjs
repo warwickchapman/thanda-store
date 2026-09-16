@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   backorderQuantityAfterInbound,
+  epxTrackingUrl,
+  epxWaybillFromTrackingPage,
   isRmaReference,
   isStockSku,
-  trackingUrlForShipment,
 } from "../src/lib/victron-order-sync.mjs";
 import { victronSkuFamilyResolver } from "../src/lib/victron-sku-family.mjs";
 
@@ -34,20 +35,24 @@ test("retail and successor SKUs reconcile within the same planning family", () =
   assert.equal(backorderQuantityAfterInbound(2, 1), 1);
 });
 
-test("EPX consignments open directly in the EPX tracking view", () => {
+test("EPX waybills are extracted from Victron tracking pages", () => {
   assert.equal(
-    trackingUrlForShipment({
-      carrier: "EPX",
-      consigment_number: "VIC26069837",
-      tracking_link: "https://eorder.victronenergy.com/tracktrace/inzuzo/epx/8806055/26069837/",
-    }),
-    "https://epx.pperfect.com/?w=VIC26069837",
+    epxWaybillFromTrackingPage(
+      "Fill in your Waybill number: <strong>VIC26069628</strong>",
+    ),
+    "VIC26069628",
   );
   assert.equal(
-    trackingUrlForShipment({
-      carrier: "Other courier",
-      tracking_link: "https://courier.example/track/123",
-    }),
-    "https://courier.example/track/123",
+    epxTrackingUrl("vic26069628"),
+    "https://epx.pperfect.com/?w=VIC26069628",
+  );
+  assert.equal(epxWaybillFromTrackingPage("No waybill is available"), null);
+  assert.equal(epxTrackingUrl("8805772/26069628"), null);
+});
+
+test("EPX direct links accept only VIC waybills", () => {
+  assert.equal(
+    epxTrackingUrl("VIC26069837"),
+    "https://epx.pperfect.com/?w=VIC26069837",
   );
 });

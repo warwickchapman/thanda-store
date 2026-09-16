@@ -24,12 +24,16 @@ function httpsUrl(value) {
   return /^https:\/\//i.test(url) ? url : null;
 }
 
-export function trackingUrlForShipment(shipment) {
-  const carrier = upper(shipment?.carrier);
-  const consignmentNumber = clean(shipment?.consigment_number);
-  if (carrier === "EPX" && consignmentNumber)
-    return `https://epx.pperfect.com/?w=${encodeURIComponent(consignmentNumber)}`;
-  return httpsUrl(shipment?.tracking_link);
+export function epxWaybillFromTrackingPage(page) {
+  const match = String(page || "").match(/\bVIC\d+\b/i);
+  return match ? upper(match[0]) : null;
+}
+
+export function epxTrackingUrl(waybill) {
+  const value = upper(waybill);
+  return /^VIC\d+$/.test(value)
+    ? `https://epx.pperfect.com/?w=${encodeURIComponent(value)}`
+    : null;
 }
 
 function rows(value) {
@@ -199,6 +203,37 @@ async function fetchJson(url, { apiKey, fetchImpl, timeoutMs }, attempt = 0) {
   }
 }
 
+async function fetchText(url, { fetchImpl, timeoutMs }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "text/html",
+        "User-Agent": "ThandaStoreOrderSync/1.0",
+      },
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Tracking page HTTP ${response.status}`);
+    return text;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolvedTrackingUrl(invoice, fetchOptions) {
+  if (upper(invoice.carrier) !== "EPX" || !invoice.trackingUrl)
+    return invoice.trackingUrl;
+  try {
+    const page = await fetchText(invoice.trackingUrl, fetchOptions);
+    return epxTrackingUrl(epxWaybillFromTrackingPage(page)) || invoice.trackingUrl;
+  } catch {
+    // A supplier tracking page must never interrupt the inbound stock sync.
+    return invoice.trackingUrl;
+  }
+}
+
 function normalizedShipment(raw) {
   const orderNumber = clean(raw?.order_number);
   const orderDate = clean(raw?.order_date);
@@ -219,7 +254,7 @@ function normalizedShipment(raw) {
           status: clean(invoice?.status) || null,
           shipmentNumber: clean(invoice?.shipment?.shipment_number) || null,
           shippingDate: clean(invoice?.shipment?.shipping_date) || null,
-          trackingUrl: trackingUrlForShipment(invoice?.shipment),
+          trackingUrl: httpsUrl(invoice?.shipment?.tracking_link),
           carrier: clean(invoice?.shipment?.carrier) || null,
         };
       })
@@ -538,6 +573,7 @@ export async function syncVictronOrders({
       );
       for (const invoice of shipment.invoices) {
         if (invoice.status === "Cancelled") continue;
+        const trackingUrl = await resolvedTrackingUrl(invoice, fetchOptions);
         await client.query(
           `INSERT INTO victron_shipment_invoices
             (invoice_number, order_number, status, products_url,
@@ -559,7 +595,7 @@ export async function syncVictronOrders({
             invoice.productsUrl,
             invoice.shipmentNumber,
             invoice.shippingDate,
-            invoice.trackingUrl,
+            trackingUrl,
             invoice.carrier,
           ],
         );
