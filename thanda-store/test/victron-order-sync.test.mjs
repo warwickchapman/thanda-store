@@ -4,6 +4,7 @@ import {
   backorderQuantityAfterInbound,
   isRmaReference,
   isStockSku,
+  trackingUrlForShipment,
 } from "../src/lib/victron-order-sync.mjs";
 import { victronSkuFamilyResolver } from "../src/lib/victron-sku-family.mjs";
 
@@ -31,4 +32,22 @@ test("retail and successor SKUs reconcile within the same planning family", () =
   ]);
   assert.equal(familyFor("PMP482305010R"), familyFor("PMP482305012"));
   assert.equal(backorderQuantityAfterInbound(2, 1), 1);
+});
+
+test("EPX consignments open directly in the EPX tracking view", () => {
+  assert.equal(
+    trackingUrlForShipment({
+      carrier: "EPX",
+      consigment_number: "VIC26069837",
+      tracking_link: "https://eorder.victronenergy.com/tracktrace/inzuzo/epx/8806055/26069837/",
+    }),
+    "https://epx.pperfect.com/?w=VIC26069837",
+  );
+  assert.equal(
+    trackingUrlForShipment({
+      carrier: "Other courier",
+      tracking_link: "https://courier.example/track/123",
+    }),
+    "https://courier.example/track/123",
+  );
 });

@@ -24,6 +24,14 @@ function httpsUrl(value) {
   return /^https:\/\//i.test(url) ? url : null;
 }
 
+export function trackingUrlForShipment(shipment) {
+  const carrier = upper(shipment?.carrier);
+  const consignmentNumber = clean(shipment?.consigment_number);
+  if (carrier === "EPX" && consignmentNumber)
+    return `https://epx.pperfect.com/?w=${encodeURIComponent(consignmentNumber)}`;
+  return httpsUrl(shipment?.tracking_link);
+}
+
 function rows(value) {
   if (Array.isArray(value)) return value;
   return Array.isArray(value?.results) ? value.results : [];
@@ -211,7 +219,7 @@ function normalizedShipment(raw) {
           status: clean(invoice?.status) || null,
           shipmentNumber: clean(invoice?.shipment?.shipment_number) || null,
           shippingDate: clean(invoice?.shipment?.shipping_date) || null,
-          trackingUrl: httpsUrl(invoice?.shipment?.tracking_link),
+          trackingUrl: trackingUrlForShipment(invoice?.shipment),
           carrier: clean(invoice?.shipment?.carrier) || null,
         };
       })
