@@ -6,6 +6,7 @@ import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
+import { customerQuoteStatus } from '@/lib/quote-settings';
 
 function currentQuoteDate() {
   return new Date().toISOString().slice(0, 10);
@@ -56,11 +57,13 @@ export async function POST() {
       };
     });
     const quoteDate = currentQuoteDate();
+    const quoteStatus = await customerQuoteStatus();
     // A retry of this unchanged checkout must not create a second Xero draft.
     const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({
       userId: user.id,
       contactId: user.xeroContactId,
       quoteDate,
+      quoteStatus,
       lineItems,
     })).digest('hex');
     const response = await xeroAccountingFetch('/Quotes', {
@@ -72,7 +75,7 @@ export async function POST() {
       body: JSON.stringify({ Quotes: [{
         Contact: { ContactID: user.xeroContactId },
         Date: quoteDate,
-        Status: 'DRAFT',
+        Status: quoteStatus,
         LineAmountTypes: 'Exclusive',
         Reference: `Thanda Store cart for ${user.email}`,
         LineItems: lineItems,
@@ -98,6 +101,7 @@ export async function POST() {
         quoteNumber: quote?.QuoteNumber || null,
         quoteId: quote?.QuoteID || null,
         source: 'cart',
+        quoteStatus,
       });
     } catch (error) {
       salesNotified = false;
@@ -118,7 +122,8 @@ export async function POST() {
     return NextResponse.json({
       quoteNumber: quote?.QuoteNumber || null,
       quoteId: quote?.QuoteID || null,
-      message: 'Draft quote created in Xero.',
+      quoteStatus,
+      message: quoteStatus === 'DRAFT' ? 'Draft quote created in Xero.' : 'Quote created in Xero as sent.',
       salesNotified,
       buyerAcknowledged,
       cart: { lines: [], itemCount: 0, subtotalExVat: 0 },

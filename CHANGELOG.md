@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added an administrator-controlled **Send quotes as drafts only** switch. It defaults on; turning it off creates new customer cart and copied quotes as `SENT` in Xero for controlled email-delivery testing.
+
 - Creating a customer quote now emails `sales@thanda.solar` with the company, portal user, and Xero quote reference. It also emails the customer from `sales@thanda.solar` to acknowledge their requested items and explain that sales will send the final quotation shortly. This covers both cart quotes and copied quotes. Email failures never prevent a successfully created Xero draft from completing.
 
 - Expanded buyer setup emails with an accurate overview of the Victron catalogue, Renogy solar panels and batteries, and the portal's catalogue, favourites, quote, and Accounts features.

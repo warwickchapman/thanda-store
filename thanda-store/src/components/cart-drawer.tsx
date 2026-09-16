@@ -36,7 +36,8 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to create draft quote');
       onChange(data.cart);
-      setQuoteMessage(data.quoteNumber ? `Draft quote ${data.quoteNumber} has been created in Xero.` : 'Draft quote has been created in Xero.');
+      const quoteLabel = data.quoteStatus === 'SENT' ? 'Quote' : 'Draft quote';
+      setQuoteMessage(data.quoteNumber ? `${quoteLabel} ${data.quoteNumber} has been created in Xero.` : `${quoteLabel} has been created in Xero.`);
     } catch (error) {
       setQuoteMessage(error instanceof Error ? error.message : 'Unable to create draft quote');
     } finally { setCreatingQuote(false); }

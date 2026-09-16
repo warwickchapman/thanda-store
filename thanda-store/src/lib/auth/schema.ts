@@ -503,6 +503,17 @@ async function ensureAuthSchemaOnce() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS portal_quote_settings (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      drafts_only BOOLEAN NOT NULL DEFAULT true,
+      updated_by_user_id BIGINT REFERENCES portal_users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    "INSERT INTO portal_quote_settings (id, drafts_only) VALUES (true, true) ON CONFLICT (id) DO NOTHING",
+  );
   // Import only missing SKU settings. Future edits in Inventory planning win
   // permanently and no recurring workbook import is required.
   await pool.query(

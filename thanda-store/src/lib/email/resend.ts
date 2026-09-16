@@ -14,6 +14,7 @@ type SendSalesQuoteNotificationInput = {
   quoteNumber: string | null;
   quoteId: string | null;
   source: 'cart' | 'quote_copy';
+  quoteStatus: 'DRAFT' | 'SENT';
 };
 
 type SendQuoteRequestReceiptInput = {
@@ -97,22 +98,23 @@ export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmail
   });
 }
 
-export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source }: SendSalesQuoteNotificationInput) {
+export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source, quoteStatus }: SendSalesQuoteNotificationInput) {
   const company = companyName.trim() || 'Unknown company';
   const quote = quoteNumber || quoteId || 'pending Xero number';
   const sourceLabel = source === 'quote_copy' ? 'a copied quote' : 'their cart';
+  const statusLabel = quoteStatus === 'SENT' ? 'a sent quote' : 'a draft quote';
   const recipient = process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar';
   return sendEmail({
     to: recipient,
     subject: `New Thanda Store quote ${quote} - ${company}`,
     html: `
-      <p>A Thanda Store customer has created ${sourceLabel} as a draft quote in Xero.</p>
+      <p>A Thanda Store customer has created ${sourceLabel} as ${statusLabel} in Xero.</p>
       <p><strong>Company:</strong> ${escapeHtml(company)}<br />
       <strong>Portal user:</strong> ${escapeHtml(buyerEmail)}<br />
       <strong>Xero quote:</strong> ${escapeHtml(quote)}</p>
-      <p>Please review the draft in Xero and contact the customer about accepting it.</p>
+      <p>Please review the quote in Xero and contact the customer about accepting it.</p>
     `,
-    text: `A Thanda Store customer has created ${sourceLabel} as a draft quote in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}\n\nPlease review the draft in Xero and contact the customer about accepting it.`,
+    text: `A Thanda Store customer has created ${sourceLabel} as ${statusLabel} in Xero.\n\nCompany: ${company}\nPortal user: ${buyerEmail}\nXero quote: ${quote}\n\nPlease review the quote in Xero and contact the customer about accepting it.`,
   });
 }
 

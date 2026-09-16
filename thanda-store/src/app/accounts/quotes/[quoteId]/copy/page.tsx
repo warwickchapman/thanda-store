@@ -62,7 +62,7 @@ export default function CopyQuotePage({ params }: { params: Promise<{ quoteId: s
       const response = await fetch(`/api/account/quotes/${encodeURIComponent(quoteId)}/copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to create copied draft quote.');
-      setMessage(`Draft quote ${data.quoteNumber || ''} created in Xero.`);
+      setMessage(`${data.quoteStatus === 'SENT' ? 'Quote' : 'Draft quote'} ${data.quoteNumber || ''} created in Xero.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to create copied draft quote.'); }
     finally { setSaving(false); }
   }

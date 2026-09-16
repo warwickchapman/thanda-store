@@ -7,6 +7,7 @@ import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/vict
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
+import { customerQuoteStatus } from '@/lib/quote-settings';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
 
@@ -103,10 +104,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       };
     });
     const date = new Date().toISOString().slice(0, 10);
-    const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({ userId: user.id, contactId: user.xeroContactId, sourceQuoteId: quoteId, date, lineItems })).digest('hex');
+    const quoteStatus = await customerQuoteStatus();
+    const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({ userId: user.id, contactId: user.xeroContactId, sourceQuoteId: quoteId, date, quoteStatus, lineItems })).digest('hex');
     const response = await xeroAccountingFetch('/Quotes', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ Quotes: [{ Contact: { ContactID: user.xeroContactId }, Date: date, Status: 'DRAFT', LineAmountTypes: 'Exclusive', Reference: `Reorder from ${source.QuoteNumber || 'quote'}`, LineItems: lineItems }] }),
+      body: JSON.stringify({ Quotes: [{ Contact: { ContactID: user.xeroContactId }, Date: date, Status: quoteStatus, LineAmountTypes: 'Exclusive', Reference: `Reorder from ${source.QuoteNumber || 'quote'}`, LineItems: lineItems }] }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return NextResponse.json({ error: 'Xero could not create the copied draft quote.' }, { status: 502 });
@@ -120,6 +122,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         quoteNumber: quote?.QuoteNumber || null,
         quoteId: quote?.QuoteID || null,
         source: 'quote_copy',
+        quoteStatus,
       });
     } catch (error) {
       salesNotified = false;
@@ -137,7 +140,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       buyerAcknowledged = false;
       console.error('Buyer quote acknowledgement failed:', error instanceof Error ? error.message : error);
     }
-    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, salesNotified, buyerAcknowledged });
+    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, quoteStatus, salesNotified, buyerAcknowledged });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create copied draft quote.' }, { status: 500 });
   }

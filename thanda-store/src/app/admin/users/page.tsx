@@ -23,6 +23,8 @@ export default function AdminUsersPage() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [resendingUserId, setResendingUserId] = useState<number | null>(null);
+  const [draftsOnly, setDraftsOnly] = useState<boolean | null>(null);
+  const [savingQuoteSetting, setSavingQuoteSetting] = useState(false);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -37,6 +39,31 @@ export default function AdminUsersPage() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to load Xero status.');
     setXeroStatus(data);
+  }
+
+  async function loadQuoteSettings() {
+    const response = await fetch('/api/admin/quote-settings', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to load quote settings.');
+    setDraftsOnly(Boolean(data.draftsOnly));
+  }
+
+  async function updateDraftsOnly(nextDraftsOnly: boolean) {
+    if (!nextDraftsOnly && !window.confirm('New client quote requests will be created as SENT quotes in Xero. Continue?')) return;
+    setSavingQuoteSetting(true);
+    setError('');
+    try {
+      const response = await fetch('/api/admin/quote-settings', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draftsOnly: nextDraftsOnly }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to update quote settings.');
+      setDraftsOnly(Boolean(data.draftsOnly));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update quote settings.');
+    } finally {
+      setSavingQuoteSetting(false);
+    }
   }
 
   async function resendInvite(user: PortalUser) {
@@ -62,7 +89,7 @@ export default function AdminUsersPage() {
     let active = true;
     async function loadInitialUsers() {
       try {
-        await Promise.all([loadUsers(), loadXeroStatus()]);
+        await Promise.all([loadUsers(), loadXeroStatus(), loadQuoteSettings()]);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : 'Failed to load users.');
       }
@@ -92,6 +119,12 @@ export default function AdminUsersPage() {
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
         {xeroStatus && <XeroStatusPanel xeroStatus={xeroStatus} onRefresh={() => void loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status.'))} />}
+        {draftsOnly !== null && <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+            <div><h2 className="font-bold">Quote creation</h2><p className="mt-1 text-sm text-zinc-600">{draftsOnly ? 'New client quote requests create DRAFT quotes in Xero.' : 'New client quote requests create SENT quotes in Xero.'}</p></div>
+            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={draftsOnly} disabled={savingQuoteSetting} onChange={(event) => void updateDraftsOnly(event.target.checked)} className="h-5 w-5 rounded border-zinc-300" />Send quotes as drafts only</label>
+          </div>
+        </section>}
 
         <section>
           <div className="mb-4 flex flex-col justify-between gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end">
