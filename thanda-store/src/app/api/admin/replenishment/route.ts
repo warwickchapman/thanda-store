@@ -24,6 +24,10 @@ type ProductRow = {
   price_break_qty: string | number | null;
   price_break_price: string | number | null;
 };
+type LocalStockRow = {
+  sku: string;
+  local_stock: string | number | null;
+};
 type SaleRow = {
   sku: string;
   sales_30: string | number;
@@ -77,6 +81,7 @@ export async function GET() {
   try {
     const [
       products,
+      localStocks,
       sales,
       inbound,
       backorders,
@@ -95,6 +100,12 @@ export async function GET() {
           NULLIF(details->>'priceBreakQty', '')::numeric AS price_break_qty,
           NULLIF(details->>'priceBreakPrice', '')::numeric AS price_break_price
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
+      `),
+      pool.query<LocalStockRow>(`
+        SELECT sku,
+          COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock
+        FROM products
+        WHERE supplier = 'victron'
       `),
       pool.query<SaleRow>(`
         SELECT UPPER(sku) AS sku,
@@ -212,6 +223,7 @@ export async function GET() {
           reference: string;
           quantity: number;
         }>;
+        localStock: number;
         minimumStock: number;
         lastSoldAt: string | null;
       }
@@ -228,6 +240,7 @@ export async function GET() {
         provisional: 0,
         reserved: 0,
         acceptedQuoteLines: [],
+        localStock: 0,
         minimumStock: 0,
         lastSoldAt: null,
       };
@@ -236,6 +249,11 @@ export async function GET() {
     };
     for (const product of products.rows)
       groupFor(product.sku).products.push(product);
+    // Xero may still hold stock under an older, hidden predecessor SKU. It is
+    // the same physical stock family as its successor, so it must contribute
+    // to the current SKU's Stock column and replenishment coverage.
+    for (const row of localStocks.rows)
+      groupFor(row.sku).localStock += Number(row.local_stock) || 0;
     for (const row of sales.rows) {
       const group = groupFor(row.sku);
       group.sales30 += Number(row.sales_30) || 0;
@@ -315,7 +333,7 @@ export async function GET() {
         )[0];
         // Retail and base SKUs are alternate packaging, not extra stock. Prefer
         // the base SKU (or the current successor) rather than adding both rows.
-        const localStock = Number(currentProduct.local_stock) || 0;
+        const localStock = group.localStock;
         const supplierStock = Number(currentProduct.supplier_stock) || 0;
         const dailyDemand = Math.max(
           group.sales30 / SALES_WINDOWS.recent,
