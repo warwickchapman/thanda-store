@@ -922,17 +922,17 @@ export default function ReplenishmentPage() {
                     align="left"
                   />
                   <SortHeader
-                    column="sales30"
-                    label="30d"
-                    selected={sortKey === "sales30"}
+                    column="sales90"
+                    label="90d"
+                    selected={sortKey === "sales90"}
                     direction={sortDirection}
                     onSelect={selectSort}
                     className="text-right"
                   />
                   <SortHeader
-                    column="sales90"
-                    label="90d"
-                    selected={sortKey === "sales90"}
+                    column="sales30"
+                    label="30d"
+                    selected={sortKey === "sales30"}
                     direction={sortDirection}
                     onSelect={selectSort}
                     className="text-right"
@@ -1055,10 +1055,10 @@ export default function ReplenishmentPage() {
                       />
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {number(item.sales30)}
+                      {number(item.sales90)}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {number(item.sales90)}
+                      {number(item.sales30)}
                     </td>
                     <td className="border-l border-zinc-300 bg-red-50 px-3 py-3 text-right text-red-800">
                       {editingMinimum === item.sku ? (
