@@ -251,6 +251,17 @@ function ItemNote({
   const [predecessorSku, setPredecessorSku] = useState("");
   const [detailsError, setDetailsError] = useState("");
   const [savingDetails, setSavingDetails] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !detailsRef.current?.contains(event.target))
+        setDetailsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [detailsOpen]);
   async function addDetails() {
     setSavingDetails(true);
     setDetailsError("");
@@ -299,7 +310,12 @@ function ItemNote({
     }
   }
   const details = item.predecessorSkus.length > 0 && (
-    <details className="relative">
+    <details
+      ref={detailsRef}
+      open={detailsOpen}
+      onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      className="relative"
+    >
       <summary className="cursor-pointer whitespace-nowrap text-xs font-semibold text-violet-800">
         Details
       </summary>
