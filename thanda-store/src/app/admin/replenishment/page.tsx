@@ -274,13 +274,55 @@ function ItemNote({
       setSavingDetails(false);
     }
   }
+  async function removeDetails(sku: string) {
+    if (!window.confirm(`Remove ${sku} as a predecessor of ${item.sku}? This stops combining the two SKUs for replenishment.`)) return;
+    setSavingDetails(true);
+    setDetailsError("");
+    try {
+      const response = await fetch("/api/admin/victron-sku-successions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ predecessorSku: sku, successorSku: item.sku }),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Unable to remove the predecessor SKU.");
+      window.location.reload();
+    } catch (cause) {
+      setDetailsError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to remove the predecessor SKU.",
+      );
+    } finally {
+      setSavingDetails(false);
+    }
+  }
   const details = item.predecessorSkus.length > 0 && (
     <details className="relative">
       <summary className="cursor-pointer whitespace-nowrap text-xs font-semibold text-violet-800">
         Details
       </summary>
       <div className="absolute right-0 top-5 z-20 w-64 rounded border border-violet-200 bg-white p-2 text-xs text-violet-950 shadow-lg">
-        Sales include predecessor: {item.predecessorSkus.join(", ")}
+        <p>Sales include predecessor{item.predecessorSkus.length === 1 ? "" : "s"}:</p>
+        <ul className="mt-1 space-y-1">
+          {item.predecessorSkus.map((sku) => (
+            <li key={sku} className="flex items-center justify-between gap-3 font-mono text-sm">
+              <span>{sku}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${sku} as a predecessor`}
+                title={`Remove ${sku} as a predecessor`}
+                onClick={() => void removeDetails(sku)}
+                disabled={savingDetails}
+                className="font-sans font-bold text-violet-800 hover:text-red-700 disabled:opacity-60"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+        {detailsError && <p className="mt-2 font-semibold text-red-800">{detailsError}</p>}
       </div>
     </details>
   );

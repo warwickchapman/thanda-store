@@ -28,3 +28,22 @@ export async function POST(request: Request) {
   `, [predecessorSku, successorSku]);
   return NextResponse.json({ ok: true, predecessorSku, successorSku });
 }
+
+export async function DELETE(request: Request) {
+  const user = await currentUser();
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  await ensureAuthSchema();
+  const body = await request.json();
+  const predecessorSku = String(body?.predecessorSku || '').trim().toUpperCase();
+  const successorSku = String(body?.successorSku || '').trim().toUpperCase();
+  if (!/^[A-Z0-9-]{3,}$/.test(predecessorSku) || !/^[A-Z0-9-]{3,}$/.test(successorSku)) {
+    return NextResponse.json({ error: 'Provide valid predecessor and successor SKUs.' }, { status: 400 });
+  }
+  const result = await pool.query(
+    `DELETE FROM victron_sku_successions
+     WHERE predecessor_sku = $1 AND successor_sku = $2`,
+    [predecessorSku, successorSku],
+  );
+  if (!result.rowCount) return NextResponse.json({ error: 'That SKU succession no longer exists.' }, { status: 404 });
+  return NextResponse.json({ ok: true, predecessorSku, successorSku });
+}
