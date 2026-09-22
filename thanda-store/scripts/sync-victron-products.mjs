@@ -227,6 +227,12 @@ async function main() {
   const allowedSkus = loadAllowedSkus();
   const products = await fetchPagedProducts('products');
   const priceListProducts = products.filter((product) => allowedSkus.has(String(product.sku || '').toUpperCase()));
+  // Successions are supplier catalogue data, not an assortment decision. Scan
+  // the complete E-Order response so a replacement relationship is retained
+  // even when the retired product is outside the storefront price-list scope.
+  const explicitSuccessionProducts = products.filter((product) =>
+    Boolean(successorSkuFromDescription(product.description || product.product_data?.name)),
+  );
   // The quarterly price list remains the normal catalogue authority. An
   // explicit Victron "If 0, order <SKU>" marker is the narrow exception: the
   // named successor must be available so a retired predecessor can transition
@@ -256,6 +262,7 @@ async function main() {
   const stats = {
     allowed: allowedSkus.size,
     explicitSuccessors: successorSkus.size,
+    explicitSuccessions: explicitSuccessionProducts.length,
     apiProducts: products.length,
     matched: allowedProducts.length,
     synced: 0,
@@ -277,12 +284,16 @@ async function main() {
       try {
         const normalized = buildProduct(product, extendedBySku.get(sku));
         await upsertProduct(client, normalized);
-        if (await upsertSkuSuccession(client, product)) stats.skuSuccessions += 1;
         stats.synced += 1;
         if (FETCH_EXTENDED && !normalized.image_url) stats.missingImagesAfterExtended.push(sku);
       } catch (error) {
         stats.failed.push({ sku, error: error.message });
       }
+    }
+    // Only explicit Victron "If 0, order <SKU>" annotations qualify. Do not
+    // infer replacements from similarly named article codes.
+    for (const product of explicitSuccessionProducts) {
+      if (await upsertSkuSuccession(client, product)) stats.skuSuccessions += 1;
     }
   } finally {
     client.release();
