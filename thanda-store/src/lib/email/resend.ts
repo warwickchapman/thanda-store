@@ -100,6 +100,23 @@ export async function sendAccountSetupEmail({ to, token }: SendAccountSetupEmail
   });
 }
 
+export async function sendPasswordResetEmail({ to, token }: SendAccountSetupEmailInput) {
+  const baseUrl = (process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/, '');
+  const resetUrl = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
+  return sendEmail({
+    to,
+    subject: 'Reset your Thanda Store password',
+    html: `
+      <p>Hello,</p>
+      <p>A Thanda Store administrator has requested a password reset for your account.</p>
+      <p><a href="${resetUrl}">Reset your password</a></p>
+      <p>This one-time link expires in 7 days. If you did not expect this email, you can ignore it.</p>
+      <p>Regards,<br />Thanda Store</p>
+    `,
+    text: `A Thanda Store administrator has requested a password reset for your account. Reset your password: ${resetUrl}\n\nThis one-time link expires in 7 days. If you did not expect this email, you can ignore it.`,
+  });
+}
+
 export async function sendSalesQuoteNotification({ companyName, buyerEmail, quoteNumber, quoteId, source, quoteStatus, quoteReference }: SendSalesQuoteNotificationInput) {
   const company = companyName.trim() || 'Unknown company';
   const quote = quoteNumber || quoteId || 'pending Xero number';

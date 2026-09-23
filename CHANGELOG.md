@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- User managers can now send an active portal user a dedicated password-reset email directly from the User Admin directory.
+
+- Fixed the **Forgot password?** link being redirected back to sign-in before the reset form could load.
+
 - Added an administrator-controlled **Send quotes as drafts only** switch. It defaults on; turning it off creates new customer cart and copied quotes as `SENT` in Xero for controlled email-delivery testing.
 
 - Creating a customer quote now emails `sales@thanda.solar` with the company, portal user, and Xero quote reference. It also emails the customer from `sales@thanda.solar` to acknowledge their requested items and explain that sales will send the final quotation shortly. This covers both cart quotes and copied quotes. Email failures never prevent a successfully created Xero draft from completing.

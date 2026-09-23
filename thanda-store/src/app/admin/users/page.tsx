@@ -22,7 +22,9 @@ export default function AdminUsersPage() {
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [resendingUserId, setResendingUserId] = useState<number | null>(null);
+  const [resettingUserId, setResettingUserId] = useState<number | null>(null);
   const [draftsOnly, setDraftsOnly] = useState<boolean | null>(null);
   const [savingQuoteSetting, setSavingQuoteSetting] = useState(false);
 
@@ -69,6 +71,7 @@ export default function AdminUsersPage() {
   async function resendInvite(user: PortalUser) {
     setResendingUserId(user.id);
     setError('');
+    setMessage('');
     try {
       const response = await fetch('/api/admin/users', {
         method: 'PUT',
@@ -77,11 +80,33 @@ export default function AdminUsersPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to resend invite.');
+      setMessage(`A new account-setup email was sent to ${user.email}.`);
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invite.');
     } finally {
       setResendingUserId(null);
+    }
+  }
+
+  async function sendPasswordReset(user: PortalUser) {
+    setResettingUserId(user.id);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, action: 'passwordReset' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send password reset.');
+      setMessage(`A password-reset email was sent to ${user.email}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send password reset.');
+    } finally {
+      setResettingUserId(null);
     }
   }
 
@@ -118,6 +143,7 @@ export default function AdminUsersPage() {
         </div>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+        {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
         {xeroStatus && <XeroStatusPanel xeroStatus={xeroStatus} onRefresh={() => void loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status.'))} />}
         {draftsOnly !== null && <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -150,6 +176,7 @@ export default function AdminUsersPage() {
               <div className="flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.setup_expires_at ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.setup_expires_at ? 'Setup pending' : user.is_active ? 'Active' : 'Disabled'}</span></div>
               <div className="flex flex-wrap gap-2 lg:justify-self-end">
                 {canManageUsers && user.setup_expires_at && <button type="button" disabled={resendingUserId === user.id} onClick={() => void resendInvite(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resendingUserId === user.id ? 'Sending...' : 'Resend invite'}</button>}
+                {canManageUsers && user.is_active && !user.setup_expires_at && <button type="button" disabled={resettingUserId === user.id} onClick={() => void sendPasswordReset(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resettingUserId === user.id ? 'Sending...' : 'Send password reset'}</button>}
                 <Link href={`/admin/users/${user.id}`} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit</Link>
               </div>
             </div>)}

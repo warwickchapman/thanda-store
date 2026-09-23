@@ -7,7 +7,7 @@ import {
   hashPassword,
 } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
-import { sendAccountSetupEmail } from '@/lib/email/resend';
+import { sendAccountSetupEmail, sendPasswordResetEmail } from '@/lib/email/resend';
 import { getXeroContactDetails, getXeroContactPeople } from '@/lib/xero/oauth';
 
 async function requireAdmin() {
@@ -443,12 +443,13 @@ export async function PUT(request: Request) {
   await ensureAuthSchema();
 
   const body = await request.json();
+  const action = text(body.action) || 'setup';
   const userId = Number(body.userId);
   if (!Number.isInteger(userId)) return NextResponse.json({ error: 'A valid user is required.' }, { status: 400 });
 
   const result = await pool.query(
     `
-      SELECT u.id, u.email, o.xero_contact_id
+      SELECT u.id, u.email, u.role, u.is_active, o.xero_contact_id
       FROM portal_users u
       JOIN organisations o ON o.id = u.organisation_id
       WHERE u.id = $1
@@ -458,8 +459,15 @@ export async function PUT(request: Request) {
   );
   const user = result.rows[0];
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
-  if (!user.xero_contact_id) {
-    return NextResponse.json({ error: 'Link this organisation to Xero before sending setup email.' }, { status: 400 });
+  if (!user.is_active) return NextResponse.json({ error: 'Enable this account before sending a password link.' }, { status: 400 });
+  if (user.role !== 'admin' && !user.xero_contact_id) {
+    return NextResponse.json({ error: 'Link this organisation to Xero before sending a password link.' }, { status: 400 });
+  }
+
+  if (action === 'passwordReset') {
+    const token = await createAccountSetupToken(Number(user.id));
+    await sendPasswordResetEmail({ to: user.email, token });
+    return NextResponse.json({ ok: true });
   }
 
   await sendSetupEmail(user);
