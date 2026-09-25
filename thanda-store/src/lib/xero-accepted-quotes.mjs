@@ -112,6 +112,8 @@ export async function ensureAcceptedQuoteSchema(client) {
 }
 
 export async function replaceAcceptedQuoteSnapshot(client, rawQuotes, options = {}) {
+  const sourceObservedAt = options.sourceObservedAt;
+  if (!sourceObservedAt || !Number.isFinite(Date.parse(sourceObservedAt))) throw new Error('Quote source observation time is required');
   const quotes = rawQuotes
     .filter((quote) => String(quote?.Status || '').toUpperCase() === 'ACCEPTED')
     .map((quote) => normalizeAcceptedQuote(quote, options))
@@ -133,9 +135,9 @@ export async function replaceAcceptedQuoteSnapshot(client, rawQuotes, options = 
         INSERT INTO xero_accepted_quotes (
           quote_id, quote_number, contact_id, contact_name, reference, quote_date,
           expiry_date, updated_date_utc, reservation_eligible, exclusion_reason, synced_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       `, [quote.quoteId, quote.quoteNumber, quote.contactId, quote.contactName, quote.reference,
-        quote.quoteDate, quote.expiryDate, quote.updatedDateUtc, quote.reservationEligible, quote.exclusionReason]);
+        quote.quoteDate, quote.expiryDate, quote.updatedDateUtc, quote.reservationEligible, quote.exclusionReason, sourceObservedAt]);
       for (const line of quote.lines) {
         await client.query(`
           INSERT INTO xero_accepted_quote_lines (quote_id, line_key, sku, description, quantity)
@@ -145,9 +147,9 @@ export async function replaceAcceptedQuoteSnapshot(client, rawQuotes, options = 
     }
     await client.query(`
       UPDATE xero_accepted_quote_sync_state
-      SET last_successful_sync_at = NOW(), last_error = NULL, last_stats = $1::jsonb, updated_at = NOW()
+      SET last_successful_sync_at = $2, last_error = NULL, last_stats = $1::jsonb, updated_at = NOW()
       WHERE id = true
-    `, [JSON.stringify(stats)]);
+    `, [JSON.stringify(stats), sourceObservedAt]);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

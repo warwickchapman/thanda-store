@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import pool from "@/lib/db";
+import { assertHubSnapshot } from "@/lib/xero/hub.mjs";
 import { currentUser } from "@/lib/auth/server";
 import { ensureAuthSchema } from "@/lib/auth/schema";
 import { xeroAccountingFetch } from "@/lib/xero/oauth";
@@ -40,6 +41,8 @@ export async function POST() {
     );
     const quotes: unknown[] = [];
     let pages = 0;
+    let snapshot: string | undefined;
+    let sourceObservedAt: string | undefined;
     for (let page = 1; ; page += 1) {
       const query = new URLSearchParams({
         Status: "ACCEPTED",
@@ -50,6 +53,9 @@ export async function POST() {
       const payload = await response.json();
       if (!response.ok)
         throw new Error(`Xero Quotes check failed (HTTP ${response.status}).`);
+      snapshot = assertHubSnapshot(payload, snapshot);
+      sourceObservedAt ||= payload._hub.observed_at;
+      if (page > 1000) throw new Error("Complete quote collection exceeds page limit");
       const pageQuotes = Array.isArray(payload.Quotes) ? payload.Quotes : [];
       quotes.push(...pageQuotes);
       pages = page;
@@ -57,6 +63,7 @@ export async function POST() {
     }
     const stats = await replaceAcceptedQuoteSnapshot(client, quotes, {
       reservationDays: acceptedQuoteReservationDays(),
+      sourceObservedAt,
     });
     return NextResponse.json({ ok: true, ...stats, pages });
   } catch (error) {

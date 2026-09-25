@@ -14,6 +14,7 @@ const QUOTES_URL = '/Quotes';
 async function fetchAcceptedQuotes() {
   const quotes = [];
   let snapshot;
+  let sourceObservedAt;
   for (let page = 1; page <= 1000; page += 1) {
     const url = new URL(QUOTES_URL, 'http://hub.invalid');
     url.searchParams.set('Status', 'ACCEPTED');
@@ -29,9 +30,10 @@ async function fetchAcceptedQuotes() {
     const payload = await response.json();
     if (!response.ok) throw new Error(`Xero Quotes fetch failed: ${response.status} ${response.statusText}`);
     snapshot = assertHubSnapshot(payload, snapshot);
+    sourceObservedAt ||= payload._hub.observed_at;
     const pageQuotes = Array.isArray(payload.Quotes) ? payload.Quotes : [];
     quotes.push(...pageQuotes);
-    if (pageQuotes.length < 100) return { quotes, pages: page };
+    if (pageQuotes.length < 100) return { quotes, pages: page, sourceObservedAt };
 
   }
   throw new Error("Complete quote collection exceeds page limit");
@@ -52,6 +54,7 @@ async function main() {
     const fetched = await fetchAcceptedQuotes(client, token);
     const stats = await replaceAcceptedQuoteSnapshot(client, fetched.quotes, {
       reservationDays: acceptedQuoteReservationDays(),
+      sourceObservedAt: fetched.sourceObservedAt,
     });
     console.log(JSON.stringify({ ...stats, pages: fetched.pages }, null, 2));
   } catch (error) {

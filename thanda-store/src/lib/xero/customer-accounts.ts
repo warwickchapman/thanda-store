@@ -79,18 +79,20 @@ async function xeroJson(pathname: string, source: string, ifModifiedSince: strin
 async function fetchPages(pathname: string, key: string, source: string, ifModifiedSince: string | null = null) {
   const records: Record<string, unknown>[] = [];
   let snapshot: string | undefined;
+  let observedAt: string | undefined;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const separator = pathname.includes('?') ? '&' : '?';
     const payload = await xeroJson(`${pathname}${separator}page=${page}&pageSize=${PAGE_SIZE}`, source, ifModifiedSince);
     snapshot = assertHubSnapshot(payload, snapshot);
+    observedAt ||= (payload._hub as { observed_at: string }).observed_at;
     const pageRecords = Array.isArray(payload[key]) ? payload[key] as Record<string, unknown>[] : [];
     records.push(...pageRecords);
-    if (pageRecords.length < PAGE_SIZE) return records;
+    if (pageRecords.length < PAGE_SIZE) return { records, observedAt };
   }
   throw new Error('The complete document collection could not be read; previous data is retained.');
 }
 
-async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>, replaceSnapshot: boolean) {
+async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>, replaceSnapshot: boolean, observedAt: string) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -99,8 +101,8 @@ async function writeDocuments(contactId: string, documents: Array<{ document: Cu
       await client.query(`
         INSERT INTO xero_customer_documents (
           contact_id, document_type, document_id, document_number, status, document_date, due_date,
-          reference, currency_code, total, amount_paid, amount_due, payload, xero_updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
+          reference, currency_code, total, amount_paid, amount_due, payload, xero_updated_at, synced_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15)
         ON CONFLICT (contact_id, document_type, document_id) DO UPDATE SET
           document_number = EXCLUDED.document_number,
           status = EXCLUDED.status,
@@ -113,10 +115,10 @@ async function writeDocuments(contactId: string, documents: Array<{ document: Cu
           amount_due = EXCLUDED.amount_due,
           payload = EXCLUDED.payload,
           xero_updated_at = EXCLUDED.xero_updated_at,
-          synced_at = NOW()
+          synced_at = EXCLUDED.synced_at
       `, [contactId, document.type, document.id, document.number, document.status, document.date, document.dueDate,
         document.reference, document.currency, document.total, document.paid, document.due,
-        JSON.stringify(raw), null]);
+        JSON.stringify(raw), null, observedAt]);
     }
     await client.query(`
       INSERT INTO xero_customer_document_sync_state (contact_id, last_successful_sync_at, last_error)
@@ -148,20 +150,20 @@ export async function refreshCustomerDocuments(user: PortalUser) {
   const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id = $1 LIMIT 1', [contactId]);
   const replaceSnapshot = !lastSync || !cached.rowCount;
   const ifModifiedSince = replaceSnapshot ? null : lastSync!.toUTCString();
-  // Initial setup imports a bounded snapshot. Every later refresh asks Xero
-  // only for documents changed since the previous successful sync.
+  // Read complete Hub collections; retain their actual observation time.
   const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-documents:quotes', ifModifiedSince);
   const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-documents:invoices', ifModifiedSince);
   const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-documents:credit-notes', ifModifiedSince);
   const documents = [
-    ...quotes.map((raw) => ({ raw, document: documentFromXero('quote', raw) })),
-    ...invoices.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCREC').map((raw) => ({ raw, document: documentFromXero('invoice', raw) })),
-    ...creditNotes.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCRECCREDIT').map((raw) => ({ raw, document: documentFromXero('credit_note', raw) })),
+    ...quotes.records.map((raw) => ({ raw, document: documentFromXero('quote', raw) })),
+    ...invoices.records.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCREC').map((raw) => ({ raw, document: documentFromXero('invoice', raw) })),
+    ...creditNotes.records.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCRECCREDIT').map((raw) => ({ raw, document: documentFromXero('credit_note', raw) })),
   ].filter((entry) => {
     const entryContactId = String((entry.raw.Contact as { ContactID?: unknown } | undefined)?.ContactID || '');
     return entryContactId === contactId;
   }).filter((entry): entry is { raw: Record<string, unknown>; document: CustomerDocument } => Boolean(entry.document));
-  await writeDocuments(contactId, documents, true);
+  const observedAt = [quotes.observedAt, invoices.observedAt, creditNotes.observedAt].sort()[0]!;
+  await writeDocuments(contactId, documents, true, observedAt);
   return documents.length;
 }
 

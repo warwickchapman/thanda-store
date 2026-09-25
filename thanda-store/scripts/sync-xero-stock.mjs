@@ -47,7 +47,7 @@ async function fetchXeroItems(client, token) {
 
   const items = Array.isArray(payload.Items) ? payload.Items : [];
   console.error(`Fetched Xero Items: ${items.length}`);
-  return { items };
+  return { items, observedAt: payload._hub.observed_at };
 }
 
 async function ensureSyncState(client) {
@@ -89,7 +89,7 @@ async function targetProducts(client) {
   return result.rows;
 }
 
-async function updateLocalStock(client, product, localStock, xeroItem) {
+async function updateLocalStock(client, product, localStock, xeroItem, observedAt) {
   const xeroSalesPrice = moneyOrNull(xeroItem?.SalesDetails?.UnitPrice);
   const xeroPurchasePrice = moneyOrNull(xeroItem?.PurchaseDetails?.UnitPrice);
   const shouldSyncXeroPrice = product.supplier === 'lora';
@@ -125,7 +125,7 @@ async function updateLocalStock(client, product, localStock, xeroItem) {
                 true
               ),
               '{xeroStockSyncedAt}',
-              to_jsonb(to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+              to_jsonb(to_char($9::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
               true
             ),
             '{xeroStockStatus}',
@@ -146,6 +146,7 @@ async function updateLocalStock(client, product, localStock, xeroItem) {
       xeroItem?.Name || '',
       xeroPurchasePrice,
       xeroSalesPrice,
+      observedAt,
     ],
   );
 }
@@ -198,7 +199,7 @@ async function main() {
       const xeroItem = xeroItemsBySku.get(normalizeSku(product.sku));
       if (!xeroItem) {
         stats.missing += 1;
-        await updateLocalStock(client, product, 0, null);
+        await updateLocalStock(client, product, 0, null, fetched.observedAt);
         stats.updated += 1;
         continue;
       }
@@ -210,7 +211,7 @@ async function main() {
         stats.untracked += 1;
       }
 
-      await updateLocalStock(client, product, quantityOnHand(xeroItem), xeroItem);
+      await updateLocalStock(client, product, quantityOnHand(xeroItem), xeroItem, fetched.observedAt);
       stats.updated += 1;
     }
     await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NULL, last_completed_at = NOW(), updated_at = NOW() WHERE id = true');
