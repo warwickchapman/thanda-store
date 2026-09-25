@@ -1,62 +1,14 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
 import pg from 'pg';
 
-const TOKEN_URL = 'https://identity.xero.com/connect/token';
-const CONTACTS_URL = 'https://api.xero.com/api.xro/2.0/Contacts';
-const DEFAULT_TOKEN_FILE = '/var/lib/thanda-store/xero-token.json';
+const CONTACTS_URL = '/Contacts';
 const EXCLUDED_ADDITIONAL_PERSON_EMAILS = new Set(['sales@thanda.solar']);
 
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
-
-function config() {
-  return {
-    clientId: requiredEnv('XERO_CLIENT_ID'),
-    clientSecret: requiredEnv('XERO_CLIENT_SECRET'),
-    tokenFile: process.env.XERO_TOKEN_FILE || DEFAULT_TOKEN_FILE,
-  };
-}
-
-async function refreshTokenIfNeeded(settings, token) {
-  const expiresAt = token.expires_at ? Date.parse(token.expires_at) : 0;
-  if (token.access_token && token.tenant_id && expiresAt > Date.now() + 60_000) return token;
-  if (!token.refresh_token) throw new Error('Xero token file does not contain a refresh token');
-
-  const credentials = Buffer.from(`${settings.clientId}:${settings.clientSecret}`).toString('base64');
-  const response = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token.refresh_token }),
-  });
-  const refreshed = await response.json();
-  if (!response.ok) throw new Error(`Xero token refresh failed: ${response.status} ${refreshed.error || ''}`.trim());
-
-  const updated = {
-    ...token,
-    ...refreshed,
-    expires_at: new Date(Date.now() + Number(refreshed.expires_in || 0) * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  await fs.mkdir(path.dirname(settings.tokenFile), { recursive: true });
-  await fs.writeFile(settings.tokenFile, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600 });
-  return updated;
-}
-
 async function xeroContact(token, contactId) {
-  const response = await fetch(`${CONTACTS_URL}/${encodeURIComponent(contactId)}`, {
+  const response = await hubFetch(`${CONTACTS_URL}/${encodeURIComponent(contactId)}`, {
     headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      'xero-tenant-id': token.tenant_id,
       Accept: 'application/json',
     },
   });
@@ -87,8 +39,7 @@ async function ensurePortalUserSchema(client) {
 }
 
 async function main() {
-  const settings = config();
-  const token = await refreshTokenIfNeeded(settings, JSON.parse(await fs.readFile(settings.tokenFile, 'utf8')));
+  const token = await hubStatus();
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   const client = await pool.connect();
   const stats = { contacts: 0, checkedUsers: 0, archivedUsers: 0 };

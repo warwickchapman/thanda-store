@@ -4,16 +4,12 @@
 // Xero call merely to check Xero's remaining allowance.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import pg from 'pg';
+import { hubStatus } from '../src/lib/xero/hub.mjs';
 
 const ALERT_FILE = process.env.CODEX_ALERT_FILE || path.resolve(process.cwd(), '../runtime/CODEX_ALERTS.md');
 const WARNING_REMAINING = 300;
 const CRITICAL_REMAINING = 150;
 
-function required(name) {
-  if (!process.env[name]) throw new Error(`${name} is required`);
-  return process.env[name];
-}
 
 function sameSastDay(value) {
   if (!value) return false;
@@ -31,20 +27,13 @@ async function writeAlert(contents) {
 }
 
 async function main() {
-  const db = new pg.Pool({ connectionString: required('DATABASE_URL') });
-  try {
-    const usage = await db.query(`
-      SELECT day_limit_remaining, minute_limit_remaining, source, observed_at, next_allowed_at
-      FROM xero_api_usage WHERE id = true
-    `);
-    const sources = await db.query(`
-      SELECT source, COUNT(*)::int AS calls
-      FROM xero_api_usage_log
-      WHERE observed_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Johannesburg') AT TIME ZONE 'Africa/Johannesburg'
-      GROUP BY source ORDER BY calls DESC, source
-    `).catch(() => ({ rows: [] }));
-    const current = usage.rows[0];
-    const remaining = Number(current?.day_limit_remaining);
+  {
+    const status = await hubStatus();
+    const sources = { rows: status.by_source };
+    const current = status.budget ? { day_limit_remaining: status.budget.day_remaining,
+      minute_limit_remaining: status.budget.minute_remaining, observed_at: status.budget.observed_at,
+      next_allowed_at: status.budget.blocked_until, source: 'Xero Hub' } : null;
+    const remaining = current?.day_limit_remaining == null ? NaN : Number(current.day_limit_remaining);
     const fresh = current?.observed_at && sameSastDay(current.observed_at);
     let level = 'OK';
     let message = 'No fresh Xero allowance observation yet today. This monitor did not call Xero to obtain one.';
@@ -66,8 +55,6 @@ async function main() {
       : '- No source history recorded for the current SAST day.';
     await writeAlert(`# Codex Production Alerts\n\nStatus: **${level}**\nChecked: ${timestamp}\n\n${message}\n\n## Latest Xero observation\n\n- Observed: ${current?.observed_at || 'none'}\n- Source: ${current?.source || 'unknown'}\n- Remaining today: ${Number.isFinite(remaining) ? remaining : 'unknown'}\n- Remaining this minute: ${current?.minute_limit_remaining ?? 'unknown'}\n- Retry after: ${current?.next_allowed_at || 'none'}\n\n## Today by source\n\n${sourceSummary}\n\n## Required Codex action\n\nWhen status is WARNING or CRITICAL, do not add, retry, or manually trigger Xero work until the source has been investigated and the allowance is safe.\n`);
     console.log(`Wrote ${ALERT_FILE}: ${level}`);
-  } finally {
-    await db.end();
   }
 }
 

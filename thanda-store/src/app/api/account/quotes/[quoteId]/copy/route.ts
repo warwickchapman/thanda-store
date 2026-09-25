@@ -107,7 +107,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const quoteStatus = await customerQuoteStatus();
     const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({ userId: user.id, contactId: user.xeroContactId, sourceQuoteId: quoteId, date, quoteStatus, lineItems })).digest('hex');
     const response = await xeroAccountingFetch('/Quotes', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey, 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId },
       body: JSON.stringify({ Quotes: [{ Contact: { ContactID: user.xeroContactId }, Date: date, Status: quoteStatus, LineAmountTypes: 'Exclusive', Reference: `Reorder from ${source.QuoteNumber || 'quote'}`, LineItems: lineItems }] }),
     });
     const payload = await response.json().catch(() => ({}));

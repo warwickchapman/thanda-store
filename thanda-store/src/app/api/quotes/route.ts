@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
+        'Idempotency-Key': idempotencyKey, 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId,
       },
       body: JSON.stringify({ Quotes: [{
         Contact: { ContactID: user.xeroContactId },

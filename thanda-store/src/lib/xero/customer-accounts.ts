@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { assertHubSnapshot } from '@/lib/xero/hub.mjs';
 import pool from '@/lib/db';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import type { PortalUser } from '@/lib/auth/server';
@@ -9,16 +11,7 @@ import { xeroAccountingFetch } from '@/lib/xero/oauth';
 const CACHE_TTL_MS = 6 * 60 * 60_000;
 const FORCED_REFRESH_COOLDOWN_MS = 30 * 60_000;
 const PAGE_SIZE = 100;
-const MAX_PAGES = 10;
-const MIN_XERO_REQUEST_GAP_MS = 1_100;
-const MIN_DAY_ALLOWANCE = 100;
-
-let lastXeroRequestAt = 0;
-
-function wait(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
+const MAX_PAGES = 1000;
 export type CustomerDocument = {
   type: 'quote' | 'invoice' | 'credit_note';
   id: string;
@@ -73,52 +66,10 @@ function documentFromXero(type: CustomerDocument['type'], raw: Record<string, un
   };
 }
 
-async function recordUsage(response: Response, source: string) {
-  const value = (name: string) => {
-    const parsed = Number(response.headers.get(name));
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-  await pool.query(`
-    INSERT INTO xero_api_usage (id, day_limit_remaining, minute_limit_remaining, app_minute_limit_remaining, rate_limit_problem, retry_after_seconds, next_allowed_at, source, observed_at)
-    VALUES (true, $1, $2, $3, $4, $5, $6, $7, NOW())
-    ON CONFLICT (id) DO UPDATE SET
-      day_limit_remaining = EXCLUDED.day_limit_remaining,
-      minute_limit_remaining = EXCLUDED.minute_limit_remaining,
-      app_minute_limit_remaining = EXCLUDED.app_minute_limit_remaining,
-      rate_limit_problem = EXCLUDED.rate_limit_problem,
-      retry_after_seconds = EXCLUDED.retry_after_seconds,
-      next_allowed_at = EXCLUDED.next_allowed_at,
-      source = EXCLUDED.source,
-      observed_at = NOW()
-  `, [
-    value('x-daylimit-remaining'), value('x-minlimit-remaining'), value('x-appminlimit-remaining'),
-    response.headers.get('x-rate-limit-problem'), value('retry-after'),
-    response.headers.get('x-rate-limit-problem') === 'day' && value('retry-after')
-      ? new Date(Date.now() + Number(value('retry-after')) * 1000).toISOString() : null,
-    source,
-  ]);
-}
-
-async function assertXeroReadAllowance() {
-  const usage = await pool.query('SELECT day_limit_remaining, next_allowed_at FROM xero_api_usage WHERE id = true');
-  const currentUsage = usage.rows[0];
-  if (currentUsage?.next_allowed_at && new Date(currentUsage.next_allowed_at).getTime() > Date.now()) {
-    throw new Error('Xero is temporarily rate limited. Please try again shortly.');
-  }
-  if (typeof currentUsage?.day_limit_remaining === 'number' && currentUsage.day_limit_remaining <= MIN_DAY_ALLOWANCE) {
-    throw new Error('Xero API allowance is being reserved for operational updates. Please try again later.');
-  }
-}
-
 async function xeroJson(pathname: string, source: string, ifModifiedSince: string | null = null) {
-  await assertXeroReadAllowance();
-  const waitFor = Math.max(0, lastXeroRequestAt + MIN_XERO_REQUEST_GAP_MS - Date.now());
-  if (waitFor) await wait(waitFor);
   const response = await xeroAccountingFetch(pathname, {
     headers: ifModifiedSince ? { 'If-Modified-Since': ifModifiedSince } : undefined,
   });
-  lastXeroRequestAt = Date.now();
-  await recordUsage(response, source);
   if (response.status === 304) return {};
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Xero document request failed: ${response.status}`);
@@ -127,14 +78,16 @@ async function xeroJson(pathname: string, source: string, ifModifiedSince: strin
 
 async function fetchPages(pathname: string, key: string, source: string, ifModifiedSince: string | null = null) {
   const records: Record<string, unknown>[] = [];
+  let snapshot: string | undefined;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const separator = pathname.includes('?') ? '&' : '?';
     const payload = await xeroJson(`${pathname}${separator}page=${page}&pageSize=${PAGE_SIZE}`, source, ifModifiedSince);
+    snapshot = assertHubSnapshot(payload, snapshot);
     const pageRecords = Array.isArray(payload[key]) ? payload[key] as Record<string, unknown>[] : [];
     records.push(...pageRecords);
-    if (pageRecords.length < PAGE_SIZE) break;
+    if (pageRecords.length < PAGE_SIZE) return records;
   }
-  return records;
+  throw new Error('The complete document collection could not be read; previous data is retained.');
 }
 
 async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>, replaceSnapshot: boolean) {
@@ -208,7 +161,7 @@ export async function refreshCustomerDocuments(user: PortalUser) {
     const entryContactId = String((entry.raw.Contact as { ContactID?: unknown } | undefined)?.ContactID || '');
     return entryContactId === contactId;
   }).filter((entry): entry is { raw: Record<string, unknown>; document: CustomerDocument } => Boolean(entry.document));
-  await writeDocuments(contactId, documents, replaceSnapshot);
+  await writeDocuments(contactId, documents, true);
   return documents.length;
 }
 
@@ -314,14 +267,13 @@ export async function updateQuoteAcceptance(user: PortalUser, quoteId: string, a
   if (accept && status !== 'SENT') throw new Error('Only sent quotes can be accepted.');
   if (!accept && status !== 'ACCEPTED') throw new Error('Only accepted quotes can be marked unaccepted.');
   const response = await xeroAccountingFetch(`/Quotes/${encodeURIComponent(quoteId)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId, 'Idempotency-Key': crypto.createHash('sha256').update(JSON.stringify({ quoteId, accept, actor: user.id, revision: quote.UpdatedDateUTC })).digest('hex') },
     body: JSON.stringify({
       Contact: { ContactID: user.xeroContactId },
       Date: dateValue(quote.DateString || quote.Date),
       Status: accept ? 'ACCEPTED' : 'SENT',
     }),
   });
-  await recordUsage(response, 'customer-quote-action');
   if (!response.ok) throw new Error('Xero could not update this quote.');
   await refreshCustomerDocuments(user);
   await auditAccountAction(user, accept ? 'quote_accepted' : 'quote_unaccepted', 'quote', quoteId, { quoteNumber: quote.QuoteNumber || null });
@@ -330,10 +282,8 @@ export async function updateQuoteAcceptance(user: PortalUser, quoteId: string, a
 export async function customerDocumentPdf(user: PortalUser, type: CustomerDocument['type'], id: string) {
   const cached = await customerDocument(user, type, id);
   if (!cached) throw new Error('Document not found for your company.');
-  await assertXeroReadAllowance();
   const path = type === 'quote' ? `/Quotes/${id}/pdf` : type === 'invoice' ? `/Invoices/${id}/pdf` : `/CreditNotes/${id}/pdf`;
-  const response = await xeroAccountingFetch(path, { headers: { Accept: 'application/pdf' } });
-  await recordUsage(response, 'customer-document-pdf');
+  const response = await xeroAccountingFetch(path, { headers: { Accept: 'application/pdf', 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId || '' } });
   if (!response.ok) {
     console.error('Xero customer document PDF request failed', {
       type,

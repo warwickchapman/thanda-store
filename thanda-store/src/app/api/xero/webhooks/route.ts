@@ -41,6 +41,17 @@ export async function POST(request: Request) {
     return new NextResponse(null, { status: 401 });
   }
 
+  const hubUrl = process.env.XERO_HUB_URL;
+  if (!hubUrl) return new NextResponse(null, { status: 503 });
+  try {
+    const forwarded = await fetch(`${hubUrl.replace(/\/$/, '')}/webhooks/xero/thanda`, {
+      method: 'POST', body: rawBody,
+      headers: { 'Content-Type': 'application/json', 'x-xero-signature': request.headers.get('x-xero-signature') || '' },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!forwarded.ok) return new NextResponse(null, { status: 503 });
+  } catch { return new NextResponse(null, { status: 503 }); }
+
   let body: { events?: XeroWebhookEvent[] };
   try {
     body = JSON.parse(rawBody.toString('utf8')) as { events?: XeroWebhookEvent[] };

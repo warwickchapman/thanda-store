@@ -1,82 +1,27 @@
 import { NextResponse } from 'next/server';
-import fs from 'node:fs/promises';
 import { currentUser } from '@/lib/auth/server';
-import pool from '@/lib/db';
-import { XERO_SCOPES, xeroConfig } from '@/lib/xero/oauth';
-
+import { hubStatus } from '@/lib/xero/hub.mjs';
+import { XERO_SCOPES } from '@/lib/xero/oauth';
 export const dynamic = 'force-dynamic';
-
-function xeroStatusResponse(body: Record<string, unknown>, init?: ResponseInit) {
-  return NextResponse.json(body, {
-    ...init,
-    headers: {
-      ...init?.headers,
-      'Cache-Control': 'no-store',
-    },
-  });
-}
-
 export async function GET() {
   const user = await currentUser();
-  if (!user || user.role !== 'admin') {
-    return xeroStatusResponse({ error: 'Admin access required' }, { status: 403 });
-  }
-
+  if (!user || user.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   try {
-    const config = xeroConfig();
-    const raw = await fs.readFile(config.tokenFile, 'utf8');
-    const token = JSON.parse(raw);
-    const grantedScopes = String(token.scope || '').split(/\s+/).filter(Boolean);
-    const requiredScopes = XERO_SCOPES.split(/\s+/).filter(Boolean);
-    const missingScopes = requiredScopes.filter((scope) => !grantedScopes.includes(scope));
-    const usageResult = await pool.query(`
-      SELECT day_limit_remaining, minute_limit_remaining, rate_limit_problem,
-             retry_after_seconds, next_allowed_at, source, observed_at
-      FROM xero_api_usage WHERE id = true
-    `);
-    const usageHistory = await pool.query(`
-      SELECT source, day_limit_remaining, observed_at
-      FROM xero_api_usage_log
-      WHERE observed_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Johannesburg') AT TIME ZONE 'Africa/Johannesburg'
-      ORDER BY observed_at DESC
-      LIMIT 100
-    `);
-    const usageBySource = await pool.query(`
-      SELECT source, COUNT(*)::int AS calls, MIN(day_limit_remaining) AS lowest_remaining
-      FROM xero_api_usage_log
-      WHERE observed_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Johannesburg') AT TIME ZONE 'Africa/Johannesburg'
-      GROUP BY source
-      ORDER BY calls DESC, source ASC
-    `);
-
-    return xeroStatusResponse({
-      connected: Boolean(token.tenant_id && token.refresh_token),
-      tenantName: token.tenant_name || null,
-      tenantId: token.tenant_id || null,
-      expiresAt: token.expires_at || null,
-      grantedScopes,
-      requiredScopes,
-      missingScopes,
-      reconnectRequired: missingScopes.length > 0,
-      webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY),
-      usage: usageResult.rows[0] || null,
-      usageToday: {
-        callsObserved: usageHistory.rowCount,
-        bySource: usageBySource.rows,
-      },
-    });
+    const status = await hubStatus();
+    const requiredScopes = XERO_SCOPES.split(/\s+/);
+    const grantedScopes = status.scope.split(/\s+/);
+    const missingScopes = requiredScopes.filter(scope => !grantedScopes.includes(scope));
+    return NextResponse.json({
+      connected: status.connected, tenantName: status.tenant_name, tenantId: status.tenant_id,
+      expiresAt: status.expires_at, requiredScopes, grantedScopes, missingScopes,
+      reconnectRequired: !status.connected || missingScopes.length > 0,
+      webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY), streams: status.streams,
+      usage: status.budget ? { day_limit_remaining: status.budget.day_remaining,
+        minute_limit_remaining: status.budget.minute_remaining, next_allowed_at: status.budget.blocked_until,
+        rate_limit_problem: status.budget.limit_problem, observed_at: status.budget.observed_at, source: 'Xero Hub' } : null,
+      usageToday: { callsObserved: status.by_source.reduce((sum, row) => sum + row.calls, 0), bySource: status.by_source },
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
-    return xeroStatusResponse({
-      connected: false,
-      tenantName: null,
-      tenantId: null,
-      expiresAt: null,
-      grantedScopes: [],
-      requiredScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
-      missingScopes: XERO_SCOPES.split(/\s+/).filter(Boolean),
-      reconnectRequired: true,
-      webhookConfigured: Boolean(process.env.XERO_WEBHOOK_KEY),
-      usage: null,
-    });
+    return NextResponse.json({ error: 'Xero Hub is unavailable; existing portal data is retained.' }, { status: 503 });
   }
 }

@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Moved all Xero API requests and OAuth credentials into the shared Xero Hub on app-01. Existing stock, quote reservations, customer documents and purchase-history jobs now project stored Hub evidence without consuming Xero calls.
+- Routed deliberate quote and PDF actions through authenticated Hub commands with customer ownership and idempotency checks. Signed webhooks are durably forwarded; allowance monitoring now reports the shared connector.
+- Retained current product rules and schedules, and added completeness/revision checks so partial or changing collections cannot replace complete local snapshots. See `docs/xero-hub.md` for deployment and recovery.
+
 - User managers can now send an active portal user a dedicated password-reset email directly from the User Admin directory.
 
 - Fixed the **Forgot password?** link being redirected back to sign-in before the reset form could load.

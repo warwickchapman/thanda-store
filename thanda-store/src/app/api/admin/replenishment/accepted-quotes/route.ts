@@ -11,39 +11,6 @@ import {
 export const maxDuration = 60;
 const MANUAL_COOLDOWN_MS = 60_000;
 
-function headerNumber(headers: Headers, name: string) {
-  const value = Number(headers.get(name));
-  return Number.isFinite(value) ? value : null;
-}
-
-async function recordUsage(response: Response) {
-  const retryAfter = headerNumber(response.headers, "retry-after");
-  const problem = response.headers.get("x-rate-limit-problem");
-  await pool.query(`
-    INSERT INTO xero_api_usage (id, day_limit_remaining, minute_limit_remaining,
-      app_minute_limit_remaining, rate_limit_problem, retry_after_seconds,
-      next_allowed_at, source, observed_at)
-    VALUES (true,$1,$2,$3,$4,$5,$6,'accepted-quotes-manual',NOW())
-    ON CONFLICT (id) DO UPDATE SET
-      day_limit_remaining=EXCLUDED.day_limit_remaining,
-      minute_limit_remaining=EXCLUDED.minute_limit_remaining,
-      app_minute_limit_remaining=EXCLUDED.app_minute_limit_remaining,
-      rate_limit_problem=EXCLUDED.rate_limit_problem,
-      retry_after_seconds=EXCLUDED.retry_after_seconds,
-      next_allowed_at=EXCLUDED.next_allowed_at,
-      source=EXCLUDED.source, observed_at=EXCLUDED.observed_at
-  `, [
-    headerNumber(response.headers, "x-daylimit-remaining"),
-    headerNumber(response.headers, "x-minlimit-remaining"),
-    headerNumber(response.headers, "x-appminlimit-remaining"),
-    problem,
-    retryAfter,
-    problem === "day" && retryAfter
-      ? new Date(Date.now() + retryAfter * 1000).toISOString()
-      : null,
-  ]);
-}
-
 export async function POST() {
   const user = await currentUser();
   if (!user || user.role !== "admin")
@@ -80,7 +47,6 @@ export async function POST() {
         order: "UpdatedDateUTC DESC",
       });
       const response = await xeroAccountingFetch(`/Quotes?${query.toString()}`);
-      await recordUsage(response);
       const payload = await response.json();
       if (!response.ok)
         throw new Error(`Xero Quotes check failed (HTTP ${response.status}).`);
