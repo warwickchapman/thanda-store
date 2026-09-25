@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { deriveCatalogueAttributes } from '../src/lib/catalogue-filters.mjs';
 
 const { Pool } = pg;
 
@@ -61,6 +62,16 @@ export async function ensureProductSchema(client) {
 }
 
 export async function upsertProduct(client, product) {
+  // Keep cached extended specifications when a lightweight supplier sync runs.
+  // This local read adds no supplier or Xero requests.
+  const existing = await client.query('SELECT details FROM products WHERE supplier = $1 AND sku = $2', [product.supplier, product.sku]);
+  const details = { ...existing.rows[0]?.details, ...product.details };
+  const derived = deriveCatalogueAttributes({ ...product, details });
+  const incomingDetails = {
+    ...product.details,
+    catalogueAttributes: derived.attributes,
+    catalogueAttributeSources: derived.sources,
+  };
   await client.query(
     `
       INSERT INTO products (
@@ -87,7 +98,7 @@ export async function upsertProduct(client, product) {
       product.image_url,
       product.category,
       product.stock_on_hand,
-      JSON.stringify(product.details),
+      JSON.stringify(incomingDetails),
     ],
   );
 }

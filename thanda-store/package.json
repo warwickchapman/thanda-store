@@ -25,7 +25,9 @@
     "sync:xero-webhooks": "node scripts/process-xero-webhook-events.mjs",
     "monitor:xero-allowance": "node scripts/monitor-xero-allowance.mjs",
     "images:thumbnails": "node scripts/generate-product-thumbnails.mjs",
-    "sync:all": "npm run sync:renogy && npm run sync:victron"
+    "sync:all": "npm run sync:renogy && npm run sync:victron",
+    "test:catalogue-filters": "node --test test/catalogue-filters.test.mjs",
+    "backfill:catalogue-attributes": "node scripts/backfill-catalogue-attributes.mjs"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pool from '@/lib/db';
+import { deriveCatalogueAttributes } from '@/lib/catalogue-filters.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -20,9 +21,10 @@ export type CatalogueProduct = {
   recommended_retail_ex_vat: number | null;
   your_price_ex_vat: number | null;
   b2b_discount_percent: number;
+  catalogue_attributes: Record<string, string[]>;
 };
 
-type CatalogueRow = Omit<CatalogueProduct, 'thumbnail_url' | 'recommended_retail_ex_vat' | 'your_price_ex_vat' | 'b2b_discount_percent'>;
+type CatalogueRow = Omit<CatalogueProduct, 'thumbnail_url' | 'recommended_retail_ex_vat' | 'your_price_ex_vat' | 'b2b_discount_percent' | 'catalogue_attributes'>;
 
 type ImageFallback = {
   predecessorSku: string;
@@ -91,6 +93,10 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const useFallback = !hasOwnImage && imageFallback !== null;
   return {
     ...row,
+    // Existing rows work immediately, without a supplier refresh. Sync/backfill
+    // persists these same attributes; only customer-facing values are exposed.
+    catalogue_attributes: (row.details?.catalogueAttributes as Record<string, string[]> | undefined)
+      ?? deriveCatalogueAttributes(row).attributes,
     image_url: useFallback ? imageFallback.imageUrl : ownImageUrl,
     details: displayDetails(row.details || {}, row.price, useFallback ? imageFallback.predecessorSku : null),
     thumbnail_url: ownThumbnailUrl || (useFallback ? imageFallback.thumbnailUrl : ''),

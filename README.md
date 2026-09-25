@@ -126,6 +126,30 @@ Renogy production authentication uses the cached bearer token in `RENOGY_TOKEN_C
 `PORTAL_BASE_URL` is the public portal URL used in account setup and password-reset emails. It defaults to `https://store.thanda.solar`.
 `PRODUCT_THUMBNAIL_SIZE`, `PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE`, and `PRODUCT_THUMBNAIL_QUALITY` control generated WebP framing. The defaults are appropriate for the current product cards; change them only when redesigning the image treatment.
 
+## Catalogue categories and filters
+
+The desktop catalogue has a left category sidebar with counts; mobile uses **Categories & filters** to open a keyboard-accessible drawer. The selected category, result count, and removable filter chips stay above the products. **All categories** searches across the selected brand. Changing category clears specification filters; changing brand clears all filters. Search clears the category and specification filters, retaining any selected availability. Counts beside categories are the search matches before specification/availability filters, so an empty filtered result never hides another category.
+
+Category filters cover inverter/charger range, battery voltage, AC voltage and power; solar-charger battery voltage, charge current and maximum PV voltage; cable type and length; battery voltage and capacity; and solar-panel power and rigid/flexible construction. Only attributes present in the current category's data are offered. Multiple values in one filter mean **any of these**; different filters must **all** match. A multi-voltage product appears under each explicitly recorded compatible voltage. Unknown values remain unset and do not match a selected specification. Power keeps watts and VA distinct; no conversion is inferred.
+
+**Thanda stock** reads cached `details.localStockOnHand`; **Supplier stock** reads `stock_on_hand` (or Hubble's existing manually maintained in-stock statement); **Unavailable** means neither is positive/available. A product stocked in both locations matches both filters. LoRa uses local stock only. With no availability filter selected, all catalogue products are discoverable, including unavailable products; the existing cart eligibility rules remain in force. Home favourites retain their existing Show/Hide unavailable control.
+
+Supplier syncs persist `details.catalogueAttributes` and `details.catalogueAttributeSources`. Cached `technicalData` with exact supported specification labels and unit-bearing values takes precedence over conservative product-name parsing. Both a label-to-value object and entries with `name`/`label` and `value` are supported; unfamiliar supplier formats remain unparsed. Lightweight syncs retain previously cached extended specifications. Renogy's currently stored product names provide the battery/panel fallbacks; the sync does not fetch extra product specifications. Attribute values are exposed as `catalogue_attributes` in the existing protected catalogue response; raw source metadata stays server-side.
+
+Reviewed name patterns include explicit voltage/capacity/power/length units, MultiPlus/Quattro model battery voltage and VA ratings, and SmartSolar/BlueSolar MPPT PV-voltage/current pairs. MPPT battery compatibility is **never** inferred from the model pair: it requires explicit labelled compatibility or a supplier specification. Accessories and kits do not inherit the host product's ratings. Manufacturer references: [MultiPlus-II specifications](https://www.victronenergy.com/media/pg/MultiPlus-II_230V/en/technical-specifications-mp-ii-230v.html) and [SmartSolar model ratings](https://www.victronenergy.com/media/pg/Manual_SmartSolar_MPPT_100-30__100-50/en/introduction.html). Parser changes need representative positive and ambiguous/negative fixtures in `test/catalogue-filters.test.mjs`.
+
+Existing records use the same local derivation until stored attributes exist. To persist attributes without a supplier sync, run from `thanda-store/` with the normal database environment:
+
+```bash
+npm run backfill:catalogue-attributes             # dry run
+npm run backfill:catalogue-attributes -- --write # persist local attributes
+npm run test:catalogue-filters
+```
+
+The backfill scans 250 records per batch, is restartable, and changes only attribute/provenance JSON. Concurrently changed records are skipped and can be picked up on the next run. It does not change stock, pricing or supplier observation timestamps. Catalogue discovery works on each existing saleable SKU row; it does not aggregate successor-family stock or copy predecessor specifications. The existing `victron_sku_successions` image fallback and fulfilment/planning family resolution remain authoritative in their respective workflows.
+
+**API budget:** filtering, drawer/category changes and the backfill make **zero supplier or Xero calls per action/run/day**. Extraction reuses each scheduled sync's existing responses and one local PostgreSQL metadata read per upsert; provider endpoints, schedules, quotas, reserves, timeouts, retry/429 handling and stop thresholds are unchanged. Existing extended specifications are reused without triggering the extended endpoint. Attributes are replaced when the normal catalogue sync updates a product, or by the local backfill after a parser change. There is no external cold-cache fill, customer-triggered refresh, or new polling loop.
+
 ## Pricing rules
 
 The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That value must never be displayed as the buyer price.

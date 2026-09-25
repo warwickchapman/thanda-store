@@ -8,6 +8,10 @@ All notable production-facing changes are recorded here. This project does not y
 - Routed deliberate quote and PDF actions through authenticated Hub commands with customer ownership and idempotency checks. Signed webhooks are durably forwarded; allowance monitoring now reports the shared connector.
 - Retained current product rules and schedules, and added completeness/revision checks so partial or changing collections cannot replace complete local snapshots. See `docs/xero-hub.md` for deployment and recovery.
 
+- Replaced horizontally scrolling product categories with a desktop sidebar and a mobile **Categories & filters** drawer. Category counts, the current category, removable filter chips, and clear empty-result guidance make narrowing the catalogue easier.
+- Added category-specific specifications and separate **Thanda stock**, **Supplier stock**, and **Unavailable** filters. Multi-voltage products match each recorded voltage; unknown specifications remain unset. Unavailable catalogue items remain discoverable without hiding their categories.
+- Supplier catalogue syncs now save structured filter attributes and their source. Existing products work immediately from cached data, with a dry-run-first local backfill command to persist attributes. Filtering and backfill add no supplier or Xero calls.
+
 - User managers can now send an active portal user a dedicated password-reset email directly from the User Admin directory.
 
 - Fixed the **Forgot password?** link being redirected back to sign-in before the reset form could load.

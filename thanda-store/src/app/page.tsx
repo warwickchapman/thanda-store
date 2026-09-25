@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 import { CartDrawer } from '@/components/cart-drawer';
+import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
+import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters } from '@/lib/catalogue-filters.mjs';
 
 // Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
 // However, since we want to keep it simple, I'll move the data fetching to an API route and fetch it here.
@@ -21,6 +23,7 @@ interface Product {
   image_url: string;
   thumbnail_url: string;
   stock_on_hand: number;
+  catalogue_attributes: Record<string, string[]>;
   details: Record<string, string | number | boolean | string[] | null>;
 }
 
@@ -148,6 +151,8 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [activeSupplier, setActiveSupplier] = useState('home');
   const [activeCategory, setActiveCategory] = useState('');
+  const [attributeFilters, setAttributeFilters] = useState<SelectedFilters>({});
+  const [availability, setAvailability] = useState<string[]>([]);
   const [homeTab, setHomeTab] = useState<'mine' | 'thanda'>('mine');
   const [showUnavailable, setShowUnavailable] = useState(false);
   const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[] }>({ mine: [], thanda: [] });
@@ -211,10 +216,12 @@ export default function Home() {
       const isEditable = target?.tagName === 'INPUT'
         || target?.tagName === 'TEXTAREA'
         || target?.isContentEditable;
-      if (isEditable || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isEditable || target?.closest('button, select, a, dialog') || document.querySelector('dialog[open]') || event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === 'Escape') {
         setQuery('');
+        setActiveCategory('');
+        setAttributeFilters({});
         searchInputRef.current?.blur();
         return;
       }
@@ -223,6 +230,8 @@ export default function Home() {
         event.preventDefault();
         searchInputRef.current?.focus();
         setQuery((current) => current.slice(0, -1));
+        setActiveCategory('');
+        setAttributeFilters({});
         return;
       }
 
@@ -230,6 +239,8 @@ export default function Home() {
       event.preventDefault();
       searchInputRef.current?.focus();
       setQuery((current) => `${current}${event.key}`);
+      setActiveCategory('');
+      setAttributeFilters({});
     };
 
     window.addEventListener('keydown', handleGlobalSearch);
@@ -242,9 +253,7 @@ export default function Home() {
   };
   const catalogueProducts = products.filter(isVisibleProduct);
   const unavailableProductCount = catalogueProducts.filter(isUnavailable).length;
-  const visibleProducts = catalogueProducts.filter(
-    (product) => showUnavailable || !isUnavailable(product),
-  );
+  const visibleProducts = catalogueProducts;
   const filteredProducts = visibleProducts.filter((product) => {
     const search = query.trim().toLowerCase();
     if (!search) return true;
@@ -282,11 +291,25 @@ export default function Home() {
     category,
     count: groupedProducts[category]?.length || 0,
   }));
-  const visibleCategories = categoryTabs.filter((tab) => tab.count > 0);
-  const selectedCategory = activeCategory && groupedProducts[activeCategory]
-    ? activeCategory
-    : visibleCategories[0]?.category || '';
-  const selectedProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : [];
+  const selectedCategory = activeCategory;
+  const categoryProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : productsInSupplier;
+  const selectedProducts = categoryProducts.filter((product) => matchesCatalogueFilters(product, attributeFilters, availability));
+  const facets = catalogueFacets(categoryProducts, attributeFilters, availability);
+  const stockOptions = availabilityOptions.map((option) => ({
+    ...option,
+    count: categoryProducts.filter((product) => matchesCatalogueFilters(product, attributeFilters, [option.key])).length,
+  }));
+  const chooseCategory = (category: string) => {
+    setActiveCategory(category);
+    setAttributeFilters({});
+  };
+  const activeFilterChips = [
+    ...availability.map((key) => ({ key: `stock-${key}`, label: availabilityOptions.find((option) => option.key === key)?.label || key,
+      remove: () => setAvailability(availability.filter((value) => value !== key)) })),
+    ...Object.entries(attributeFilters).flatMap(([key, values]) => values.map((value) => ({ key: `${key}-${value}`,
+      label: `${filterDefinitions.find((definition) => definition.key === key)?.label || key}: ${value}`,
+      remove: () => setAttributeFilters({ ...attributeFilters, [key]: values.filter((item) => item !== value) }) }))),
+  ];
   const selectedHomeProducts = (homeTab === 'mine' ? favourites.mine : favourites.thanda)
     .filter(isVisibleProduct)
     .filter((product) => showUnavailable || !isUnavailable(product));
@@ -316,7 +339,7 @@ export default function Home() {
                 type="text" 
                 placeholder="Search SKU or name..." 
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => { setQuery(event.target.value); setActiveCategory(''); setAttributeFilters({}); }}
                 className="h-9 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
               />
             </div>
@@ -383,7 +406,7 @@ export default function Home() {
           <div className="space-y-6">
             <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
               <div className="flex min-w-max gap-2 border-b border-zinc-200">
-                <button type="button" onClick={() => { setActiveSupplier('home'); setActiveCategory(''); }} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'home' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
+                <button type="button" onClick={() => { setActiveSupplier('home'); setActiveCategory(''); setAttributeFilters({}); setAvailability([]); }} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'home' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
                   <span>Home</span>
                 </button>
                 {visibleSuppliers.map(({ supplier, count }) => {
@@ -395,6 +418,8 @@ export default function Home() {
                       onClick={() => {
                         setActiveSupplier(supplier);
                         setActiveCategory('');
+                        setAttributeFilters({});
+                        setAvailability([]);
                       }}
                       className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
                         isActive
@@ -421,41 +446,26 @@ export default function Home() {
                   <button type="button" onClick={() => setHomeTab('thanda')} className={`border-b-2 px-3 py-3 text-sm font-semibold ${homeTab === 'thanda' ? 'border-amber-600 text-zinc-950' : 'border-transparent text-zinc-500'}`}>Popular</button>
                 </div>
               </div>
-            ) : <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-              <div className="flex min-w-max gap-2 border-b border-zinc-200">
-                {visibleCategories.map(({ category, count }) => {
-                  const isActive = category === selectedCategory;
-                  return (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => setActiveCategory(category)}
-                      className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
-                        isActive
-                          ? 'border-amber-600 text-zinc-950'
-                          : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'
-                      }`}
-                    >
-                      <span>{displayLabel(category)}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        isActive ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'
-                      }`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>}
+            ) : null}
 
+            <div className={selectedSupplier === 'home' ? '' : 'grid items-start gap-5 lg:grid-cols-[230px_minmax(0,1fr)]'}>
+            {selectedSupplier !== 'home' && <CatalogueFilters
+              key={selectedSupplier}
+              categories={[{ category: '', label: 'All categories', count: productsInSupplier.length },
+                ...categoryTabs.map((tab) => ({ ...tab, label: displayLabel(tab.category) })).sort((a, b) => a.label.localeCompare(b.label))]}
+              category={selectedCategory} onCategory={chooseCategory}
+              facets={facets} selected={attributeFilters} onSelected={setAttributeFilters}
+              availabilityOptions={stockOptions} availability={availability} onAvailability={setAvailability}
+              resultCount={selectedProducts.length}
+            />}
             <section className="space-y-4">
               <div className="flex items-end justify-between gap-3 border-b border-zinc-200 pb-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
-                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : displayLabel(selectedCategory)}</h2>
+                  <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : (selectedCategory ? displayLabel(selectedCategory) : 'All categories')}</h2>
                 </div>
                 <div className="flex items-center gap-3">
-                  {unavailableProductCount > 0 && (
+                  {selectedSupplier === 'home' && unavailableProductCount > 0 && (
                     <button
                       type="button"
                       onClick={() => setShowUnavailable((current) => !current)}
@@ -464,12 +474,24 @@ export default function Home() {
                       {showUnavailable ? "Hide" : "Show"} unavailable ({unavailableProductCount})
                     </button>
                   )}
-                  <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+                  <span aria-live="polite" className="text-xs font-medium uppercase tracking-widest text-zinc-400">
                     {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
                   </span>
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {selectedSupplier !== 'home' && activeFilterChips.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2" aria-label="Applied filters">
+                  {activeFilterChips.map((chip) => <button key={chip.key} type="button" onClick={chip.remove}
+                    aria-label={`Remove ${chip.label} filter`} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900">
+                    {chip.label} <span aria-hidden="true">×</span>
+                  </button>)}
+                  <button type="button" onClick={() => { setAttributeFilters({}); setAvailability([]); }} className="px-2 text-xs font-semibold text-zinc-600 underline">Clear filters</button>
+                </div>
+              )}
+              {selectedSupplier !== 'home' && selectedProducts.length === 0 && (
+                <p role="status" className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600">No products match these filters. Remove a filter or choose another category.</p>
+              )}
+              <div className={`grid grid-cols-1 gap-5 sm:grid-cols-2 ${selectedSupplier === 'home' ? 'lg:grid-cols-3 xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
                 {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
@@ -549,6 +571,7 @@ export default function Home() {
                 </p>
               )}
             </section>
+            </div>
           </div>
         )}
       </main>
