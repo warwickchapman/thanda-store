@@ -1,13 +1,17 @@
+import { classifyCatalogueProduct, reviewedCatalogueOverride } from './catalogue-classification.mjs';
+
 // Shared by supplier syncs, local backfill, catalogue presentation and the browser.
 export const filterDefinitions = [
+  { key: 'productType', label: 'Product type' },
   { key: 'range', label: 'Range' },
   { key: 'batteryVoltage', label: 'Battery voltage' },
   { key: 'acVoltage', label: 'AC voltage' },
   { key: 'power', label: 'Power' },
   { key: 'chargeCurrent', label: 'Charge current' },
   { key: 'maxPvVoltage', label: 'Maximum PV voltage' },
-  { key: 'cableType', label: 'Cable type' },
-  { key: 'length', label: 'Length' },
+  { key: 'cableType', label: 'Cable family' },
+  { key: 'cableLength', label: 'Cable length' },
+  { key: 'conductorSize', label: 'Conductor size' },
   { key: 'capacity', label: 'Capacity' },
   { key: 'panelType', label: 'Panel type' },
 ];
@@ -18,20 +22,12 @@ export const availabilityOptions = [
   { key: 'unavailable', label: 'Unavailable' },
 ];
 
-function productKind(category) {
-  const text = String(category || '').replace(/_/g, ' ').toLowerCase();
-  if (/cable/.test(text)) return 'cable';
-  if (/solar.*(charger|controller)|charge controller|mppt/.test(text)) return 'charger';
-  if (/inverter|multi(?:plus)?|quattro/.test(text)) return 'inverter';
-  if (/^(?:lithium |smart |deep cycle |agm |gel )?batter(?:y|ies)$/.test(text)) return 'battery';
-  if (/solar (panel|module)/.test(text)) return 'panel';
-  return '';
-}
-
 const keysByKind = {
   inverter: ['range', 'batteryVoltage', 'acVoltage', 'power', 'maxPvVoltage'],
   charger: ['batteryVoltage', 'chargeCurrent', 'maxPvVoltage'],
-  cable: ['cableType', 'length'],
+  cable: ['cableType', 'cableLength', 'conductorSize'],
+  adapter: ['cableType', 'cableLength', 'conductorSize'],
+  connector: ['cableType', 'conductorSize'],
   battery: ['batteryVoltage', 'capacity'],
   panel: ['power', 'panelType'],
 };
@@ -50,14 +46,16 @@ const specificationLabels = {
   'maximum pv voltage': 'maxPvVoltage',
   'maximum dc pv voltage': 'maxPvVoltage',
   'maximum pv open circuit voltage': 'maxPvVoltage',
-  'cable length': 'length',
+  'cable length': 'cableLength',
+  'conductor cross-section': 'conductorSize',
+  'conductor size': 'conductorSize',
   'battery capacity': 'capacity',
   'nominal capacity': 'capacity',
 };
 
 function quantities(text, units) {
   // Require the whole value: never extract 12 V from a 12-48 V range.
-  const match = String(text).trim().match(new RegExp(`^(\\d+(?:\\.\\d+)?(?:\\s*[/,]\\s*\\d+(?:\\.\\d+)?)*)\\s*(${units})$`, 'i'));
+  const match = String(text).replace(/(\d),(?=\d)/g, '$1.').trim().match(new RegExp(`^(\\d+(?:\\.\\d+)?(?:\\s*[/,]\\s*\\d+(?:\\.\\d+)?)*)\\s*(${units})$`, 'i'));
   if (!match) return [];
   return match[1].split(/[/,]/).map(Number).filter((n) => n > 0).map((n) => {
     const unit = match[2].toLowerCase().replace('vac', 'v');
@@ -67,9 +65,30 @@ function quantities(text, units) {
   });
 }
 
+// Scalar cable measurements, kept numeric in SI units. Multiple differing
+// lengths, ranges and dimensions are ambiguous and deliberately remain unset.
+export function cableMeasurement(value, kind, exact = false) {
+  const text = String(value ?? '').replace(/(\d),(?=\d)/g, '$1.');
+  const number = '(\\d+(?:\\.\\d+)?)';
+  const units = kind === 'length' ? '(mm|cm|m|metres?|meters?|mtr)' : '(mm²|mm2|sqmm)';
+  const end = kind === 'length' ? '(?![\\w²])' : '(?![\\w])';
+  const expression = exact ? new RegExp(`^\\s*${number}\\s*${units}\\s*$`, 'i')
+    : new RegExp(`(?<![\\w.,–-])${number}\\s*${units}${end}`, 'gi');
+  // Do not reinterpret the tail of 0.3-1.8 m, 1/2 m or panel dimensions.
+  if (kind === 'length' && /\d\s*[-–/x×]\s*\d+(?:\.\d+)?\s*(?:mm|cm|m)\b/i.test(text)) return null;
+  const matches = exact ? [text.match(expression)].filter(Boolean) : [...text.matchAll(expression)];
+  // A 3x2.5sqmm cable records 2.5 mm² conductor area, not three lengths.
+  const areaMatches = kind === 'area' && !exact ? [...text.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)\s*(mm²|mm2|sqmm)(?!\w)/gi)] : matches;
+  const values = [...new Set(areaMatches.map(m => Number((Number(m[1]) * (kind === 'length' ? ({ mm: 0.001, cm: 0.01 }[m[2].toLowerCase()] || 1) : 1)).toFixed(6))).filter(n => n > 0))];
+  return values.length === 1 ? values[0] : null;
+}
+
 export function deriveCatalogueAttributes(product) {
-  const kind = productKind(product.category);
-  const allowed = keysByKind[kind] || [];
+  const classification = classifyCatalogueProduct(product);
+  const { kind } = classification;
+  const allowed = ['productType', ...(keysByKind[kind] || [])];
+  /** @type {Record<string, number>} */
+  const measurements = {};
   /** @type {Record<string, string[]>} */
   const attributes = {};
   const sources = {};
@@ -80,8 +99,11 @@ export function deriveCatalogueAttributes(product) {
       sources[key] = source;
     }
   };
-  const unitValues = (units) => [...name.matchAll(new RegExp(`(?<![\\w.\\-/])([0-9]+(?:\\.[0-9]+)?(?:\\s*[/,]\\s*[0-9]+(?:\\.[0-9]+)?)*)\\s*(${units})\\b`, 'gi'))]
+  const unitName = name.replace(/(\d),(?=\d)/g, '$1.').replace(/\bwatts?\b/gi, 'W').replace(/([a-z])\/(?=\d)/gi, '$1 ');
+  const unitValues = (units) => [...unitName.matchAll(new RegExp(`(?<![\\w.\\-/])([0-9]+(?:\\.[0-9]+)?(?:\\s*[/,]\\s*[0-9]+(?:\\.[0-9]+)?)*)\\s*(${units})\\b`, 'gi'))]
     .flatMap((m) => quantities(`${m[1]} ${m[2]}`, units));
+
+  if (kind !== 'other' || classification.typeLabel !== 'Other') put('productType', [classification.typeLabel], classification.source);
 
   // Avoid attributing the specifications of a host device to its accessories.
   const accessory = /\b(kit|cover|case|replacement|spare|bracket|remote|display|dongle)\b/i.test(name);
@@ -136,19 +158,43 @@ export function deriveCatalogueAttributes(product) {
       if (type) put('panelType', [type.toLowerCase() === 'rigid' ? 'Rigid' : 'Flexible']);
     }
   }
-  if (kind === 'cable') {
-    put('length', unitValues('cm|m'));
-    const type = name.match(/\b(VE\.Direct|VE\.Can|VE\.Bus|RJ45|MC4|USB|HDMI)\b/i)?.[1];
-    if (type) put('cableType', [({ 've.direct': 'VE.Direct', 've.can': 'VE.Can', 've.bus': 'VE.Bus' })[type.toLowerCase()] || type.toUpperCase()]);
+  const setMeasurement = (key, value, source) => {
+    if (!allowed.includes(key)) return;
+    const field = key === 'cableLength' ? 'cableLengthM' : 'conductorSizeMm2';
+    delete measurements[field];
+    delete attributes[key];
+    delete sources[key];
+    if (value !== null) {
+      measurements[field] = value;
+      put(key, [`${value} ${key === 'cableLength' ? 'm' : 'mm²'}`], source);
+    }
+  };
+  if (['cable', 'adapter', 'connector'].includes(kind)) {
+    const familyText = `${name} ${product.details?.subcategory || ''}`;
+    const bms = name.match(/VE[.\s-]?Can.*BMS\s*type\s*([AB])\b/i);
+    const protocol = name.match(/\b(VE\.Direct|VE\.Can|VE\.Bus|RJ12|RJ45|USB|HDMI)\b/i)?.[1];
+    const family = bms ? `VE.Can–BMS type ${bms[1].toUpperCase()}`
+      : /shore/i.test(familyText) ? 'Shore power'
+      : /solar|\bMC[34]\b/i.test(familyText) ? 'Solar'
+      : /mains cord/i.test(name) ? 'Mains power'
+      : protocol ? ({ 've.direct': 'VE.Direct', 've.can': 'VE.Can', 've.bus': 'VE.Bus' })[protocol.toLowerCase()] || protocol.toUpperCase()
+      : /chargers?/i.test(product.details?.subcategory || '') ? 'Charger lead' : null;
+    if (family) put('cableType', [family]);
+    setMeasurement('cableLength', cableMeasurement(name, 'length'), 'product name');
+    setMeasurement('conductorSize', cableMeasurement(name, 'area'), 'product name');
   }
 
   const technical = product.details?.technicalData;
   const specs = Array.isArray(technical) ? technical.map((entry) => [entry?.name ?? entry?.label, entry?.value])
     : technical && typeof technical === 'object' ? Object.entries(technical) : [];
-  const units = { batteryVoltage: 'V', acVoltage: 'V', power: 'kVA|VA|kW|W', chargeCurrent: 'A', maxPvVoltage: 'V', length: 'cm|m', capacity: 'Ah|kWh|Wh' };
+  const units = { batteryVoltage: 'V', acVoltage: 'V', power: 'kVA|VA|kW|W', chargeCurrent: 'A', maxPvVoltage: 'V', capacity: 'Ah|kWh|Wh' };
   for (const [label, value] of specs) {
     const key = specificationLabels[String(label).trim().toLowerCase()];
     if (key && allowed.includes(key)) {
+      if (key === 'cableLength' || key === 'conductorSize') {
+        setMeasurement(key, cableMeasurement(value, key === 'cableLength' ? 'length' : 'area', true), `supplier specification: ${label}`);
+        continue;
+      }
       // A supplied but unparseable value must not fall back to a conflicting
       // name-derived rating (for example a voltage range or 'see manual').
       delete attributes[key];
@@ -156,7 +202,13 @@ export function deriveCatalogueAttributes(product) {
       put(key, quantities(value, units[key]), `supplier specification: ${label}`);
     }
   }
-  return { attributes, sources };
+  const override = reviewedCatalogueOverride(product);
+  for (const [field, key] of [['cableLengthM', 'cableLength'], ['conductorSizeMm2', 'conductorSize']]) {
+    if (Object.hasOwn(override, field) && (override[field] === null || (typeof override[field] === 'number' && Number.isFinite(override[field]) && override[field] > 0))) {
+      setMeasurement(key, override[field], `reviewed override: ${override.reason}`);
+    }
+  }
+  return { attributes, sources, classification, measurements };
 }
 
 export function productAvailability(product) {
@@ -179,11 +231,17 @@ export function matchesCatalogueFilters(product, selected = {}, availability = [
 export function catalogueFacets(products, selected = {}, availability = []) {
   return filterDefinitions.flatMap((definition) => {
     const options = [...new Set(products.flatMap((product) => product.catalogue_attributes?.[definition.key] || []))]
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .sort((a, b) => ['cableLength', 'conductorSize'].includes(definition.key)
+        ? parseFloat(a) - parseFloat(b) : a.localeCompare(b, undefined, { numeric: true }))
       .map((value) => ({
         value,
         count: products.filter((product) => matchesCatalogueFilters(product, { ...selected, [definition.key]: [value] }, availability)).length,
       }));
     return options.length ? [{ ...definition, options }] : [];
   });
+}
+
+export function catalogueDerivedDetails(product) {
+  const { attributes, sources, classification, measurements } = deriveCatalogueAttributes(product);
+  return { catalogueAttributes: attributes, catalogueAttributeSources: sources, catalogueClassification: classification, catalogueMeasurements: measurements };
 }

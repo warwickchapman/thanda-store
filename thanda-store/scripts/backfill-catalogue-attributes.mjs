@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { isDeepStrictEqual } from 'node:util';
 import { createPool } from './product-sync-lib.mjs';
-import { deriveCatalogueAttributes } from '../src/lib/catalogue-filters.mjs';
+import { catalogueDerivedDetails } from '../src/lib/catalogue-filters.mjs';
 
 // PostgreSQL only. Bounded, restartable batches; dry-run unless --write is given.
 const write = process.argv.includes('--write');
@@ -14,10 +14,8 @@ try {
     const { rows } = await pool.query('SELECT id, supplier, name, category, details FROM products WHERE id > $1 ORDER BY id LIMIT 250', [after]);
     if (!rows.length) break;
     for (const row of rows) {
-      const { attributes, sources } = deriveCatalogueAttributes(row);
-      const patch = { catalogueAttributes: attributes, catalogueAttributeSources: sources };
-      if (!isDeepStrictEqual(row.details.catalogueAttributes, attributes)
-        || !isDeepStrictEqual(row.details.catalogueAttributeSources, sources)) {
+      const patch = catalogueDerivedDetails(row);
+      if (Object.entries(patch).some(([key, value]) => !isDeepStrictEqual(row.details[key], value))) {
         changed++;
         if (write) {
           // Do not overwrite a concurrent sync or stock update; the next run

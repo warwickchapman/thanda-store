@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pool from '@/lib/db';
-import { deriveCatalogueAttributes } from '@/lib/catalogue-filters.mjs';
+import { catalogueDerivedDetails } from '@/lib/catalogue-filters.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -12,6 +12,7 @@ export type CatalogueProduct = {
   name: string;
   supplier: string;
   category: string;
+  supplier_category: string;
   price: string | number;
   sku: string;
   image_url: string;
@@ -24,7 +25,7 @@ export type CatalogueProduct = {
   catalogue_attributes: Record<string, string[]>;
 };
 
-type CatalogueRow = Omit<CatalogueProduct, 'thumbnail_url' | 'recommended_retail_ex_vat' | 'your_price_ex_vat' | 'b2b_discount_percent' | 'catalogue_attributes'>;
+type CatalogueRow = Omit<CatalogueProduct, 'thumbnail_url' | 'recommended_retail_ex_vat' | 'your_price_ex_vat' | 'b2b_discount_percent' | 'catalogue_attributes' | 'supplier_category'>;
 
 type ImageFallback = {
   predecessorSku: string;
@@ -91,12 +92,16 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const ownImageUrl = row.image_url.trim();
   const hasOwnImage = Boolean(ownThumbnailUrl || ownImageUrl);
   const useFallback = !hasOwnImage && imageFallback !== null;
+  const derived = row.details?.catalogueClassification && row.details?.catalogueMeasurements
+    ? row.details : catalogueDerivedDetails(row);
+  const classification = derived.catalogueClassification as { category: string };
   return {
     ...row,
+    category: classification.category,
+    supplier_category: row.category,
     // Existing rows work immediately, without a supplier refresh. Sync/backfill
     // persists these same attributes; only customer-facing values are exposed.
-    catalogue_attributes: (row.details?.catalogueAttributes as Record<string, string[]> | undefined)
-      ?? deriveCatalogueAttributes(row).attributes,
+    catalogue_attributes: derived.catalogueAttributes as Record<string, string[]>,
     image_url: useFallback ? imageFallback.imageUrl : ownImageUrl,
     details: displayDetails(row.details || {}, row.price, useFallback ? imageFallback.predecessorSku : null),
     thumbnail_url: ownThumbnailUrl || (useFallback ? imageFallback.thumbnailUrl : ''),

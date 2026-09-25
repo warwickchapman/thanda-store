@@ -5,6 +5,7 @@ import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText } from "lucide
 import { useState, useEffect, useRef } from 'react';
 import { CartDrawer } from '@/components/cart-drawer';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
+import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters } from '@/lib/catalogue-filters.mjs';
 
 // Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
@@ -15,6 +16,7 @@ interface Product {
   name: string;
   supplier: string;
   category: string;
+  supplier_category?: string;
   price: string | number;
   recommended_retail_ex_vat: number | null;
   your_price_ex_vat: number | null;
@@ -247,11 +249,7 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleGlobalSearch);
   }, []);
 
-  const isVisibleProduct = (product: Product) => {
-    if (product.supplier.toLowerCase() !== 'renogy') return true;
-    return ['battery', 'batteries', 'solar panel', 'solar panels', 'solar_panel', 'solar_panels'].includes(product.category.trim().toLowerCase());
-  };
-  const catalogueProducts = products.filter(isVisibleProduct);
+  const catalogueProducts = products.filter(isStorefrontProduct);
   const unavailableProductCount = catalogueProducts.filter(isUnavailable).length;
   const visibleProducts = catalogueProducts;
   const filteredProducts = visibleProducts.filter((product) => {
@@ -260,7 +258,8 @@ export default function Home() {
     return product.sku.toLowerCase().includes(search)
       || product.name.toLowerCase().includes(search)
       || product.supplier.toLowerCase().includes(search)
-      || product.category.toLowerCase().includes(search);
+      || product.category.toLowerCase().includes(search)
+      || product.supplier_category?.toLowerCase().includes(search);
   });
   const supplierProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
     const supplier = product.supplier || 'unknown';
@@ -311,7 +310,7 @@ export default function Home() {
       remove: () => setAttributeFilters({ ...attributeFilters, [key]: values.filter((item) => item !== value) }) }))),
   ];
   const selectedHomeProducts = (homeTab === 'mine' ? favourites.mine : favourites.thanda)
-    .filter(isVisibleProduct)
+    .filter(isStorefrontProduct)
     .filter((product) => showUnavailable || !isUnavailable(product));
   const priceLabel = (amount: number | null) => amount === null ? 'POA' : formatCurrency(amount);
 

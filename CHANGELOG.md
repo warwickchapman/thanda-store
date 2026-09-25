@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Separated solar panels from cables using supplier subcategories and the actual item being sold. Cables and electrical adapters from Miscellaneous, monitoring and charger groups now appear together under **Cables & connectors**; identifiable mounts, sensors and other accessories have their own category. Original supplier categories and Renogy range eligibility are preserved.
+- Renamed **Length** to **Cable length**, corrected decimal-comma parsing (`0,3m` is 0.3 m; `1,8 m` is 1.8 m), and stored lengths numerically. Added cable/adapter/connector type, cable family and separate conductor-size filters. Panel dimensions and included equipment leads no longer supply cable filters; actual panels receive their rated-power filters.
+- Added a before/after classification report and persistent, reason-backed product exceptions that survive supplier syncs. Uncertain products remain unguessed. The cleanup uses cached catalogue data with no additional supplier or Xero calls and preserves the 450 V RS filters.
+
 - Added **450 V** to maximum PV voltage filtering for SmartSolar MPPT RS 450/100 and 450/200, Multi RS Solar, and Inverter RS Smart Solar. The non-solar Inverter RS and accessories remain excluded; existing catalogue data is corrected locally without supplier or Xero requests.
 
 - Stock, accepted-quote reservations and customer document records now preserve the Hub's source observation time; reading cached evidence cannot make old source data appear newly observed.
