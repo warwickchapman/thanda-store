@@ -57,24 +57,24 @@ export function CatalogueFilters(props: Props) {
           </button>
         ))}
       </nav>
-      <fieldset className="space-y-2 border-t border-zinc-200 pt-4">
+      <fieldset className="min-w-0 space-y-2 border-t border-zinc-200 pt-4">
         <legend className="pt-4 text-sm font-semibold">Availability</legend>
         {props.availabilityOptions.map(({ key, label, count }) => (
-          <label key={key} className="flex cursor-pointer items-center gap-2 py-1 text-sm text-zinc-700">
+          <label key={key} className="flex cursor-pointer items-center gap-2 py-1 pr-3 text-sm text-zinc-700">
             <input type="checkbox" className="h-4 w-4 accent-amber-600" checked={props.availability.includes(key)}
               onChange={() => props.onAvailability(toggle(props.availability, key))} />
-            <span className="flex-1">{label}</span><span className="text-xs tabular-nums text-zinc-500">{count}</span>
+            <span className="flex-1">{label}</span><span className="min-w-[3ch] shrink-0 text-right text-xs tabular-nums text-zinc-500">{count}</span>
           </label>
         ))}
       </fieldset>
       {props.facets.map(({ key, label, options }) => (
-        <fieldset key={key} className="space-y-2 border-t border-zinc-200 pt-4">
+        <fieldset key={key} className="min-w-0 space-y-2 border-t border-zinc-200 pt-4">
           <legend className="pt-4 text-sm font-semibold">{label}</legend>
           {options.map(({ value, count }) => (
-            <label key={value} className="flex cursor-pointer items-center gap-2 py-1 text-sm text-zinc-700">
+            <label key={value} className="flex cursor-pointer items-center gap-2 py-1 pr-3 text-sm text-zinc-700">
               <input type="checkbox" className="h-4 w-4 accent-amber-600" checked={(props.selected[key] || []).includes(value)}
                 onChange={() => props.onSelected({ ...props.selected, [key]: toggle(props.selected[key] || [], value) })} />
-              <span className="flex-1">{value}</span><span className="text-xs tabular-nums text-zinc-500">{count}</span>
+              <span className="flex-1">{value}</span><span className="min-w-[3ch] shrink-0 text-right text-xs tabular-nums text-zinc-500">{count}</span>
             </label>
           ))}
         </fieldset>

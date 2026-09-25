@@ -5,6 +5,7 @@ All notable production-facing changes are recorded here. This project does not y
 ## Unreleased
 
 - Stock, accepted-quote reservations and customer document records now preserve the Hub's source observation time; reading cached evidence cannot make old source data appear newly observed.
+- Added breathing room between filter counts and the sidebar scrollbar, with consistently aligned count columns in the desktop sidebar and mobile drawer.
 
 - Moved all Xero API requests and OAuth credentials into the shared Xero Hub on app-01. Existing stock, quote reservations, customer documents and purchase-history jobs now project stored Hub evidence without consuming Xero calls.
 - Routed deliberate quote and PDF actions through authenticated Hub commands with customer ownership and idempotency checks. Signed webhooks are durably forwarded; allowance monitoring now reports the shared connector.
