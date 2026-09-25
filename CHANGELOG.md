@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added **450 V** to maximum PV voltage filtering for SmartSolar MPPT RS 450/100 and 450/200, Multi RS Solar, and Inverter RS Smart Solar. The non-solar Inverter RS and accessories remain excluded; existing catalogue data is corrected locally without supplier or Xero requests.
+
 - Stock, accepted-quote reservations and customer document records now preserve the Hub's source observation time; reading cached evidence cannot make old source data appear newly observed.
 - Added breathing room between filter counts and the sidebar scrollbar, with consistently aligned count columns in the desktop sidebar and mobile drawer.
 

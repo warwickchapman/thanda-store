@@ -19,6 +19,37 @@ test('MPPT pair describes PV voltage and current, never assumed battery compatib
   assert.deepEqual(attrs('BlueSolar MPPT 150/35 battery voltage: 12/24/48V', 'Solar chargers').batteryVoltage, ['12 V', '24 V', '48 V']);
 });
 
+test('450 V includes both MPPT RS outputs and solar RS inverters, including the cached predecessor', () => {
+  const rows = [
+    { ...product('SmartSolar MPPT RS 450/100-MC4', 'Solar chargers'), sku: 'SCC145110512' },
+    { ...product('SmartSolar MPPT RS 450/200-MC4', 'Solar chargers'), sku: 'SCC145120512' },
+    { ...product('SmartSolar MPPT RS 450/200-MC4 *If 0, order SCC145120512*', 'Solar chargers'), sku: 'SCC145120510' },
+    { ...product('Multi RS Solar 48/6000/100-450/100', 'Inverter Chargers'), sku: 'PMR482602020' },
+    { ...product('Inverter RS 48/6000 230V Smart Solar', 'Inverters'), sku: 'PIN482601000' },
+    { ...product('Inverter RS 48/6000 230V Smart', 'Inverters'), sku: 'PIN482600000' },
+  ].map(p => ({ ...p, catalogue_attributes: deriveCatalogueAttributes(p).attributes }));
+  assert.deepEqual(rows[0].catalogue_attributes.chargeCurrent, ['100 A']);
+  assert.deepEqual(rows[1].catalogue_attributes.chargeCurrent, ['200 A']);
+  assert.equal(rows[0].catalogue_attributes.batteryVoltage, undefined);
+  assert.deepEqual(rows.filter(p => matchesCatalogueFilters(p, { maxPvVoltage: ['450 V'] })).map(p => p.sku),
+    ['SCC145110512', 'SCC145120512', 'SCC145120510', 'PMR482602020', 'PIN482601000']);
+  assert.deepEqual(catalogueFacets(rows).find(f => f.key === 'maxPvVoltage').options, [{ value: '450 V', count: 5 }]);
+  assert.equal(rows[5].catalogue_attributes.maxPvVoltage, undefined);
+});
+
+test('RS Solar manufacturer fallback excludes accessories and remains subordinate to supplier specifications', () => {
+  assert.deepEqual(attrs('SmartSolar MPPT RS 450/100-Tr', 'Solar chargers').maxPvVoltage, ['450 V']);
+  assert.deepEqual(attrs('Inverter RS Smart Solar 48/6000', 'Inverters').maxPvVoltage, ['450 V']);
+  assert.equal(attrs('Cover for Multi RS Solar 48/6000', 'Inverter Chargers').maxPvVoltage, undefined);
+  assert.equal(attrs('Multi RS Solar 48/6000 replacement display', 'Inverter Chargers').maxPvVoltage, undefined);
+  assert.equal(attrs('SmartSolar MPPT RS 450/100 remote display', 'Solar chargers').maxPvVoltage, undefined);
+  assert.equal(deriveCatalogueAttributes({ ...product('Multi RS Solar 48/6000', 'Inverters'), supplier: 'other' }).attributes.maxPvVoltage, undefined);
+  const derived = deriveCatalogueAttributes(product('Multi RS Solar 48/6000/100-450/100', 'Inverter Chargers', {
+    technicalData: { 'Maximum DC PV voltage': '450 V' },
+  }));
+  assert.equal(derived.sources.maxPvVoltage, 'supplier specification: Maximum DC PV voltage');
+});
+
 test('explicit supplier specifications override name parsing and multi-voltage products match every voltage', () => {
   const derived = deriveCatalogueAttributes(product('SmartSolar MPPT 100/50', 'Solar chargers', {
     technicalData: [{ name: 'Battery voltage', value: '12/24/48 V' }, { label: 'Rated charge current', value: '45 A' }],

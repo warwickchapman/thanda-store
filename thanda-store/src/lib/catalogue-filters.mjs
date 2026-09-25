@@ -29,7 +29,7 @@ function productKind(category) {
 }
 
 const keysByKind = {
-  inverter: ['range', 'batteryVoltage', 'acVoltage', 'power'],
+  inverter: ['range', 'batteryVoltage', 'acVoltage', 'power', 'maxPvVoltage'],
   charger: ['batteryVoltage', 'chargeCurrent', 'maxPvVoltage'],
   cable: ['cableType', 'length'],
   battery: ['batteryVoltage', 'capacity'],
@@ -47,6 +47,8 @@ const specificationLabels = {
   'rated charge current': 'chargeCurrent',
   'maximum charge current': 'chargeCurrent',
   'max pv voltage': 'maxPvVoltage',
+  'maximum pv voltage': 'maxPvVoltage',
+  'maximum dc pv voltage': 'maxPvVoltage',
   'maximum pv open circuit voltage': 'maxPvVoltage',
   'cable length': 'length',
   'battery capacity': 'capacity',
@@ -95,6 +97,17 @@ export function deriveCatalogueAttributes(product) {
         put('batteryVoltage', [`${model[1]} V`]);
         put('power', [`${model[2]} VA`]);
       }
+      // These reviewed 48/6000 solar models have a 450 V maximum PV input.
+      // The plain Inverter RS Smart has no solar input and must not match.
+      // References and the actual supplier naming variants are in README/tests.
+      if (product.supplier === 'victron') {
+        const multiRsSolar = /^Multi RS Solar\s+48\/6000\b/i.test(name);
+        const inverterRsSolar = /^Inverter RS\s+(?:(?:Smart\s+)?Solar\s+48\/6000\b|48\/6000\s+230V\s+Smart Solar\b)/i.test(name);
+        if (multiRsSolar || inverterRsSolar) {
+          const manual = multiRsSolar ? 'Multi_RS_Solar' : 'Inverter_RS_Smart_Solar';
+          put('maxPvVoltage', ['450 V'], `manufacturer specification: https://www.victronenergy.com/media/pg/${manual}/en/technical-specifications.html`);
+        }
+      }
       const volts = unitValues('VAC|V');
       put('acVoltage', volts.filter((v) => /^(120|230|240) V$/.test(v)));
       if (!model) {
@@ -105,7 +118,7 @@ export function deriveCatalogueAttributes(product) {
     if (kind === 'charger') {
       // MPPT PV voltage/current are explicit in these model names. Battery
       // compatibility cannot be inferred from that pair and remains unset.
-      const model = product.supplier === 'victron' && name.match(/\b(?:SmartSolar|BlueSolar)\s+MPPT\s+(\d{2,3})\/(\d{1,3})\b/i);
+      const model = product.supplier === 'victron' && name.match(/\b(?:SmartSolar\s+MPPT(?:\s+RS)?|BlueSolar\s+MPPT)\s+(\d{2,3})\/(\d{1,3})\b/i);
       if (model) {
         put('maxPvVoltage', [`${model[1]} V`]);
         put('chargeCurrent', [`${model[2]} A`]);
