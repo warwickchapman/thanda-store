@@ -139,7 +139,7 @@ export default function AdminUsersPage() {
             <h1 className="text-2xl font-bold">User Admin</h1>
             <p className="text-sm text-zinc-500">Find a portal user, then open their account to manage access and Xero linking.</p>
           </div>
-          <Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link>
+          <div className="flex flex-wrap gap-4"><Link href="/admin/quote-requests" className="text-sm font-semibold text-zinc-700">Quote requests & notifications</Link><Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link></div>
         </div>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}

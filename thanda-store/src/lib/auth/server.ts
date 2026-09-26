@@ -15,6 +15,7 @@ export type PortalUser = {
   email: string;
   role: string;
   canManageUsers: boolean;
+  apiEnabled: boolean;
   organisationId: number;
   organisationName: string;
   xeroContactId: string | null;
@@ -190,6 +191,7 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
         u.email,
         u.role,
         u.can_manage_users,
+        u.api_enabled,
         o.id AS organisation_id,
         o.name AS organisation_name,
         o.xero_contact_id,
@@ -210,8 +212,8 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
   await pool.query('UPDATE portal_sessions SET last_seen_at = NOW() WHERE session_hash = $1', [sha256(token)]);
 
   const discountsResult = await pool.query(
-    'SELECT supplier, discount_percent FROM user_supplier_discounts WHERE user_id = $1',
-    [row.id],
+    'SELECT supplier, discount_percent FROM contact_supplier_discounts WHERE contact_id = $1',
+    [row.xero_contact_id],
   );
   const discounts: Record<string, number> = {};
   for (const discount of discountsResult.rows) {
@@ -223,6 +225,7 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
     email: row.email,
     role: row.role,
     canManageUsers: Boolean(row.can_manage_users),
+    apiEnabled: Boolean(row.api_enabled),
     organisationId: Number(row.organisation_id),
     organisationName: row.organisation_name,
     xeroContactId: row.xero_contact_id,

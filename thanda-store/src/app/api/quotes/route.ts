@@ -1,27 +1,14 @@
 import { NextResponse } from 'next/server';
-import crypto from 'node:crypto';
 import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
-import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
+import { recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
 
 function currentQuoteDate() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function validationMessages(payload: unknown) {
-  if (!payload || typeof payload !== 'object') return [];
-  const elements = Array.isArray((payload as { Elements?: unknown }).Elements)
-    ? (payload as { Elements: Array<{ ValidationErrors?: unknown }> }).Elements
-    : [];
-  return elements.flatMap((element) => Array.isArray(element.ValidationErrors)
-    ? element.ValidationErrors
-      .map((error) => typeof error === 'object' && error && 'Message' in error ? String(error.Message) : '')
-      .filter(Boolean)
-    : []);
 }
 
 export async function POST(request: Request) {
@@ -30,11 +17,15 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     if (!user.xeroContactId) return NextResponse.json({ error: 'Your account must be linked to a Xero customer before a quote can be created.' }, { status: 409 });
     const body = await request.json().catch(() => null);
+    const requestId = body?.requestId;
+    if (!validRequestId(requestId)) return NextResponse.json({ error: 'A valid request ID is required. Reload the store and try again.' }, { status: 400 });
+    const previous = await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch);
+    if (previous) return NextResponse.json(previous);
     const quoteReference = typeof body?.quoteReference === 'string' ? body.quoteReference.trim() : '';
     if (!quoteReference) return NextResponse.json({ error: 'A quote reference is required.' }, { status: 400 });
     if (quoteReference.length > 255) return NextResponse.json({ error: 'Quote reference must be 255 characters or fewer.' }, { status: 400 });
 
-    const cart = await pool.query('SELECT product_id, quantity FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
+    const cart = await pool.query('SELECT product_id, quantity, updated_at::text AS updated_at FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
     if (!cart.rowCount) return NextResponse.json({ error: 'Your cart is empty.' }, { status: 400 });
     const catalogue = await currentCatalogue(user.discounts);
     const products = new Map(catalogue.map((product) => [product.id, product]));
@@ -62,80 +53,15 @@ export async function POST(request: Request) {
     });
     const quoteDate = currentQuoteDate();
     const quoteStatus = await customerQuoteStatus();
-    // A retry of this unchanged checkout must not create a second Xero draft.
-    const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({
-      userId: user.id,
-      contactId: user.xeroContactId,
-      quoteDate,
-      quoteStatus,
-      quoteReference,
-      lineItems,
-    })).digest('hex');
-    const response = await xeroAccountingFetch('/Quotes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey, 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId,
-      },
-      body: JSON.stringify({ Quotes: [{
-        Contact: { ContactID: user.xeroContactId },
-        Date: quoteDate,
-        Status: quoteStatus,
-        LineAmountTypes: 'Exclusive',
-        Reference: quoteReference,
-        LineItems: lineItems,
-      }] }),
+    await recordQuoteRequest(pool,user,requestId,{ Quotes: [{
+      Contact:{ContactID:user.xeroContactId},Date:quoteDate,Status:quoteStatus,
+      LineAmountTypes:'Exclusive',Reference:quoteReference,LineItems:lineItems,
+    }] },{
+      source:'cart',cart:cart.rows,companyName:user.organisationName,buyerEmail:user.email,
+      salesEmail:process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar',
+      baseUrl:(process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/,''),
     });
-    const payload = await response.json();
-    if (!response.ok) {
-      console.error('Xero quote error:', {
-        status: response.status,
-        type: typeof payload === 'object' && payload ? (payload as { Type?: unknown }).Type : null,
-        message: typeof payload === 'object' && payload ? (payload as { Message?: unknown }).Message : null,
-        validationMessages: validationMessages(payload),
-      });
-      return NextResponse.json({ error: 'Xero could not create the draft quote. The cart has been kept unchanged.' }, { status: 502 });
-    }
-    const quote = payload.Quotes?.[0];
-    await pool.query('DELETE FROM portal_cart_lines WHERE user_id = $1', [user.id]);
-    let salesNotified = true;
-    try {
-      await sendSalesQuoteNotification({
-        companyName: user.organisationName,
-        buyerEmail: user.email,
-        quoteNumber: quote?.QuoteNumber || null,
-        quoteId: quote?.QuoteID || null,
-        source: 'cart',
-        quoteStatus,
-        quoteReference,
-      });
-    } catch (error) {
-      salesNotified = false;
-      console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
-    }
-    let buyerAcknowledged = true;
-    try {
-      await sendQuoteRequestReceipt({
-        to: user.email,
-        companyName: user.organisationName,
-        quoteNumber: quote?.QuoteNumber || null,
-        quoteReference,
-        items: lineItems.map((line) => ({ sku: line.ItemCode, description: line.Description, quantity: line.Quantity })),
-      });
-    } catch (error) {
-      buyerAcknowledged = false;
-      console.error('Buyer quote acknowledgement failed:', error instanceof Error ? error.message : error);
-    }
-    return NextResponse.json({
-      quoteNumber: quote?.QuoteNumber || null,
-      quoteId: quote?.QuoteID || null,
-      quoteStatus,
-      quoteReference,
-      message: quoteStatus === 'DRAFT' ? 'Draft quote created in Xero.' : 'Quote created in Xero as sent.',
-      salesNotified,
-      buyerAcknowledged,
-      cart: { lines: [], itemCount: 0, subtotalExVat: 0 },
-    });
+    return NextResponse.json(await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch));
   } catch (error) {
     console.error('Quote creation error:', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create draft quote' }, { status: 500 });

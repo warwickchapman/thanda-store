@@ -1,0 +1,67 @@
+[
+  {
+    "supplier": "victron",
+    "sku": "SCC145110512",
+    "resources": [
+      {
+        "kind": "product",
+        "url": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-rs-450-tr",
+        "title": "SmartSolar MPPT RS",
+        "verifiedAt": "2026-09-26",
+        "source": "Manufacturer product page and model listing reviewed"
+      }
+    ]
+  },
+  {
+    "supplier": "victron",
+    "sku": "SCC145120512",
+    "resources": [
+      {
+        "kind": "product",
+        "url": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-rs-450-tr",
+        "title": "SmartSolar MPPT RS",
+        "verifiedAt": "2026-09-26",
+        "source": "Manufacturer product page and model listing reviewed"
+      }
+    ]
+  },
+  {
+    "supplier": "victron",
+    "sku": "SCC145120510",
+    "resources": [
+      {
+        "kind": "product",
+        "url": "https://www.victronenergy.com/solar-charge-controllers/smartsolar-mppt-rs-450-tr",
+        "title": "SmartSolar MPPT RS",
+        "verifiedAt": "2026-09-26",
+        "source": "Manufacturer product page and model listing reviewed"
+      }
+    ]
+  },
+  {
+    "supplier": "victron",
+    "sku": "PMR482602020",
+    "resources": [
+      {
+        "kind": "product",
+        "url": "https://www.victronenergy.com/inverters-chargers/multi-rs-solar",
+        "title": "Multi RS Solar",
+        "verifiedAt": "2026-09-26",
+        "source": "Manufacturer product page and model listing reviewed"
+      }
+    ]
+  },
+  {
+    "supplier": "victron",
+    "sku": "PIN482601000",
+    "resources": [
+      {
+        "kind": "product",
+        "url": "https://www.victronenergy.com/inverter-charger-mppt/inverter-rs-smart-solar",
+        "title": "Inverter RS Smart Solar",
+        "verifiedAt": "2026-09-26",
+        "source": "Manufacturer product page and model listing reviewed"
+      }
+    ]
+  }
+]

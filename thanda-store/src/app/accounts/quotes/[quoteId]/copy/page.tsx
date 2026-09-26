@@ -59,10 +59,14 @@ export default function CopyQuotePage({ params }: { params: Promise<{ quoteId: s
   async function save() {
     setSaving(true); setMessage('');
     try {
-      const response = await fetch(`/api/account/quotes/${encodeURIComponent(quoteId)}/copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines }) });
+      const storageKey = `thanda-copy-request-${quoteId}`;
+      const requestId = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+      sessionStorage.setItem(storageKey, requestId);
+      const response = await fetch(`/api/account/quotes/${encodeURIComponent(quoteId)}/copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines, requestId }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to create copied draft quote.');
-      setMessage(`${data.quoteStatus === 'SENT' ? 'Quote' : 'Draft quote'} ${data.quoteNumber || ''} created in Xero.`);
+      sessionStorage.removeItem(storageKey);
+      window.location.assign(`/quotes/confirmation?requestId=${encodeURIComponent(data.requestId)}`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to create copied draft quote.'); }
     finally { setSaving(false); }
   }

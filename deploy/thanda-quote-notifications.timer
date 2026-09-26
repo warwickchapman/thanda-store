@@ -1,0 +1,10 @@
+[Unit]
+Description=Process pending Thanda quote notifications each minute
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

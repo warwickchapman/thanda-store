@@ -100,7 +100,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
   const rows = result.rows;
   const requested = rows.find((row) => row.id === productId) || rows[0];
   if (requested.supplier.toLowerCase() !== 'victron') {
-    return { id: requested.id, sku: requested.sku, supplier: requested.supplier, hasStock: hasStock(requested), substituted: false };
+    return { id: Number(requested.id), sku: requested.sku, supplier: requested.supplier, hasStock: hasStock(requested), substituted: false };
   }
 
   // A predecessor is an older article code. Prefer the closest stocked older
@@ -114,7 +114,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
     || requested;
 
   return {
-    id: selected.id,
+    id: Number(selected.id),
     sku: selected.sku,
     supplier: selected.supplier,
     hasStock: hasStock(selected),

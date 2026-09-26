@@ -7,9 +7,11 @@ export async function GET() {
 
   return NextResponse.json({
     user: {
+      id: user.id,
       email: user.email,
       role: user.role,
       canManageUsers: user.canManageUsers,
+      apiEnabled: user.apiEnabled,
       organisationName: user.organisationName,
       xeroContactId: user.xeroContactId,
       xeroContactName: user.xeroContactName,

@@ -155,6 +155,7 @@ function buildProduct(product, extendedProduct) {
   const supplierStock = selectWarehouseStock(product);
   const details = {
     originalPrice: recommendedRetailExVat,
+      supplierObservedAt: new Date().toISOString(),
     recommendedRetailExVat,
     recommendedRetailPriceVatMode: 'ex_vat',
     recommendedRetailSource: 'eorder_price_divided_by_thanda_discount_factor',
@@ -187,6 +188,7 @@ function buildProduct(product, extendedProduct) {
 
   if (extendedProduct) {
     details.imageSource = imageUrl ? 'victron-products-extended' : null;
+    if (typeof productData.description === 'string' && productData.description.trim()) details.description = productData.description;
     details.documents = productData.documents || [];
     details.technicalData = productData.pms_technical_data || [];
   }

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth/server';
 import { currentCatalogue } from '@/lib/catalogue';
@@ -6,7 +5,7 @@ import pool from '@/lib/db';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
-import { sendQuoteRequestReceipt, sendSalesQuoteNotification } from '@/lib/email/resend';
+import { recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
@@ -80,8 +79,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!user.xeroContactId) return NextResponse.json({ error: 'Your account is not linked to a Xero customer.' }, { status: 409 });
   try {
     const { quoteId } = await params;
-    const source = await sourceQuote(user, quoteId);
     const body = await request.json().catch(() => ({}));
+    const requestId = body.requestId;
+    if (!validRequestId(requestId)) return NextResponse.json({error:'A valid request ID is required.'},{status:400});
+    const previous = await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch);
+    if (previous) return NextResponse.json(previous);
+    const source = await sourceQuote(user, quoteId);
     const requestedLines = Array.isArray(body.lines) ? body.lines : [];
     if (!requestedLines.length) return NextResponse.json({ error: 'Add at least one product.' }, { status: 400 });
     const catalogue = await currentProducts(user);
@@ -105,42 +108,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     const date = new Date().toISOString().slice(0, 10);
     const quoteStatus = await customerQuoteStatus();
-    const idempotencyKey = crypto.createHash('sha256').update(JSON.stringify({ userId: user.id, contactId: user.xeroContactId, sourceQuoteId: quoteId, date, quoteStatus, lineItems })).digest('hex');
-    const response = await xeroAccountingFetch('/Quotes', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey, 'X-Hub-Actor': `portal-user:${user.id}`, 'X-Hub-Contact': user.xeroContactId },
-      body: JSON.stringify({ Quotes: [{ Contact: { ContactID: user.xeroContactId }, Date: date, Status: quoteStatus, LineAmountTypes: 'Exclusive', Reference: `Reorder from ${source.QuoteNumber || 'quote'}`, LineItems: lineItems }] }),
+    await recordQuoteRequest(pool,user,requestId,{ Quotes:[{
+      Contact:{ContactID:user.xeroContactId},Date:date,Status:quoteStatus,LineAmountTypes:'Exclusive',
+      Reference:`Reorder from ${source.QuoteNumber || 'quote'}`,LineItems:lineItems,
+    }] },{source:'quote_copy',companyName:user.organisationName,buyerEmail:user.email,
+      salesEmail:process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar',
+      baseUrl:(process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/,''),
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return NextResponse.json({ error: 'Xero could not create the copied draft quote.' }, { status: 502 });
-    const quote = Array.isArray(payload.Quotes) ? payload.Quotes[0] as { QuoteID?: string; QuoteNumber?: string } : null;
-    await auditAccountAction(user, 'quote_copied_to_draft', 'quote', quoteId, { sourceQuoteNumber: source.QuoteNumber || null, newQuoteId: quote?.QuoteID || null, newQuoteNumber: quote?.QuoteNumber || null, lineCount: lineItems.length });
-    let salesNotified = true;
-    try {
-      await sendSalesQuoteNotification({
-        companyName: user.organisationName,
-        buyerEmail: user.email,
-        quoteNumber: quote?.QuoteNumber || null,
-        quoteId: quote?.QuoteID || null,
-        source: 'quote_copy',
-        quoteStatus,
-      });
-    } catch (error) {
-      salesNotified = false;
-      console.error('Sales quote notification failed:', error instanceof Error ? error.message : error);
-    }
-    let buyerAcknowledged = true;
-    try {
-      await sendQuoteRequestReceipt({
-        to: user.email,
-        companyName: user.organisationName,
-        quoteNumber: quote?.QuoteNumber || null,
-        items: lineItems.map((line) => ({ sku: line.ItemCode, description: line.Description, quantity: line.Quantity })),
-      });
-    } catch (error) {
-      buyerAcknowledged = false;
-      console.error('Buyer quote acknowledgement failed:', error instanceof Error ? error.message : error);
-    }
-    return NextResponse.json({ quoteId: quote?.QuoteID || null, quoteNumber: quote?.QuoteNumber || null, quoteStatus, salesNotified, buyerAcknowledged });
+    return NextResponse.json(await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create copied draft quote.' }, { status: 500 });
   }

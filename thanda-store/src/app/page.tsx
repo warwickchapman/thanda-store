@@ -3,6 +3,7 @@ import { formatCurrency } from "@/lib/utils";
 import Link from 'next/link';
 import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
+import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
@@ -30,6 +31,8 @@ interface Product {
 }
 
 interface SessionUser {
+  id: number;
+  apiEnabled: boolean;
   role: string;
   organisationName: string;
 }
@@ -160,6 +163,7 @@ export default function Home() {
   const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[] }>({ mine: [], thanda: [] });
   const [cart, setCart] = useState<Cart>(emptyCart);
   const [cartOpen, setCartOpen] = useState(false);
+  const [detailProduct, setDetailProduct] = useState<Product|null>(null);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -354,6 +358,7 @@ export default function Home() {
                   Accounts
                 </Link>
               )}
+              {sessionUser?.apiEnabled && <Link href="/api-access" className="flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-sm font-medium">API access</Link>}
               {sessionUser?.role === 'admin' && (
                 <>
                   <a href="/admin/replenishment" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
@@ -494,7 +499,7 @@ export default function Home() {
                 {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
-                        <ProductImage product={product} />
+                        <button type="button" onClick={() => setDetailProduct(product)} aria-label={`View details for ${product.name}`} className="h-full w-full"><ProductImage product={product} /></button>
                         {isUnavailable(product) && (
                           <span className="pointer-events-none absolute -right-10 top-7 z-20 w-40 rotate-45 bg-red-700 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-sm">
                             Not available
@@ -523,7 +528,7 @@ export default function Home() {
                         </div>
                         
                         <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
-                          {product.name}
+                          <button type="button" onClick={() => setDetailProduct(product)} className="text-left hover:underline">{product.name}</button>
                         </h3>
                         <div className="mb-4 space-y-1 text-xs font-medium text-zinc-500">
                           {stockLines(product).map((line) => (
@@ -574,7 +579,8 @@ export default function Home() {
           </div>
         )}
       </main>
-      <CartDrawer cart={cart} open={cartOpen} onClose={() => setCartOpen(false)} onChange={setCart} />
+      {detailProduct && <ProductDetails key={detailProduct.id} product={detailProduct} stock={stockLines(detailProduct)} onClose={() => setDetailProduct(null)} />}
+      <CartDrawer userId={sessionUser?.id} cart={cart} open={cartOpen} onClose={() => setCartOpen(false)} onChange={setCart} />
 
       <footer className="mt-12 bg-white">
         <div className="w-full h-24 overflow-hidden opacity-50 grayscale hover:grayscale-0 transition-all duration-700">

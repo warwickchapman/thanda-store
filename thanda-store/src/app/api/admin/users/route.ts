@@ -46,6 +46,7 @@ export async function GET() {
       u.email,
       u.role,
       u.can_manage_users,
+      u.api_enabled,
       u.is_active,
       u.xero_person_kind,
       u.archived_at,
@@ -57,7 +58,7 @@ export async function GET() {
       COALESCE(jsonb_object_agg(d.supplier, d.discount_percent) FILTER (WHERE d.supplier IS NOT NULL), '{}'::jsonb) AS discounts
     FROM portal_users u
     JOIN organisations o ON o.id = u.organisation_id
-    LEFT JOIN user_supplier_discounts d ON d.user_id = u.id
+    LEFT JOIN contact_supplier_discounts d ON d.contact_id = o.xero_contact_id
     LEFT JOIN LATERAL (
       SELECT expires_at
       FROM account_setup_tokens
@@ -151,10 +152,10 @@ export async function POST(request: Request) {
     user = insertedUser.rows[0];
     if (role === 'buyer') await client.query(
       `
-        INSERT INTO user_supplier_discounts (user_id, supplier, discount_percent)
-        VALUES ($1, 'victron', $2), ($1, 'renogy', $3)
+        INSERT INTO contact_supplier_discounts (contact_id, supplier, discount_percent)
+        VALUES ($1, 'victron', $2), ($1, 'renogy', $3) ON CONFLICT DO NOTHING
       `,
-      [user.id, victronDiscount, renogyDiscount],
+      [xeroContactId, victronDiscount, renogyDiscount],
     );
     await client.query('COMMIT');
   } catch (error) {
@@ -183,6 +184,44 @@ export async function PATCH(request: Request) {
 
   const body = await request.json();
   const action = text(body.action) || 'linkXero';
+
+  if (action === 'setCompanyDiscounts') {
+    const contactId = text(body.xeroContactId);
+    const victron = discount(body.victronDiscount);
+    const renogy = discount(body.renogyDiscount);
+    if (!contactId || victron === null || renogy === null) return NextResponse.json({ error: 'Select a linked company and discounts between 0% and 40%.' }, { status: 400 });
+    const company = await pool.query('SELECT id FROM organisations WHERE xero_contact_id=$1', [contactId]);
+    if (!company.rowCount) return NextResponse.json({ error: 'Linked company not found.' }, { status: 404 });
+    await pool.query(`WITH saved AS (
+      INSERT INTO contact_supplier_discounts(contact_id,supplier,discount_percent)
+      VALUES($1,'victron',$2),($1,'renogy',$3) ON CONFLICT(contact_id,supplier)
+      DO UPDATE SET discount_percent=EXCLUDED.discount_percent,updated_at=now() RETURNING supplier,discount_percent)
+      INSERT INTO portal_activity_log(user_id,organisation_id,action,resource_type,resource_id,metadata)
+      SELECT $4,$5,'company_discounts_changed','xero_contact',$1,jsonb_object_agg(supplier,discount_percent) FROM saved`,
+      [contactId,victron,renogy,admin.id,admin.organisationId]);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === 'setApiAccess') {
+    const id = Number(body.userId);
+    if (!Number.isSafeInteger(id) || id < 1) return NextResponse.json({ error: 'A valid user is required.' }, { status: 400 });
+    const enabled = body.enabled === true;
+    const db = await pool.connect();
+    try {
+      await db.query('BEGIN');
+      const target = await db.query('SELECT u.id,o.xero_contact_id FROM portal_users u JOIN organisations o ON o.id=u.organisation_id WHERE u.id=$1 FOR UPDATE OF u', [id]);
+      if (!target.rowCount || (enabled && !target.rows[0].xero_contact_id)) {
+        await db.query('ROLLBACK');
+        return NextResponse.json({ error: 'API access requires a user linked to a Xero contact.' }, { status: 400 });
+      }
+      await db.query('UPDATE portal_users SET api_enabled=$2,updated_at=now() WHERE id=$1', [id,enabled]);
+      if (!enabled) await db.query('UPDATE portal_api_keys SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=$1', [id]);
+      await db.query(`INSERT INTO portal_activity_log(user_id,organisation_id,action,resource_type,resource_id,metadata)
+        VALUES($1,$2,'api_access_changed','user',$3,$4::jsonb)`,[admin.id,admin.organisationId,String(id),JSON.stringify({enabled})]);
+      await db.query('COMMIT');
+    } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    return NextResponse.json({ ok: true });
+  }
 
   if (action === 'setAccess') {
     const userId = Number(body.userId);
@@ -371,16 +410,7 @@ export async function PATCH(request: Request) {
           [organisationId, xeroPerson.email, resetPassword, xeroPerson.kind, xeroPerson.email],
         );
         portalUser = inserted.rows[0];
-        await client.query(
-          `
-            INSERT INTO user_supplier_discounts (user_id, supplier, discount_percent)
-            SELECT $1, supplier, discount_percent
-            FROM user_supplier_discounts
-            WHERE user_id = (SELECT id FROM portal_users WHERE organisation_id = $2 ORDER BY id LIMIT 1)
-            ON CONFLICT (user_id, supplier) DO NOTHING
-          `,
-          [portalUser.id, organisationId],
-        );
+
       }
       await client.query('DELETE FROM portal_sessions WHERE user_id = $1', [portalUser.id]);
       await client.query('UPDATE login_otps SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [portalUser.id]);

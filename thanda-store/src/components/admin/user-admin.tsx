@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { CompanyAccess } from './company-access';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -10,6 +11,7 @@ type AdminUser = {
   email: string;
   role: string;
   can_manage_users: boolean;
+  api_enabled: boolean;
   is_active: boolean;
   xero_person_kind: 'manual' | 'primary' | 'additional';
   archived_at: string | null;
@@ -472,8 +474,8 @@ export function InviteUserForm({ onCreated }: { onCreated: () => Promise<void> }
           <div className="flex items-end lg:col-span-6"><button disabled={submitting} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{submitting ? 'Creating' : 'Create and send setup email'}</button></div>
         </>}
         {role === 'buyer' && contact && <>
-          <label className="grid gap-1 text-sm font-semibold">Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-          <label className="grid gap-1 text-sm font-semibold">Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+          <label className="grid gap-1 text-sm font-semibold">Company Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
+          <label className="grid gap-1 text-sm font-semibold">Company Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
           <div className="flex items-end lg:col-span-4"><button disabled={submitting} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{submitting ? 'Creating' : 'Create and send setup email'}</button></div>
         </>}
       </form>
@@ -668,10 +670,11 @@ export function UserEditorPage({ userId }: { userId: number }) {
           <div className="mb-5 border-b border-zinc-100 pb-4">
             <h2 className="text-lg font-bold">{user.organisation_name}</h2>
             <p className="mt-1 text-sm text-zinc-500">{user.email} · {user.role}{user.role === 'admin' && user.can_manage_users ? ' · Manage users' : ''}</p>
-            {user.role === 'buyer' && <p className="mt-1 text-sm text-zinc-500">Discounts: Victron {user.discounts?.victron ?? 0}% · Renogy {user.discounts?.renogy ?? 0}%</p>}
+            {user.role === 'buyer' && <p className="mt-1 text-sm text-zinc-500">Company discounts: Victron {user.discounts?.victron ?? 0}% · Renogy {user.discounts?.renogy ?? 0}%</p>}
           </div>
 
           {canManageUsers ? <>
+            <CompanyAccess key={`company-${user.id}-${user.xero_contact_id}`} user={user} onChanged={loadUsers} />
             <UserAccessEditor key={`access-${user.id}-${user.role}-${user.can_manage_users}`} user={user} busy={busyUserId === user.id} onSave={(role, manager) => void saveAccess(user, role, manager)} />
             <form onSubmit={(event) => { event.preventDefault(); void updateEmail(user, new FormData(event.currentTarget)); }} className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="grid gap-1 text-sm font-semibold">Portal email

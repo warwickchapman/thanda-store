@@ -178,7 +178,7 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 
 All customer-facing prices in the portal are displayed excluding VAT.
 
-Authenticated users can have supplier-specific discounts in `user_supplier_discounts`. Victron and Renogy discounts are capped at 40%. LoRa products do not receive a B2B discount; the Xero sales price is the buyer price.
+Supplier-specific discounts belong to the linked Xero contact in `contact_supplier_discounts`, so every user in a company sees the same prices. User Admin edits company pricing separately from per-user API access. Victron and Renogy discounts are capped at 40%. LoRa products do not receive a B2B discount; the Xero sales price is the buyer price.
 
 ## Portal users and OTP login
 
@@ -643,3 +643,7 @@ PYTHON=/Users/warwick/.cache/codex-runtimes/codex-primary-runtime/dependencies/p
 - Credentials must stay in root-readable environment configuration and token files must remain mode `0600`. Rotate any secret that has ever been committed or shared outside its intended operational boundary.
 
 See [CHANGELOG.md](CHANGELOG.md) for the production-facing change history.
+
+## Customer quote reliability, product details and API
+
+See [Customer commerce](docs/customer-commerce.md) for the local quote ledger and notification worker, contact pricing migration, product resources, API access and deployment checks.

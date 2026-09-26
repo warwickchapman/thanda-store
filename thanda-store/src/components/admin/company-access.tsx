@@ -1,0 +1,12 @@
+'use client';
+import {useState} from 'react';
+type User={id:number;xero_contact_id:string|null;api_enabled:boolean;discounts:Record<string,number>};
+export function CompanyAccess({user,onChanged}:{user:User;onChanged:()=>Promise<void>}){
+  const [victron,setVictron]=useState(String(user.discounts.victron??30));const [renogy,setRenogy]=useState(String(user.discounts.renogy??30));
+  const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
+  async function save(body:Record<string,unknown>,success:string){setBusy(true);setMessage('');try{const r=await fetch('/api/admin/users',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);await onChanged();setMessage(success);}catch(e){setMessage(e instanceof Error?e.message:'Unable to save.');}finally{setBusy(false);}}
+  if(!user.xero_contact_id)return <p className="my-4 text-sm text-zinc-500">Link a Xero contact to manage company pricing and API access.</p>;
+  return <section className="my-5 space-y-3 rounded-lg border p-4"><h3 className="font-bold">Company pricing</h3><p className="text-sm text-zinc-600">Discounts apply to everyone linked to this Xero contact, including API prices.</p><form className="flex flex-wrap items-end gap-3" onSubmit={e=>{e.preventDefault();void save({action:'setCompanyDiscounts',xeroContactId:user.xero_contact_id,victronDiscount:Number(victron),renogyDiscount:Number(renogy)},'Company discounts updated.');}}>
+    <label className="text-sm">Victron discount (%)<input type="number" required min={0} max={40} step="0.01" value={victron} onChange={e=>setVictron(e.target.value)} className="mt-1 block w-36 rounded border p-2"/></label><label className="text-sm">Renogy discount (%)<input type="number" required min={0} max={40} step="0.01" value={renogy} onChange={e=>setRenogy(e.target.value)} className="mt-1 block w-36 rounded border p-2"/></label><button disabled={busy} className="rounded-lg border px-3 py-2 text-sm font-semibold">Save company discounts</button>
+  </form><label className="flex items-center gap-2 border-t pt-3 text-sm font-semibold"><input type="checkbox" checked={user.api_enabled} disabled={busy} onChange={e=>void save({action:'setApiAccess',userId:Number(user.id),enabled:e.target.checked},e.target.checked?'API access enabled. The user can generate their own key.':'API access disabled and existing keys revoked.')}/>Enable API access for this user</label>{message&&<p role="status" className="text-sm">{message}</p>}</section>;
+}

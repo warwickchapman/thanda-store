@@ -352,6 +352,7 @@ async function buildProduct(row, wrapper, detail) {
     stock_on_hand: stockOnHand,
     details: {
       originalPrice,
+      supplierObservedAt: new Date().toISOString(),
       // Renogy's product-detail originalPrice is list price excluding VAT.
       // The partner portal renders the same amount with 15% VAT included.
       recommendedRetailExVat: originalPrice,
@@ -367,6 +368,7 @@ async function buildProduct(row, wrapper, detail) {
       safetyInventory: numberOrNull(detail.safety_inventory),
       itemModel: detail.item_model,
       productUrl: `https://partner.renogy.com/product/item/${wrapper.id}`,
+      ...(typeof detail.description === 'string' && detail.description.trim() ? { description: detail.description } : {}),
       lastRenogyModified: detail.lastModified,
       hasImage: Boolean(imageUrl),
     },

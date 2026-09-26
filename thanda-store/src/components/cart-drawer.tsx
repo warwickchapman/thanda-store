@@ -11,8 +11,9 @@ type CartLine = {
 
 type Cart = { lines: CartLine[]; itemCount: number; subtotalExVat: number };
 
-export function CartDrawer({ cart, open, onClose, onChange }: {
+export function CartDrawer({ cart, open, onClose, onChange, userId }: {
   cart: Cart;
+  userId?: number;
   open: boolean;
   onClose: () => void;
   onChange: (cart: Cart) => void;
@@ -38,16 +39,20 @@ export function CartDrawer({ cart, open, onClose, onChange }: {
     setCreatingQuote(true);
     setQuoteMessage('');
     try {
+      if (!userId) throw new Error('Your session is loading. Please try again.');
+      const storageKey = `thanda-cart-request-${userId}`;
+      const requestId = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+      sessionStorage.setItem(storageKey, requestId);
       const response = await fetch('/api/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteReference: reference }),
+        body: JSON.stringify({ quoteReference: reference, requestId }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to create draft quote');
       onChange(data.cart);
-      const params = new URLSearchParams({ reference });
-      if (data.quoteNumber) params.set('quoteNumber', data.quoteNumber);
+      sessionStorage.removeItem(storageKey);
+      const params = new URLSearchParams({ requestId: data.requestId });
       window.location.assign(`/quotes/confirmation?${params.toString()}`);
     } catch (error) {
       setQuoteMessage(error instanceof Error ? error.message : 'Unable to create draft quote');

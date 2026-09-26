@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const requestedView = request.nextUrl.searchParams.get('view') || 'current';
     const view = ['current', 'invoice', 'quote', 'credit_note'].includes(requestedView)
       ? requestedView as CustomerDocumentView : 'current';
-    const result = await customerDocumentsPage(user, { refresh, page, query, view });
+    const result = await customerDocumentsPage(user, { refresh, page, query, view, quoteId: request.nextUrl.searchParams.get('quote') || undefined });
     await auditAccountAction(user, 'account_documents_viewed', 'account', user.xeroContactId || undefined, { refresh, page: result.page, view, query: query || null });
     return NextResponse.json({ ...result, refreshed: refresh });
   } catch (error) {

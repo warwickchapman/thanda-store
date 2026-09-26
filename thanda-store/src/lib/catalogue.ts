@@ -97,6 +97,7 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const classification = derived.catalogueClassification as { category: string };
   return {
     ...row,
+    id: Number(row.id),
     category: classification.category,
     supplier_category: row.category,
     // Existing rows work immediately, without a supplier refresh. Sync/backfill

@@ -57,6 +57,8 @@ export default function AccountsPage() {
     setMessage('');
     try {
       const params = new URLSearchParams({ page: String(requestedPage), view: tab });
+      const focusedQuote = new URLSearchParams(window.location.search).get('quote');
+      if (focusedQuote) params.set('quote', focusedQuote);
       if (searchTerm) params.set('query', searchTerm);
       if (refresh) params.set('refresh', '1');
       const response = await fetch(`/api/account/documents?${params.toString()}`);
@@ -122,6 +124,7 @@ export default function AccountsPage() {
           <Link href="/" className="inline-flex h-10 items-center justify-center rounded-lg border border-zinc-300 px-4 text-sm font-semibold hover:bg-white">Back to store</Link>
         </header>
 
+        <p className="mt-4 text-sm"><Link className="underline" href="/accounts">Show all account documents</Link></p>
         <section className="mt-6">
           <div className="border border-zinc-300 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Open invoices</p>
@@ -158,7 +161,7 @@ export default function AccountsPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-bold">{document.number || 'Unnumbered document'}</p>
-                      <span className="border border-zinc-300 px-2 py-0.5 text-xs font-semibold">{titleCase(document.status || document.type)}</span>
+                      <span className="border border-zinc-300 px-2 py-0.5 text-xs font-semibold">{document.type === 'quote' && document.status === 'DRAFT' ? 'Quote requested' : titleCase(document.status || document.type)}</span>
                     </div>
                     <p className="mt-1 text-sm text-zinc-600">{accountDate(document.date)}{document.dueDate ? ` · Due ${accountDate(document.dueDate)}` : ''}{document.reference ? ` · ${document.reference}` : ''}</p>
                     <p className="mt-1 text-sm text-zinc-600">{titleCase(document.type)} · Total {money(document, document.total)}{document.type === 'invoice' && ` · Open ${money(document, document.due)}`}</p>

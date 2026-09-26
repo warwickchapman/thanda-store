@@ -96,7 +96,8 @@ async function writeDocuments(contactId: string, documents: Array<{ document: Cu
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    if (replaceSnapshot) await client.query('DELETE FROM xero_customer_documents WHERE contact_id = $1', [contactId]);
+    if (replaceSnapshot) await client.query(`DELETE FROM xero_customer_documents d WHERE contact_id=$1
+      AND NOT EXISTS (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=d.contact_id AND r.quote_id=d.document_id AND d.document_type='quote')`, [contactId]);
     for (const { document, raw } of documents) {
       await client.query(`
         INSERT INTO xero_customer_documents (
@@ -174,12 +175,20 @@ export async function customerDocuments(user: PortalUser, refresh = false) {
   const lastSync = state.rows[0]?.last_successful_sync_at ? Date.parse(state.rows[0].last_successful_sync_at) : 0;
   const shouldRefresh = !lastSync || Date.now() - lastSync > CACHE_TTL_MS;
   const forcedRefreshAllowed = refresh && (!lastSync || Date.now() - lastSync > FORCED_REFRESH_COOLDOWN_MS);
-  if (shouldRefresh || forcedRefreshAllowed) await refreshCustomerDocuments(user);
+  if (shouldRefresh || forcedRefreshAllowed) {
+    try { await refreshCustomerDocuments(user); }
+    catch (error) {
+      const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 LIMIT 1', [user.xeroContactId]);
+      if (!cached.rowCount) throw error;
+      console.error('Retaining cached customer documents after Hub refresh failure');
+    }
+  }
   const result = await pool.query(`
     SELECT document_type, document_id, document_number, status, document_date, due_date, reference,
            currency_code, total, amount_paid, amount_due
     FROM xero_customer_documents
-    WHERE contact_id = $1
+    WHERE contact_id = $1 AND (document_type <> 'quote' OR status <> 'DRAFT' OR EXISTS
+      (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=xero_customer_documents.contact_id AND r.quote_id=document_id))
     ORDER BY document_date DESC NULLS LAST, document_number DESC
   `, [user.xeroContactId]);
   return result.rows.map((row) => ({
@@ -193,7 +202,7 @@ export async function customerDocuments(user: PortalUser, refresh = false) {
 
 export async function customerDocumentsPage(
   user: PortalUser,
-  options: { refresh?: boolean; page?: number; pageSize?: number; query?: string; view?: CustomerDocumentView } = {},
+  options: { refresh?: boolean; page?: number; pageSize?: number; query?: string; view?: CustomerDocumentView; quoteId?: string } = {},
 ): Promise<CustomerDocumentsPage> {
   await ensureAuthSchema();
   if (!user.xeroContactId) throw new Error('Your account is not linked to a Xero customer.');
@@ -206,12 +215,23 @@ export async function customerDocumentsPage(
   const lastSync = state.rows[0]?.last_successful_sync_at ? Date.parse(state.rows[0].last_successful_sync_at) : 0;
   const shouldRefresh = !lastSync || Date.now() - lastSync > CACHE_TTL_MS;
   const forcedRefreshAllowed = options.refresh && (!lastSync || Date.now() - lastSync > FORCED_REFRESH_COOLDOWN_MS);
-  if (shouldRefresh || forcedRefreshAllowed) await refreshCustomerDocuments(user);
+  const focusedQuote = options.quoteId && await pool.query("SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 AND document_type='quote' AND document_id=$2", [user.xeroContactId, options.quoteId]);
+  if ((!focusedQuote || !focusedQuote.rowCount || options.refresh) && (shouldRefresh || forcedRefreshAllowed)) {
+    try { await refreshCustomerDocuments(user); }
+    catch (error) {
+      const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 LIMIT 1', [user.xeroContactId]);
+      if (!cached.rowCount) throw error;
+      console.error('Retaining cached customer documents after Hub refresh failure');
+    }
+  }
 
-  const conditions = ['contact_id = $1'];
+  const conditions = ['contact_id = $1', `(document_type <> 'quote' OR status <> 'DRAFT' OR EXISTS
+    (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=xero_customer_documents.contact_id AND r.quote_id=document_id))`];
   const values: unknown[] = [user.xeroContactId];
-  if (view === 'current') {
-    conditions.push("((document_type = 'invoice' AND amount_due > 0) OR (document_type = 'quote' AND status IN ('SENT', 'ACCEPTED'))) ");
+  if (options.quoteId) {
+    values.push(options.quoteId); conditions.push(`document_type='quote' AND document_id=$${values.length}`);
+  } else if (view === 'current') {
+    conditions.push("((document_type = 'invoice' AND amount_due > 0) OR (document_type = 'quote' AND status IN ('DRAFT', 'SENT', 'ACCEPTED'))) ");
   } else {
     values.push(view);
     conditions.push(`document_type = $${values.length}`);
@@ -255,6 +275,8 @@ export async function customerDocument(user: PortalUser, type: CustomerDocument[
   const result = await pool.query(`
     SELECT payload, document_number, status, document_date, due_date, reference, currency_code, total, amount_paid, amount_due
     FROM xero_customer_documents WHERE contact_id = $1 AND document_type = $2 AND document_id = $3
+      AND (document_type <> 'quote' OR status <> 'DRAFT' OR EXISTS
+      (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=xero_customer_documents.contact_id AND r.quote_id=document_id))
   `, [user.xeroContactId, type, id]);
   return result.rows[0] || null;
 }

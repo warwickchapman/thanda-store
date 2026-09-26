@@ -1,6 +1,8 @@
 import pool from "@/lib/db";
 import { INITIAL_VICTRON_STOCK_MINIMA } from "@/lib/victron-stock-minima";
 
+import { ensureCommerceSchema } from '@/lib/commerce/schema.mjs';
+
 let schemaPromise: Promise<void> | null = null;
 
 async function ensureAuthSchemaOnce() {
@@ -587,7 +589,7 @@ async function ensureAuthSchemaOnce() {
 // share the same migration promise.
 export function ensureAuthSchema() {
   if (!schemaPromise) {
-    schemaPromise = ensureAuthSchemaOnce().catch((error) => {
+    schemaPromise = ensureAuthSchemaOnce().then(() => ensureCommerceSchema(pool)).catch((error) => {
       schemaPromise = null;
       throw error;
     });
