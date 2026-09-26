@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added a customer API guide under **API access**, with setup examples, field definitions, pagination, change detection and error recovery. API-enabled customers can download the same guide as Markdown or a standard OpenAPI JSON specification for their developer or AI assistant. Guide and downloads require a signed-in, API-enabled, company-linked user and contain no real keys or customer data.
+
 - Quote requests now retain a durable request ID across retries. The successful Hub response, Accounts entry, cart update and notification jobs are saved together. Customer-submitted drafts appear as **Quote requested**, with a direct Accounts link; internal staff drafts stay hidden. The confirmation reports notification status accurately instead of claiming an email was sent after a failure.
 - Added bounded email retries and delivery checks independent of quote creation. Sales can review unresolved quote requests and notification failures under **User Admin → Quote requests & notifications**.
 - Moved supplier discounts from individual portal users to the linked Xero company/contact. Company users, carts, quotes, CSV and API exports now share the same pricing. Migration stops if existing users have conflicting effective discounts.

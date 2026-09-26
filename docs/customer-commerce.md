@@ -47,3 +47,11 @@ Notification failures are visible to sales in Admin. Temporary errors retry the 
 - The real checkout route against a loopback mock Hub resolved a `PMP482305012` cart line to stocked predecessor `PMP482305010`, submitted once across retries, created two notification jobs and retained the request after a complete but lagging Hub snapshot.
 - Chromium checks passed at desktop and 390 px mobile widths: product drawer, Escape/focus return, public document links, key generation/revocation, confirmation link, company pricing/API controls and sales request list. No real quote or email was created by these checks.
 - Production build and TypeScript checks passed. ESLint reported zero errors and eight existing warnings.
+
+## Customer integration documentation
+
+API-enabled, company-linked users can open `/api-access/guide` from **API access → Read API guide**. `/api/account/api-docs` downloads `thanda-api-openapi.json` (OpenAPI 3.1.1); `?format=markdown` downloads `thanda-api-guide.md`. Both downloads check the portal session and current API entitlement on every request, return private/no-store responses, and do not accept API bearer keys in place of a portal session. Disabled or unlinked users cannot retrieve them.
+
+The guide and machine-readable document share `src/lib/commerce/api-documentation.mjs` for field definitions, examples and integration instructions. Keep this contract aligned with `/api/v1/products` when changing the API. Examples are fictional, contain no credentials or live prices, and explain how to configure a key separately from an LLM prompt. Only the customer catalogue operation is documented; administrative and session endpoints are excluded from the OpenAPI operations.
+
+Budget: documentation rendering and downloads perform local session/permission checks only, with **zero Xero, supplier or email calls per request or day**, no backfill and no scheduled job.
