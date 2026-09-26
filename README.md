@@ -647,3 +647,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the production-facing change history.
 ## Customer quote reliability, product details and API
 
 See [Customer commerce](docs/customer-commerce.md) for the local quote ledger and notification worker, contact pricing migration, product resources, API access and deployment checks.
+
+### Mobile navigation
+
+Below 640 px, the storefront header shows the brand, a labelled hamburger button and product search. The expandable navigation contains the same company, account, API, admin, cart and logout controls as desktop, with the same permission checks. Selecting an action, focusing search, clicking outside or pressing Escape closes it; Escape returns focus to the trigger. Opening the menu performs no additional API requests.

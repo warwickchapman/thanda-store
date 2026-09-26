@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Moved the mobile header navigation into a hamburger menu, leaving the brand and product search visible. Company details, Accounts, API access, Inventory, Admin, Cart and Logout retain their existing access rules. The menu closes after selection, outside clicks, Escape or returning to desktop size; desktop navigation remains inline, with enough header height when a long set of links wraps.
+
 - Added a customer API guide under **API access**, with setup examples, field definitions, pagination, change detection and error recovery. API-enabled customers can download the same guide as Markdown or a standard OpenAPI JSON specification for their developer or AI assistant. Guide and downloads require a signed-in, API-enabled, company-linked user and contain no real keys or customer data.
 
 - Quote requests now retain a durable request ID across retries. The successful Hub response, Accounts entry, cart update and notification jobs are saved together. Customer-submitted drafts appear as **Quote requested**, with a direct Accounts link; internal staff drafts stay hidden. The confirmation reports notification status accurately instead of claiming an email was sent after a failure.

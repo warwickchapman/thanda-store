@@ -1,7 +1,7 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
 import Link from 'next/link';
-import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText } from "lucide-react";
+import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText, Menu, X } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
@@ -166,6 +166,32 @@ export default function Home() {
   const [detailProduct, setDetailProduct] = useState<Product|null>(null);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!headerRef.current?.contains(event.target as Node)) setMobileMenuOpen(false);
+    };
+    const desktop = window.matchMedia('(min-width: 640px)');
+    const onResize = () => { if (desktop.matches) setMobileMenuOpen(false); };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    desktop.addEventListener('change', onResize);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+      desktop.removeEventListener('change', onResize);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     fetch('/api/session')
@@ -321,65 +347,72 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 font-sans text-zinc-900">
       {/* Top Bar - Minimal */}
-      <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-0">
-          <div className="flex items-center gap-4">
-            <img 
-              src="/logos/logo_icon_color.png" 
-              alt="Thanda Store Icon" 
-              className="h-10 w-10 object-contain"
-            />
-            <span className="text-xl font-bold tracking-tight text-zinc-900">
-              THANDA STORE
-            </span>
+      <header ref={headerRef} className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:min-h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-4">
+              <img
+                src="/logos/logo_icon_color.png"
+                alt="Thanda Store Icon"
+                className="h-10 w-10 shrink-0 object-contain"
+              />
+              <span className="truncate text-xl font-bold tracking-tight text-zinc-900">
+                THANDA STORE
+              </span>
+            </div>
+            <button ref={menuButtonRef} type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} aria-controls="store-navigation" onClick={() => setMobileMenuOpen(open => !open)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 sm:hidden">
+              {mobileMenuOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
+            </button>
           </div>
-          
+
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-              <input 
+              <input
                 ref={searchInputRef}
-                type="text" 
-                placeholder="Search SKU or name..." 
+                type="text"
+                placeholder="Search SKU or name..."
+                aria-label="Search products"
+                onFocus={() => setMobileMenuOpen(false)}
                 value={query}
                 onChange={(event) => { setQuery(event.target.value); setActiveCategory(''); setAttributeFilters({}); }}
                 className="h-9 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
               />
             </div>
-            <div className="flex flex-wrap gap-2">
+            <nav id="store-navigation" aria-label="Main navigation" onClick={event => { if ((event.target as Element).closest('a, button')) setMobileMenuOpen(false); }} className={`${mobileMenuOpen ? 'flex' : 'hidden'} max-h-[calc(100dvh-8rem)] flex-col gap-2 overflow-y-auto border-t border-zinc-200 pt-3 sm:flex sm:max-h-none sm:flex-row sm:flex-wrap sm:overflow-visible sm:border-0 sm:pt-0`}>
               {sessionUser && (
-                <div className="flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
+                <div className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
                   {sessionUser.organisationName}
                 </div>
               )}
               {sessionUser && (
-                <Link href="/accounts" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                <Link href="/accounts" className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                   <ReceiptText className="h-4 w-4" />
                   Accounts
                 </Link>
               )}
-              {sessionUser?.apiEnabled && <Link href="/api-access" className="flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-sm font-medium">API access</Link>}
+              {sessionUser?.apiEnabled && <Link href="/api-access" className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-sm font-medium">API access</Link>}
               {sessionUser?.role === 'admin' && (
                 <>
-                  <a href="/admin/replenishment" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                  <a href="/admin/replenishment" className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                     <Package className="h-4 w-4" />
                     Inventory
                   </a>
-                  <Link href="/admin/users" className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+                  <Link href="/admin/users" className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                     <Info className="h-4 w-4" />
                     Admin
                   </Link>
                 </>
               )}
-              <button onClick={() => setCartOpen(true)} className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
+              <button onClick={() => setCartOpen(true)} className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
                 <ShoppingCart className="h-4 w-4" />
                 Cart ({cart.itemCount})
               </button>
-              <button onClick={logout} className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
+              <button onClick={logout} className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                 <LogOut className="h-4 w-4" />
                 Logout
               </button>
-            </div>
+            </nav>
           </div>
         </div>
       </header>
