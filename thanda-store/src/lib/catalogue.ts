@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pool from '@/lib/db';
 import { catalogueDerivedDetails } from '@/lib/catalogue-filters.mjs';
+import { localStockObservation, supplierStockObservation } from '@/lib/data-freshness.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -16,7 +17,7 @@ export type CatalogueProduct = {
   price: string | number;
   sku: string;
   image_url: string;
-  stock_on_hand: number;
+  stock_on_hand: number | null;
   details: Record<string, unknown>;
   thumbnail_url: string;
   recommended_retail_ex_vat: number | null;
@@ -65,7 +66,8 @@ function configuredDiscountPercent(supplier: string, userDiscounts: Record<strin
 
 function displayDetails(details: Record<string, unknown>, price: unknown, imageFallbackFromSku: string | null = null) {
   return {
-    localStockOnHand: numberOrNull(details.localStockOnHand),
+    localStockOnHand: localStockObservation({ details }).quantity,
+    supplierStockStatus: details.supplierStockStatus === 'unknown' ? 'unknown' : null,
     supplierStockLabel: typeof details.supplierStockLabel === 'string' ? details.supplierStockLabel : null,
     supplierAvailability: typeof details.supplierAvailability === 'string' ? details.supplierAvailability : null,
     manualAvailability: typeof details.manualAvailability === 'string' ? details.manualAvailability : null,
@@ -97,6 +99,7 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const classification = derived.catalogueClassification as { category: string };
   return {
     ...row,
+    stock_on_hand: supplierStockObservation(row).quantity,
     id: Number(row.id),
     category: classification.category,
     supplier_category: row.category,

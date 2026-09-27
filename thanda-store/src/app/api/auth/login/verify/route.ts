@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { canLogin, consumeLoginOtp, createSession, findLoginUser, SESSION_COOKIE } from '@/lib/auth/server';
+import { canLogin, completeLogin, findLoginUser, SESSION_COOKIE } from '@/lib/auth/server';
 
 export async function POST(request: Request) {
   try {
@@ -16,12 +16,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Login is not available for this account' }, { status: 403 });
     }
 
-    const valid = await consumeLoginOtp(Number(user.id), otp);
-    if (!valid) {
+    const token = await completeLogin({ userId: Number(user.id), email: user.email,
+      organisationId: Number(user.organisation_id) }, otp);
+    if (!token) {
       return NextResponse.json({ error: 'Invalid or expired login code' }, { status: 401 });
     }
 
-    const token = await createSession(Number(user.id));
     const response = NextResponse.json({ ok: true });
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,

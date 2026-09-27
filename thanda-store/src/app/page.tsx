@@ -6,11 +6,9 @@ import { useState, useEffect, useRef } from 'react';
 import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
+import { StockFreshness } from '@/components/stock-freshness';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
-import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters } from '@/lib/catalogue-filters.mjs';
-
-// Client-side DB fetching isn't ideal, but for this B2B simplicity we'll use an API route or a fetch pattern.
-// However, since we want to keep it simple, I'll move the data fetching to an API route and fetch it here.
+import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters, productAvailability } from '@/lib/catalogue-filters.mjs';
 
 interface Product {
   id: number;
@@ -25,7 +23,7 @@ interface Product {
   sku: string;
   image_url: string;
   thumbnail_url: string;
-  stock_on_hand: number;
+  stock_on_hand: number | null;
   catalogue_attributes: Record<string, string[]>;
   details: Record<string, string | number | boolean | string[] | null>;
 }
@@ -85,18 +83,21 @@ function stockLines(product: Product) {
   const supplierLabelText = supplierStockLabel(product);
 
   if (supplier === 'lora') {
-    return [`${localStock ?? 0} in stock (KZN)`];
+    return [localStock === null ? 'Thanda stock unknown' : `${localStock} in stock (KZN)`];
   }
 
   if (supplier === 'hubble') {
-    return [typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Out of stock'];
+    return [typeof product.details.manualAvailability === 'string' ? `${product.details.manualAvailability} (manually maintained)` : 'Stock unknown'];
   }
 
   const lines: string[] = [];
+  if (supplier === 'victron' && localStock === null) lines.push('Thanda stock unknown');
   if (localStock !== null && localStock > 0) lines.push(`Available now: ${localStock} in stock (KZN)`);
   const supplierLeadTime = supplier === 'renogy' ? '4-7 working days' : supplier === 'victron' ? '3-5 working days' : null;
-  const supplierStock = Number(product.stock_on_hand);
-  if (supplierLabelText && Number.isFinite(supplierStock) && supplierStock <= 0) {
+  const supplierStock = numberDetail(product.stock_on_hand);
+  if (supplierStock === null || product.details.supplierStockStatus === 'unknown') {
+    lines.push(`${supplierLabelText || 'Supplier'}: Stock unknown`);
+  } else if (supplierLabelText && supplierStock <= 0) {
     if (localStock === null || localStock <= 0) lines.push(`${supplierLabelText}: Out of stock / not available`);
   } else if (supplierLabelText && supplierLeadTime) {
     lines.push(`${supplierLabelText}: ${product.stock_on_hand} in stock (${supplierLeadTime})`);
@@ -109,18 +110,17 @@ function stockLines(product: Product) {
 function primaryStockBadge(product: Product) {
   const localStock = numberDetail(product.details.localStockOnHand);
   if (localStock !== null && localStock > 0) return `${localStock} in stock (KZN)`;
-  if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Out of stock';
-  if (product.supplier === 'lora') return `${localStock ?? 0} in stock (KZN)`;
-  if (Number(product.stock_on_hand) <= 0) return 'Out of stock';
+  if (productAvailability(product).includes('unknown')) return 'Stock unknown';
+  if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Stock unknown';
+  if (product.supplier === 'lora') return `${localStock} in stock (KZN)`;
+  if (productAvailability(product).includes('unavailable')) return 'Out of stock';
   return product.supplier === 'renogy' ? '4-7 days' : product.supplier === 'victron' ? '3-5 days' : 'Check stock';
 }
 
 function isUnavailable(product: Product) {
   const supplier = product.supplier.toLowerCase();
   if (!['renogy', 'victron'].includes(supplier)) return false;
-  const localStock = numberDetail(product.details.localStockOnHand);
-  const supplierStock = Number(product.stock_on_hand);
-  return (localStock === null || localStock <= 0) && Number.isFinite(supplierStock) && supplierStock <= 0;
+  return productAvailability(product).includes('unavailable');
 }
 
 function ProductImage({ product }: { product: Product }) {
@@ -153,6 +153,9 @@ function ProductImage({ product }: { product: Product }) {
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogueError, setCatalogueError] = useState('');
+  const [favouritesError, setFavouritesError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [query, setQuery] = useState('');
   const [activeSupplier, setActiveSupplier] = useState('home');
   const [activeCategory, setActiveCategory] = useState('');
@@ -201,31 +204,49 @@ export default function Home() {
       })
       .catch(() => {});
 
-    fetch('/api/products')
+    fetch('/api/cart').then((res) => res.ok ? res.json() : null).then((data) => {
+      if (data) setCart(data);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/products', { signal: controller.signal, cache: 'no-store' })
       .then(res => {
         if (res.status === 401) {
           window.location.href = '/login';
           return null;
         }
+        if (!res.ok) throw new Error('Unable to load products. Please try again.');
         return res.json();
       })
       .then(data => {
-        if (Array.isArray(data)) {
-          setProducts(data);
-        }
+        if (data === null) return;
+        if (!Array.isArray(data)) throw new Error('Unable to load products. Please try again.');
+        setProducts(data);
         setLoading(false);
       })
       .catch(err => {
-        console.error('Fetch error:', err);
+        if (err.name === 'AbortError') return;
+        setCatalogueError('Unable to load products. Please try again.');
         setLoading(false);
       });
-    fetch('/api/favourites').then((res) => res.ok ? res.json() : null).then((data) => {
-      if (data && Array.isArray(data.mine) && Array.isArray(data.thanda)) setFavourites(data);
-    }).catch(() => {});
-    fetch('/api/cart').then((res) => res.ok ? res.json() : null).then((data) => {
-      if (data) setCart(data);
-    }).catch(() => {});
-  }, []);
+    fetch('/api/favourites', { signal: controller.signal, cache: 'no-store' }).then((res) => {
+      if (!res.ok) throw new Error('Unable to load favourites.');
+      return res.json();
+    }).then((data) => {
+      if (!Array.isArray(data.mine) || !Array.isArray(data.thanda)) throw new Error('Unable to load favourites.');
+      setFavourites(data);
+    }).catch((err) => { if (err.name !== 'AbortError') setFavouritesError('Unable to load favourites and popular products. Browse a brand or try again.'); });
+    return () => controller.abort();
+  }, [loadAttempt]);
+
+  function retryCatalogue() {
+    setLoading(true);
+    setCatalogueError('');
+    setFavouritesError('');
+    setLoadAttempt(attempt => attempt + 1);
+  }
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -423,21 +444,22 @@ export default function Home() {
             <h1 className="text-3xl font-bold tracking-tight">Dealer Portal</h1>
             <p className="text-zinc-500">Premium inventory from top-tier brands.</p>
           </div>
-          <div className="text-right">
-            <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-              Warehouse Live
-            </span>
-          </div>
         </div>
+        <StockFreshness supplier={selectedSupplier} reloadKey={loadAttempt} />
 
         {/* Product Grid */}
         {loading ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
             Loading products...
           </div>
+        ) : catalogueError ? (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-950">
+            <p>{catalogueError}</p>
+            <button type="button" onClick={retryCatalogue} className="mt-3 min-h-11 rounded-lg border border-amber-300 bg-white px-4 font-semibold">Retry loading products</button>
+          </div>
         ) : visibleSuppliers.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
-            No products match your search.
+            {products.length ? 'No products match your search.' : 'The catalogue is currently empty.'}
           </div>
         ) : (
           <div className="space-y-6">
@@ -484,6 +506,9 @@ export default function Home() {
                 </div>
               </div>
             ) : null}
+            {selectedSupplier === 'home' && favouritesError && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <p>{favouritesError}</p><button type="button" onClick={retryCatalogue} className="mt-2 min-h-11 font-semibold underline">Retry loading favourites</button>
+            </div>}
 
             <div className={selectedSupplier === 'home' ? '' : 'grid items-start gap-5 lg:grid-cols-[230px_minmax(0,1fr)]'}>
             {selectedSupplier !== 'home' && <CatalogueFilters
@@ -589,9 +614,9 @@ export default function Home() {
                             </div>
                             <button
                               onClick={() => addToCart(product.id)}
-                              aria-label={isUnavailable(product) ? `${product.name} is not available` : `Add ${product.name} to cart`}
-                              disabled={isUnavailable(product)}
-                              title={isUnavailable(product) ? 'Not available to order' : 'Add to cart'}
+                              aria-label={productAvailability(product).includes('unknown') ? `Confirm availability of ${product.name} with sales` : isUnavailable(product) ? `${product.name} is not available` : `Add ${product.name} to cart`}
+                              disabled={isUnavailable(product) || productAvailability(product).includes('unknown')}
+                              title={productAvailability(product).includes('unknown') ? 'Confirm availability with sales' : isUnavailable(product) ? 'Not available to order' : 'Add to cart'}
                               className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none disabled:hover:scale-100 disabled:hover:bg-zinc-200"
                             >
                               <ShoppingCart className="h-5 w-5" />
@@ -602,7 +627,7 @@ export default function Home() {
                     </div>
                 ))}
               </div>
-              {selectedSupplier === 'home' && selectedHomeProducts.length === 0 && (
+              {selectedSupplier === 'home' && !favouritesError && selectedHomeProducts.length === 0 && (
                 <p className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
                   {homeTab === 'mine' ? 'No qualifying sales in the last 12 months yet. Browse Popular products for common products.' : 'No sales history has been synced yet.'}
                 </p>

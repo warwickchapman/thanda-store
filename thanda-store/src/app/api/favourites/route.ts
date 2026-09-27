@@ -18,7 +18,7 @@ type SkuSuccession = {
   successor_sku: string;
 };
 
-function productIsOrderable(product: { stock_on_hand: number; details: Record<string, unknown> }) {
+function productIsOrderable(product: { stock_on_hand: number | null; details: Record<string, unknown> }) {
   const localStock = Number(product.details.localStockOnHand ?? 0);
   return localStock > 0 || Number(product.stock_on_hand) > 0;
 }

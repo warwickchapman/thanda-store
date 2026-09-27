@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
+import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 
 import { createPool, ensureProductSchema } from './product-sync-lib.mjs';
 
@@ -11,9 +12,10 @@ function normalizeSku(value) {
 }
 
 function quantityOnHand(item) {
-  if (!item || item.IsTrackedAsInventory !== true) return 0;
+  if (!item || item.IsTrackedAsInventory !== true || item.QuantityOnHand === null || item.QuantityOnHand === undefined || item.QuantityOnHand === '') return null;
   const quantity = Number(item.QuantityOnHand);
-  if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+  if (!Number.isFinite(quantity)) return null;
+  if (quantity <= 0) return 0;
   return Math.floor(quantity);
 }
 
@@ -102,8 +104,8 @@ async function updateLocalStock(client, product, localStock, xeroItem, observedA
             ELSE name
           END,
           price = CASE
-            WHEN $5::boolean AND $7::numeric IS NOT NULL THEN $7::numeric::text
-            ELSE price
+            WHEN $5::boolean AND $7::numeric IS NOT NULL THEN $7::numeric
+            ELSE price::numeric
           END,
           details = jsonb_set(
             jsonb_set(
@@ -121,7 +123,7 @@ async function updateLocalStock(client, product, localStock, xeroItem, observedA
                   ELSE details
                 END,
                 '{localStockOnHand}',
-                to_jsonb($3::int),
+                COALESCE(to_jsonb($3::int), 'null'::jsonb),
                 true
               ),
               '{xeroStockSyncedAt}',
@@ -156,6 +158,7 @@ async function main() {
   const pool = createPool();
   const client = await pool.connect();
   let locked = false;
+  let started = false;
   const stats = {
     requestedOnly,
     refreshedToken: false,
@@ -181,6 +184,9 @@ async function main() {
       console.log('No invoice-triggered local-stock refresh is pending.');
       return;
     }
+    await startDataSync(client, 'thanda');
+    started = true;
+    await client.query('UPDATE xero_stock_sync_state SET last_started_at=NOW(), updated_at=NOW() WHERE id=true');
     const token = await hubStatus();
     const fetched = await fetchXeroItems(client, token);
     const xeroItems = fetched.items;
@@ -199,7 +205,7 @@ async function main() {
       const xeroItem = xeroItemsBySku.get(normalizeSku(product.sku));
       if (!xeroItem) {
         stats.missing += 1;
-        await updateLocalStock(client, product, 0, null, fetched.observedAt);
+        await updateLocalStock(client, product, null, null, fetched.observedAt);
         stats.updated += 1;
         continue;
       }
@@ -215,6 +221,10 @@ async function main() {
       stats.updated += 1;
     }
     await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NULL, last_completed_at = NOW(), updated_at = NOW() WHERE id = true');
+    await finishDataSync(client, 'thanda', { observedAt: fetched.observedAt, counts: stats });
+  } catch (error) {
+    if (started) await finishDataSync(client, 'thanda', { status: 'failed', error }).catch(() => {});
+    throw error;
   } finally {
     if (locked) await client.query('SELECT pg_advisory_unlock(742033)');
     client.release();

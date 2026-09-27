@@ -40,8 +40,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, message: SUCCESS_MESSAGE });
     }
 
-    const token = await createAccountSetupToken(Number(user.id));
-    await sendAccountSetupEmail({ to: user.email, token });
+    const token = await createAccountSetupToken({ userId: Number(user.id), email: user.email,
+      organisationId: Number(user.organisation_id) });
+    if (token) await sendAccountSetupEmail({ to: user.email, token });
     return NextResponse.json({ ok: true, message: SUCCESS_MESSAGE });
   } catch (error) {
     console.error('Password reset request failed:', error);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { hubFetch, hubStatus, assertHubSnapshot } from '../src/lib/xero/hub.mjs';
+import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 
 import { createPool } from './product-sync-lib.mjs';
 import {
@@ -43,11 +44,14 @@ async function main() {
   const pool = createPool();
   const client = await pool.connect();
   let locked = false;
+  let started = false;
   try {
     await ensureAcceptedQuoteSchema(client);
     const lock = await client.query('SELECT pg_try_advisory_lock(742037) AS locked');
     locked = Boolean(lock.rows[0]?.locked);
     if (!locked) return console.log('Another Xero accepted-quote sync is already running.');
+    await startDataSync(client, 'accepted-quotes');
+    started = true;
     await client.query("UPDATE xero_accepted_quote_sync_state SET last_started_at=NOW(), last_error=NULL, updated_at=NOW() WHERE id=true");
     const token = await hubStatus();
     if (!token.tenant_id) throw new Error('Xero Hub connection has no tenant identity');
@@ -56,8 +60,10 @@ async function main() {
       reservationDays: acceptedQuoteReservationDays(),
       sourceObservedAt: fetched.sourceObservedAt,
     });
+    await finishDataSync(client, 'accepted-quotes', { observedAt: fetched.sourceObservedAt, counts: { ...stats, pages: fetched.pages } });
     console.log(JSON.stringify({ ...stats, pages: fetched.pages }, null, 2));
   } catch (error) {
+    if (started) await finishDataSync(client, 'accepted-quotes', { status: 'failed', error }).catch(() => {});
     await client.query(
       "UPDATE xero_accepted_quote_sync_state SET last_error=$1, updated_at=NOW() WHERE id=true",
       [error instanceof Error ? error.message : String(error)],

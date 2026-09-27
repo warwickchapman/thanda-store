@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
+import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -25,11 +27,6 @@ const ALLOWLIST_FILE = process.env.VICTRON_ALLOWLIST_FILE
   || path.resolve(__dirname, '../data/victron-zar-2026-q3-skus.json');
 const RATE_LIMIT_CACHE_FILE = process.env.VICTRON_RATE_LIMIT_CACHE_FILE
   || path.resolve(__dirname, '../../.victron-rate-limit.json');
-
-if (!API_KEY) {
-  console.error('VICTRON_EORDER_API_KEY is required.');
-  process.exit(1);
-}
 
 const pool = createPool();
 
@@ -119,12 +116,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function selectWarehouseStock(product) {
-  const warehouseStock = numberOrNull(product.all_stock_by_warehouse?.af_sa_inzuzo);
-  if (warehouseStock !== null) return warehouseStock;
-  return numberOrNull(product.stock_quantity) ?? 0;
-}
-
 function selectImageUrl(product) {
   const productData = product.product_data || {};
   const mainImage = productData.main_images?.[0]?.url;
@@ -138,7 +129,7 @@ function successorSkuFromDescription(description) {
   return match ? match[1].toUpperCase() : null;
 }
 
-function buildProduct(product, extendedProduct) {
+function buildProduct(product, extendedProduct, observedAt) {
   const richProduct = extendedProduct || product;
   const productData = richProduct.product_data || {};
   const accountPrice = numberOrNull(product.price) ?? 0;
@@ -152,10 +143,12 @@ function buildProduct(product, extendedProduct) {
   const imageUrl = selectImageUrl(richProduct);
   const is120vAc = /(^|[^0-9])120V([^0-9]|$)/i.test(name);
   const hidden = category.toLowerCase() === 'solar home system';
-  const supplierStock = selectWarehouseStock(product);
+  const stock = observeVictronSupplierStock(product, observedAt);
+  const supplierStock = stock.quantity;
   const details = {
     originalPrice: recommendedRetailExVat,
-      supplierObservedAt: new Date().toISOString(),
+    supplierObservedAt: stock.observedAt,
+    supplierStockStatus: stock.status,
     recommendedRetailExVat,
     recommendedRetailPriceVatMode: 'ex_vat',
     recommendedRetailSource: 'eorder_price_divided_by_thanda_discount_factor',
@@ -183,7 +176,7 @@ function buildProduct(product, extendedProduct) {
     // E-Order exposes current warehouse quantities but does not expose a
     // reliable inbound shipment/ETA field in the product response. Never
     // promise the normal lead time when South African stock is zero.
-    supplierAvailability: supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
+    supplierAvailability: supplierStock === null ? 'Availability unknown' : supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
   };
 
   if (extendedProduct) {
@@ -201,7 +194,7 @@ function buildProduct(product, extendedProduct) {
     category,
     price: accountPrice,
     image_url: imageUrl,
-    stock_on_hand: supplierStock,
+    stock_on_hand: supplierStock ?? 0,
     details,
   };
 }
@@ -224,10 +217,16 @@ async function upsertSkuSuccession(client, product) {
 }
 
 async function main() {
-  if (skipIfRateLimited()) return;
+  await startDataSync(pool, 'victron');
+  if (!API_KEY) throw new Error('VICTRON_EORDER_API_KEY is required.');
+  if (skipIfRateLimited()) {
+    await finishDataSync(pool, 'victron', { status: 'failed', error: 'HTTP 429: waiting for recorded retry deadline' });
+    return;
+  }
 
   const allowedSkus = loadAllowedSkus();
   const products = await fetchPagedProducts('products');
+  const observedAt = new Date().toISOString();
   const priceListProducts = products.filter((product) => allowedSkus.has(String(product.sku || '').toUpperCase()));
   // Successions are supplier catalogue data, not an assortment decision. Scan
   // the complete E-Order response so a replacement relationship is retained
@@ -284,7 +283,7 @@ async function main() {
     for (const product of allowedProducts) {
       const sku = String(product.sku || '').toUpperCase();
       try {
-        const normalized = buildProduct(product, extendedBySku.get(sku));
+        const normalized = buildProduct(product, extendedBySku.get(sku), observedAt);
         await upsertProduct(client, normalized);
         stats.synced += 1;
         if (FETCH_EXTENDED && !normalized.image_url) stats.missingImagesAfterExtended.push(sku);
@@ -299,14 +298,20 @@ async function main() {
     }
   } finally {
     client.release();
-    await pool.end();
   }
 
+  await finishDataSync(pool, 'victron', {
+    status: stats.failed.length || stats.missingFromApi.length || extendedFailures.length ? 'partial' : 'success',
+    observedAt,
+    error: stats.failed.length || stats.missingFromApi.length || extendedFailures.length ? 'Incomplete catalogue update' : null,
+    counts: { synced: stats.synced, failed: stats.failed.length, missing: stats.missingFromApi.length, extendedFailed: extendedFailures.length },
+  });
   console.log(JSON.stringify(stats, null, 2));
   if (stats.failed.length > 0) process.exitCode = 1;
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  await finishDataSync(pool, 'victron', { status: 'failed', error }).catch(() => {});
   console.error(error);
-  process.exit(1);
-});
+  process.exitCode = 1;
+}).finally(() => pool.end());

@@ -12,15 +12,28 @@ Resend's [idempotency keys](https://resend.com/changelog/idempotency-keys) expir
 
 ## Contact pricing
 
-`contact_supplier_discounts` is keyed by Xero contact ID and supplier. All users on the contact, storefront pricing, carts, quote creation and API exports read this source. Legacy user discounts are retained only as migration evidence. The one-time transaction checks explicit rates and implicit defaults across all contact users and aborts on a conflict; it never silently picks a price. Creating another user does not overwrite existing contact prices. Relinking to another Xero contact selects that contact's pricing, rather than copying the old company's rates.
+`contact_supplier_discounts` is keyed by Xero contact ID and supplier. All users on the contact, storefront pricing, carts, quote creation and API exports read this source. Legacy user discounts are retained only as migration evidence. The one-time transaction checks explicit rates and implicit defaults across all contact users and aborts on a conflict; it never silently picks a price. Creating another user does not overwrite existing contact prices. Explicitly moving a person to another company selects the destination contact's pricing; the company identity is never repointed and old rates are not copied.
 
-Admin user editing includes clearly labelled company discount controls; saving applies to every user of the linked contact. API access is separately enabled per user, off by default. Enabled users manage up to three keys in API access. Each bearer secret is shown once and stored only as a hash. Revoking a key or disabling API access takes effect immediately; keys are bound to the original user/contact pair and cannot follow a user to another contact. No credentials are included in documentation or logs.
+Company membership and source-freshness regression checks can run against disposable PostgreSQL from `thanda-store/`:
+
+```bash
+node --test test/*.test.mjs
+RUN_COMPANY_DB_TESTS=1 node test/company-management.integration.mjs
+RUN_FRESHNESS_DB_TESTS=1 node test/data-freshness.integration.mjs
+RUN_AUTH_DB_TESTS=1 node test/auth-credential-boundary.integration.mjs
+```
+
+Set `DATABASE_URL` to a disposable local instance for the integration commands. Each creates and drops a unique synthetic schema. Company tests cover shared-company email edits, validation rollback, explicit movement, credential/cart isolation and pricing. Freshness tests execute the actual stock/sales/reservation jobs against a local fake Hub, covering observed versus imported time, tracked zero versus unknown, failed/partial outcomes and retained evidence. No real supplier, Xero or mail request is made. The existing commerce DB test remains available as `npm run test:customer-commerce:db`.
+
+The credential-boundary suite exercises concurrent identity changes, OTP/session creation, API-key issuance and password setup against the real database. These operations take the same user lock and recheck identity before issuing credentials, so an in-flight request cannot recreate credentials after an email or company edit revoked them. OTP consumption and session creation are one transaction; replacement codes invalidate older unused codes. Setup completion uses the same user-then-token lock order to avoid deadlocks with membership changes.
+
+**Admin → Companies** owns the contact identity, discounts and people list; saving discounts applies to every user of the linked contact. A personal email edit validates against the same company and leaves colleagues unchanged. Explicit company movement revokes only that person’s sessions/codes/keys, disables their API access and clears their cart. API access is separately enabled per user, off by default. Enabled users manage up to three keys in API access. Each bearer secret is shown once and stored only as a hash. Revoking a key or disabling API access takes effect immediately; keys are bound to the original user/contact pair and cannot follow a user to another contact. No credentials are included in documentation or logs.
 
 ## API v1
 
 `GET /api/v1/products` accepts `Authorization: Bearer <key>`. Use HTTPS. The same endpoint with `?format=csv` exports the complete catalogue. Signed-in users can download the same pricing data from `/api/account/catalogue.csv` without exposing a bearer secret in a URL.
 
-JSON fields: supplier, SKU, description, price excluding VAT, currency, separate Thanda/supplier stock, immediate successor SKU, source timestamps and company pricing timestamp. Unknown prices/stock timestamps are null. LoRa has no supplier stock. The normal storefront product scope and hidden-product rules apply.
+JSON fields: supplier, SKU, description, price excluding VAT, currency, separate Thanda/supplier stock, immediate successor SKU, source timestamps and company pricing timestamp. Unknown prices, stock quantities and timestamps are null. LoRa has no supplier feed; Hubble's manual availability does not imply a counted supplier quantity. The normal storefront product scope and hidden-product rules apply.
 
 Pagination defaults to 100 rows, maximum 250 (`limit`). Follow the opaque `next_cursor` using `cursor`. It is scoped to the contact and content revision; a changed catalogue returns 409 so the integration restarts the scan. ETags and `If-None-Match` support 304 change detection. Price changes are included in the revision even when catalogue rows have not changed. Rate limiting is 60 requests/minute per user across all their keys; 429 includes `Retry-After`. Berg's integration remains responsible for changes to its own Xero account.
 

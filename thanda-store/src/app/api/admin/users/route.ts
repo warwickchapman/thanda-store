@@ -9,6 +9,7 @@ import {
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import { sendAccountSetupEmail, sendPasswordResetEmail } from '@/lib/email/resend';
 import { getXeroContactDetails, getXeroContactPeople } from '@/lib/xero/oauth';
+import { CompanyManagementError, defaultCompanyDiscount, moveUserCompany, updateUserEmail } from '@/lib/admin/company-management.mjs';
 
 async function requireAdmin() {
   const user = await currentUser();
@@ -25,13 +26,10 @@ function text(value: unknown) {
   return String(value || '').trim();
 }
 
-function discount(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 40 ? parsed : null;
-}
-
-async function sendSetupEmail(user: { id: number; email: string }) {
-  const token = await createAccountSetupToken(user.id);
+async function sendSetupEmail(user: { id: number; email: string; organisation_id: number }) {
+  const token = await createAccountSetupToken({ userId: Number(user.id), email: user.email,
+    organisationId: Number(user.organisation_id) });
+  if (!token) throw new Error('Account changed before the setup link could be issued. Reload and try again.');
   await sendAccountSetupEmail({ to: user.email, token });
 }
 
@@ -72,7 +70,8 @@ export async function GET() {
     ORDER BY o.name, u.email
   `);
 
-  return NextResponse.json({ users: result.rows, canManageUsers: admin.canManageUsers });
+  const defaultDiscount = defaultCompanyDiscount();
+  return NextResponse.json({ users: result.rows.map((user) => ({ ...user, discounts: { victron: defaultDiscount, renogy: defaultDiscount, ...user.discounts } })), canManageUsers: admin.canManageUsers });
 }
 
 export async function POST(request: Request) {
@@ -82,81 +81,51 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const email = text(body.email).toLowerCase();
-  const xeroContactId = text(body.xeroContactId);
+  const organisationId = Number(body.organisationId);
   const role = body.role === 'admin' ? 'admin' : 'buyer';
   const canManageUsers = role === 'admin' && body.canManageUsers === true;
-  const victronDiscount = discount(body.victronDiscount);
-  const renogyDiscount = discount(body.renogyDiscount);
 
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     return NextResponse.json({ error: 'Provide a valid email address.' }, { status: 400 });
   }
-  if (role === 'buyer' && !xeroContactId) {
-    return NextResponse.json({ error: 'Select a Xero contact before inviting a user.' }, { status: 400 });
-  }
-  if (role === 'buyer' && (victronDiscount === null || renogyDiscount === null)) {
-    return NextResponse.json({ error: 'Victron and Renogy discounts must be between 0% and 40%.' }, { status: 400 });
-  }
-  const xeroContact = role === 'buyer'
-    ? await getXeroContactDetails(xeroContactId)
+  const selectedCompany = role === 'buyer' && Number.isSafeInteger(organisationId)
+    ? (await pool.query('SELECT id,xero_contact_id FROM organisations WHERE id=$1', [organisationId])).rows[0]
     : null;
-  if (xeroContact) {
-    const xeroPrimary = xeroContact.people.find(
-      (person) => person.kind === 'primary' && person.email === email,
-    );
-    if (!xeroPrimary) {
-      return NextResponse.json({ error: 'The portal email must match the selected Xero contact primary email address.' }, { status: 400 });
+  if (role === 'buyer' && !selectedCompany?.xero_contact_id) {
+    return NextResponse.json({ error: 'Select an existing linked company. Create the company first in Companies if needed.' }, { status: 400 });
+  }
+  let xeroPerson = null;
+  if (selectedCompany) {
+    try {
+      xeroPerson = (await getXeroContactPeople(selectedCompany.xero_contact_id)).find((person) => person.email === email);
+    } catch {
+      return NextResponse.json({ error: 'Unable to verify the stored Xero people. No user was created. Try again when the Hub is available.' }, { status: 503 });
     }
+    if (!xeroPerson) return NextResponse.json({ error: 'The email must belong to an eligible person on the selected company’s Xero contact.' }, { status: 400 });
   }
 
   const client = await pool.connect();
-  let user: { id: number; email: string };
+  let user: { id: number; email: string; organisation_id: number };
   try {
     await client.query('BEGIN');
-    const organisation = xeroContact ? await client.query(
-      `
-        INSERT INTO organisations (name, xero_contact_id, xero_contact_name)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (xero_contact_id) WHERE xero_contact_id IS NOT NULL DO UPDATE
-          SET name = EXCLUDED.name,
-              xero_contact_name = EXCLUDED.xero_contact_name,
-              updated_at = NOW()
-        RETURNING id
-      `,
-      [xeroContact.name, xeroContactId, xeroContact.name],
-    ) : await client.query(
-      `
-        WITH existing AS (
-          SELECT id FROM organisations
-          WHERE xero_contact_id IS NULL AND name = 'Thanda staff'
-          ORDER BY id LIMIT 1
-        ), inserted AS (
-          INSERT INTO organisations (name)
-          SELECT 'Thanda staff'
-          WHERE NOT EXISTS (SELECT 1 FROM existing)
-          RETURNING id
-        )
-        SELECT id FROM existing UNION ALL SELECT id FROM inserted
-      `,
+    const organisation = selectedCompany ? { rows: [{ id: selectedCompany.id }] } : await client.query(
+      `WITH existing AS (
+        SELECT id FROM organisations WHERE xero_contact_id IS NULL AND name='Thanda staff' ORDER BY id LIMIT 1
+      ), inserted AS (
+        INSERT INTO organisations(name) SELECT 'Thanda staff' WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id
+      ) SELECT id FROM existing UNION ALL SELECT id FROM inserted`,
     );
     const unusablePassword = await hashPassword(crypto.randomBytes(32).toString('hex'));
     const insertedUser = await client.query(
       `
         INSERT INTO portal_users (organisation_id, email, password_hash, role, can_manage_users, is_active, xero_person_kind, xero_person_email)
         VALUES ($1, $2, $3, $4, $5, true, $6, $7)
-        RETURNING id, email
+        RETURNING id, email, organisation_id
       `,
       [organisation.rows[0].id, email, unusablePassword, role, canManageUsers,
-        xeroContact ? 'primary' : 'manual', xeroContact ? email : null],
+        xeroPerson?.kind || 'manual', xeroPerson?.email || null],
     );
     user = insertedUser.rows[0];
-    if (role === 'buyer') await client.query(
-      `
-        INSERT INTO contact_supplier_discounts (contact_id, supplier, discount_percent)
-        VALUES ($1, 'victron', $2), ($1, 'renogy', $3) ON CONFLICT DO NOTHING
-      `,
-      [xeroContactId, victronDiscount, renogyDiscount],
-    );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -185,21 +154,8 @@ export async function PATCH(request: Request) {
   const body = await request.json();
   const action = text(body.action) || 'linkXero';
 
-  if (action === 'setCompanyDiscounts') {
-    const contactId = text(body.xeroContactId);
-    const victron = discount(body.victronDiscount);
-    const renogy = discount(body.renogyDiscount);
-    if (!contactId || victron === null || renogy === null) return NextResponse.json({ error: 'Select a linked company and discounts between 0% and 40%.' }, { status: 400 });
-    const company = await pool.query('SELECT id FROM organisations WHERE xero_contact_id=$1', [contactId]);
-    if (!company.rowCount) return NextResponse.json({ error: 'Linked company not found.' }, { status: 404 });
-    await pool.query(`WITH saved AS (
-      INSERT INTO contact_supplier_discounts(contact_id,supplier,discount_percent)
-      VALUES($1,'victron',$2),($1,'renogy',$3) ON CONFLICT(contact_id,supplier)
-      DO UPDATE SET discount_percent=EXCLUDED.discount_percent,updated_at=now() RETURNING supplier,discount_percent)
-      INSERT INTO portal_activity_log(user_id,organisation_id,action,resource_type,resource_id,metadata)
-      SELECT $4,$5,'company_discounts_changed','xero_contact',$1,jsonb_object_agg(supplier,discount_percent) FROM saved`,
-      [contactId,victron,renogy,admin.id,admin.organisationId]);
-    return NextResponse.json({ ok: true });
+  if (action === 'setCompanyDiscounts' || action === 'linkXero') {
+    return NextResponse.json({ error: 'Manage company pricing in Companies. To change a person’s company, use Move company; shared Xero links cannot be repointed.' }, { status: 400 });
   }
 
   if (action === 'setApiAccess') {
@@ -234,13 +190,17 @@ export async function PATCH(request: Request) {
     try {
       await client.query('BEGIN');
       const target = await client.query(
-        'SELECT id, role, can_manage_users, is_active FROM portal_users WHERE id = $1 FOR UPDATE',
+        'SELECT u.id,u.role,u.can_manage_users,u.is_active,o.xero_contact_id FROM portal_users u JOIN organisations o ON o.id=u.organisation_id WHERE u.id=$1 FOR UPDATE OF u',
         [userId],
       );
       const current = target.rows[0];
       if (!current) {
         await client.query('ROLLBACK');
         return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+      }
+      if (role === 'buyer' && !current.xero_contact_id) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'Move this user to a linked company before changing their access to Buyer.' }, { status: 400 });
       }
       if (current.is_active && current.role === 'admin' && current.can_manage_users && !canManageUsers) {
         const managers = await client.query(
@@ -265,63 +225,16 @@ export async function PATCH(request: Request) {
     }
   }
 
-  if (action === 'updateEmail') {
-    const userId = Number(body.userId);
-    const email = text(body.email).toLowerCase();
-    if (!Number.isInteger(userId) || !/^\S+@\S+\.\S+$/.test(email)) {
-      return NextResponse.json({ error: 'A valid user and email address are required.' }, { status: 400 });
-    }
-
-    const client = await pool.connect();
+  if (action === 'updateEmail' || action === 'moveCompany') {
     try {
-      await client.query('BEGIN');
-      const user = await client.query(
-        'SELECT organisation_id, email FROM portal_users WHERE id = $1 FOR UPDATE',
-        [userId],
-      );
-      const row = user.rows[0];
-      if (!row) {
-        await client.query('ROLLBACK');
-        return NextResponse.json({ error: 'User not found.' }, { status: 404 });
-      }
-      if (row.email.toLowerCase() === email) {
-        await client.query('COMMIT');
-        return NextResponse.json({ ok: true, unchanged: true, signedOut: false });
-      }
-
-      const duplicate = await client.query(
-        'SELECT id FROM portal_users WHERE LOWER(email) = $1 AND id <> $2 LIMIT 1',
-        [email, userId],
-      );
-      if (duplicate.rowCount) {
-        await client.query('ROLLBACK');
-        return NextResponse.json({ error: 'That email address is already assigned to another portal user.' }, { status: 409 });
-      }
-
-      await client.query(
-        'UPDATE portal_users SET email = $2, updated_at = NOW() WHERE id = $1',
-        [userId, email],
-      );
-      await client.query(
-        `
-          UPDATE organisations
-          SET xero_contact_id = NULL,
-              xero_contact_name = NULL,
-              updated_at = NOW()
-          WHERE id = $1
-        `,
-        [row.organisation_id],
-      );
-      await client.query('DELETE FROM portal_sessions WHERE user_id = $1', [userId]);
-      await client.query('UPDATE login_otps SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [userId]);
-      await client.query('UPDATE account_setup_tokens SET consumed_at = NOW() WHERE user_id = $1 AND consumed_at IS NULL', [userId]);
-      await client.query('COMMIT');
-      return NextResponse.json({ ok: true, signedOut: userId === admin.id });
+      const result = action === 'updateEmail'
+        ? await updateUserEmail(pool, { userId: Number(body.userId), email: body.email, actor: admin, getContact: getXeroContactDetails })
+        : await moveUserCompany(pool, { userId: Number(body.userId), organisationId: Number(body.organisationId), email: body.email, actor: admin, getContact: getXeroContactDetails });
+      return NextResponse.json({ ok: true, ...result });
     } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      if (error instanceof CompanyManagementError) return NextResponse.json({ error: error.message }, { status: error.status });
+      console.error('Could not update company membership:', error);
+      return NextResponse.json({ error: 'Unable to complete this change. No changes were saved. Verify that the stored Xero contact is available and try again.' }, { status: 503 });
     }
   }
 
@@ -369,7 +282,7 @@ export async function PATCH(request: Request) {
     }
 
     const client = await pool.connect();
-    let portalUser: { id: number; email: string };
+    let portalUser: { id: number; email: string; organisation_id: number };
     try {
       await client.query('BEGIN');
       const existing = await client.query(
@@ -394,7 +307,7 @@ export async function PATCH(request: Request) {
                 xero_person_email = $4,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email
+            RETURNING id, email, organisation_id
           `,
           [existingUser.id, resetPassword, xeroPerson.kind, xeroPerson.email],
         );
@@ -405,7 +318,7 @@ export async function PATCH(request: Request) {
           `
             INSERT INTO portal_users (organisation_id, email, password_hash, role, is_active, xero_person_kind, xero_person_email)
             VALUES ($1, $2, $3, 'buyer', true, $4, $5)
-            RETURNING id, email
+            RETURNING id, email, organisation_id
           `,
           [organisationId, xeroPerson.email, resetPassword, xeroPerson.kind, xeroPerson.email],
         );
@@ -431,40 +344,7 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const organisationId = Number(body.organisationId);
-  const xeroContactId = text(body.xeroContactId);
-  if (!Number.isInteger(organisationId) || !xeroContactId) {
-    return NextResponse.json({ error: 'Organisation and Xero contact ID are required.' }, { status: 400 });
-  }
-
-  const xeroContact = await getXeroContactDetails(xeroContactId);
-  const people = xeroContact.people;
-  await pool.query(
-    `
-      UPDATE organisations
-      SET name = $2,
-          xero_contact_id = $3,
-          xero_contact_name = $2,
-          updated_at = NOW()
-      WHERE id = $1
-    `,
-    [organisationId, xeroContact.name, xeroContactId],
-  );
-  for (const person of people) {
-    await pool.query(
-      `
-        UPDATE portal_users
-        SET xero_person_kind = $3,
-            xero_person_email = $2,
-            archived_at = NULL,
-            updated_at = NOW()
-        WHERE organisation_id = $1
-          AND LOWER(email) = $2
-      `,
-      [organisationId, person.email, person.kind],
-    );
-  }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ error: 'Unknown user action.' }, { status: 400 });
 }
 
 export async function PUT(request: Request) {
@@ -479,7 +359,7 @@ export async function PUT(request: Request) {
 
   const result = await pool.query(
     `
-      SELECT u.id, u.email, u.role, u.is_active, o.xero_contact_id
+      SELECT u.id, u.email, u.role, u.is_active, u.organisation_id, o.xero_contact_id
       FROM portal_users u
       JOIN organisations o ON o.id = u.organisation_id
       WHERE u.id = $1
@@ -495,7 +375,9 @@ export async function PUT(request: Request) {
   }
 
   if (action === 'passwordReset') {
-    const token = await createAccountSetupToken(Number(user.id));
+    const token = await createAccountSetupToken({ userId: Number(user.id), email: user.email,
+      organisationId: Number(user.organisation_id) });
+    if (!token) return NextResponse.json({ error: 'Account changed before the reset link could be issued. Reload and try again.' }, { status: 409 });
     await sendPasswordResetEmail({ to: user.email, token });
     return NextResponse.json({ ok: true });
   }

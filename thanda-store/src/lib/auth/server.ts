@@ -3,12 +3,9 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import pool from '@/lib/db';
 import { ensureAuthSchema } from './schema';
+import { finishAccountSetup, finishLogin, issueAccountSetupToken, issueLoginOtp } from './login.mjs';
 
 export const SESSION_COOKIE = 'thanda_session';
-const OTP_TTL_MINUTES = 10;
-const SESSION_TTL_DAYS = 14;
-const MAX_OTP_ATTEMPTS = 5;
-const ACCOUNT_SETUP_TTL_DAYS = 7;
 
 export type PortalUser = {
   id: number;
@@ -29,11 +26,6 @@ function sha256(value: string) {
 
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 12);
-}
-
-function numericCode(length = 6) {
-  const max = 10 ** length;
-  return String(crypto.randomInt(0, max)).padStart(length, '0');
 }
 
 function numberOrZero(value: unknown) {
@@ -60,119 +52,24 @@ export async function verifyPassword(password: string, passwordHash: string) {
   return bcrypt.compare(password, passwordHash);
 }
 
-export async function createAccountSetupToken(userId: number) {
+export async function createAccountSetupToken(expected: LoginIdentity) {
   await ensureAuthSchema();
-  const token = crypto.randomBytes(32).toString('hex');
-  await pool.query(
-    `
-      UPDATE account_setup_tokens
-      SET consumed_at = NOW()
-      WHERE user_id = $1 AND consumed_at IS NULL
-    `,
-    [userId],
-  );
-  await pool.query(
-    `
-      INSERT INTO account_setup_tokens (user_id, token_hash, expires_at)
-      VALUES ($1, $2, NOW() + ($3::text || ' days')::interval)
-    `,
-    [userId, sha256(token), ACCOUNT_SETUP_TTL_DAYS],
-  );
-  return token;
+  return issueAccountSetupToken(pool, expected);
 }
 
 export async function completeAccountSetup(token: string, password: string) {
   await ensureAuthSchema();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const tokenResult = await client.query(
-      `
-        SELECT t.user_id, u.email
-        FROM account_setup_tokens t
-        JOIN portal_users u ON u.id = t.user_id
-        WHERE t.token_hash = $1
-          AND t.consumed_at IS NULL
-          AND t.expires_at > NOW()
-        FOR UPDATE OF t
-      `,
-      [sha256(token)],
-    );
-    const row = tokenResult.rows[0];
-    if (!row) {
-      await client.query('ROLLBACK');
-      return null;
-    }
-
-    const passwordHash = await hashPassword(password);
-    await client.query(
-      'UPDATE portal_users SET password_hash = $2, updated_at = NOW() WHERE id = $1',
-      [row.user_id, passwordHash],
-    );
-    await client.query(
-      'UPDATE account_setup_tokens SET consumed_at = NOW() WHERE token_hash = $1',
-      [sha256(token)],
-    );
-    await client.query('COMMIT');
-    return String(row.email);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  return finishAccountSetup(pool, token, () => hashPassword(password));
 }
 
-export async function createLoginOtp(userId: number) {
-  const otp = numericCode();
-  await pool.query(
-    `
-      INSERT INTO login_otps (user_id, otp_hash, expires_at)
-      VALUES ($1, $2, NOW() + ($3::text || ' minutes')::interval)
-    `,
-    [userId, sha256(otp), OTP_TTL_MINUTES],
-  );
-  return otp;
+type LoginIdentity = { userId: number; email: string; organisationId: number };
+
+export async function createLoginOtp(expected: LoginIdentity & { passwordHash: string }) {
+  return issueLoginOtp(pool, expected);
 }
 
-export async function consumeLoginOtp(userId: number, otp: string) {
-  const result = await pool.query(
-    `
-      SELECT id, otp_hash, attempts
-      FROM login_otps
-      WHERE user_id = $1
-        AND consumed_at IS NULL
-        AND expires_at > NOW()
-      ORDER BY created_at DESC
-      LIMIT 1
-    `,
-    [userId],
-  );
-  const row = result.rows[0];
-  if (!row) return false;
-
-  if (row.attempts >= MAX_OTP_ATTEMPTS) return false;
-
-  const matches = row.otp_hash === sha256(otp.trim());
-  if (!matches) {
-    await pool.query('UPDATE login_otps SET attempts = attempts + 1 WHERE id = $1', [row.id]);
-    return false;
-  }
-
-  await pool.query('UPDATE login_otps SET consumed_at = NOW() WHERE id = $1', [row.id]);
-  return true;
-}
-
-export async function createSession(userId: number) {
-  const token = crypto.randomBytes(32).toString('hex');
-  await pool.query(
-    `
-      INSERT INTO portal_sessions (user_id, session_hash, expires_at)
-      VALUES ($1, $2, NOW() + ($3::text || ' days')::interval)
-    `,
-    [userId, sha256(token), SESSION_TTL_DAYS],
-  );
-  return token;
+export async function completeLogin(expected: LoginIdentity, otp: string) {
+  return finishLogin(pool, expected, otp);
 }
 
 export async function destroySession(token: string | undefined) {

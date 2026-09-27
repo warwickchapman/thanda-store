@@ -10,18 +10,21 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DataSourceStatus } from "@/lib/data-freshness";
 
 type ReportItem = {
   sku: string;
   name: string;
-  sales30: number;
-  sales90: number;
-  dailyDemand: number;
-  localStock: number;
-  inbound: number;
-  backorder: number;
+  sales30: number | null;
+  sales90: number | null;
+  dailyDemand: number | null;
+  localStock: number | null;
+  knownLocalStock: number | null;
+  localStockObservedAt: string | null;
+  inbound: number | null;
+  backorder: number | null;
   provisional: number;
-  reserved: number;
+  reserved: number | null;
   acceptedQuoteLines: Array<{
     quoteId: string;
     quoteNumber: string;
@@ -29,7 +32,7 @@ type ReportItem = {
     reference: string;
     quantity: number;
   }>;
-  supplierStock: number;
+  supplierStock: number | null;
   unitPrice: number;
   priceBreakQty: number | null;
   priceBreakPrice: number | null;
@@ -37,14 +40,24 @@ type ReportItem = {
   predecessorSkus: string[];
   note: string | null;
   daysCover: number | null;
-  reorderPoint: number;
-  targetStock: number;
-  suggestedOrder: number;
-  status: "order_now" | "top_up" | "covered" | "satisfied" | "in_cart";
+  reorderPoint: number | null;
+  targetStock: number | null;
+  suggestedOrder: number | null;
+  status: "order_now" | "top_up" | "covered" | "satisfied" | "in_cart" | "review";
+  confidence: "current" | "provisional" | "unavailable";
+  reviewReasons: string[];
   lastSoldAt: string | null;
 };
 type Report = {
   items: ReportItem[];
+  dataHealth: {
+    checkedAt: string;
+    sources: DataSourceStatus[];
+    sourceIssues: DataSourceStatus[];
+    warnings: string[];
+    provisionalCount: number;
+    unavailableCount: number;
+  };
   provisionalCart: {
     lineCount: number;
     uploadedAt: string | null;
@@ -90,8 +103,8 @@ type SortKey =
   | "suggestedOrder"
   | "status";
 type SortDirection = "asc" | "desc";
-const number = (value: number, maximumFractionDigits = 0) =>
-  new Intl.NumberFormat("en-ZA", { maximumFractionDigits }).format(value);
+const number = (value: number | null, maximumFractionDigits = 0) =>
+  value === null ? "Unknown" : new Intl.NumberFormat("en-ZA", { maximumFractionDigits }).format(value);
 const money = (value: number | null) =>
   value === null
     ? "—"
@@ -466,6 +479,7 @@ export default function ReplenishmentPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("suggestedOrder");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [itemSearch, setItemSearch] = useState("");
@@ -497,7 +511,9 @@ export default function ReplenishmentPage() {
           data.error || "Unable to load the replenishment report.",
         );
       setReport(data);
+      setLoadFailed(false);
     } catch (cause) {
+      setLoadFailed(true);
       setError(
         cause instanceof Error ? cause.message : "Unable to load the report.",
       );
@@ -551,6 +567,7 @@ export default function ReplenishmentPage() {
       )
       .sort((left, right) => {
         const ranks = {
+          review: -1,
           order_now: 0,
           top_up: 1,
           in_cart: 2,
@@ -562,11 +579,13 @@ export default function ReplenishmentPage() {
             ? `${item.sku} ${item.name}`
             : sortKey === "status"
               ? ranks[item.status]
-              : sortKey === "daysCover"
-                ? (item.daysCover ?? Number.POSITIVE_INFINITY)
-                : item[sortKey];
+              : item[sortKey];
         const leftValue = value(left);
         const rightValue = value(right);
+        // Unknown quantities stay at the end in either direction; they are
+        // never silently sorted as zero or as a very large stock quantity.
+        if (leftValue === null || rightValue === null)
+          return leftValue === rightValue ? left.sku.localeCompare(right.sku) : leftValue === null ? 1 : -1;
         const comparison =
           typeof leftValue === "string"
             ? leftValue.localeCompare(String(rightValue))
@@ -785,6 +804,14 @@ export default function ReplenishmentPage() {
         {error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             {error}
+            {loadFailed && (
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                {report && <span>The report below is the last successfully loaded copy.</span>}
+                <button type="button" onClick={() => void load()} disabled={loading} className="font-semibold underline disabled:opacity-60">
+                  {loading ? "Loading…" : "Retry report"}
+                </button>
+              </div>
+            )}
           </div>
         )}
         {message && (
@@ -821,6 +848,34 @@ export default function ReplenishmentPage() {
         )}
         {report && (
           <>
+            <section className={`mb-5 rounded-lg border p-4 text-sm ${report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "border-amber-300 bg-amber-50 text-amber-950" : "border-zinc-200 bg-white text-zinc-700"}`}>
+              <h2 className="font-bold">
+                {report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "Review the data before ordering" : "Planning data checked"}
+              </h2>
+              <p className="mt-1">
+                {report.dataHealth.unavailableCount > 0 && `${report.dataHealth.unavailableCount} suggestion${report.dataHealth.unavailableCount === 1 ? " is" : "s are"} withheld because required data is unknown. `}
+                {report.dataHealth.provisionalCount > 0 && `${report.dataHealth.provisionalCount} suggestion${report.dataHealth.provisionalCount === 1 ? " uses" : "s use"} data that needs review. `}
+                Stock and demand use saved observations. Reloading this report does not refresh the source systems.
+              </p>
+              {(report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0) && (
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {report.dataHealth.sourceIssues.map((source) => <li key={source.id}>{source.label}: {source.message}</li>)}
+                  {report.dataHealth.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                </ul>
+              )}
+              <details className="mt-3">
+                <summary className="cursor-pointer font-semibold">Stock and demand update times</summary>
+                <dl className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {report.dataHealth.sources.map((source) => (
+                    <div key={source.id} className="min-w-0">
+                      <dt className="font-semibold">{source.label}</dt>
+                      <dd>{source.observedAt ? new Date(source.observedAt).toLocaleString() : "No confirmed observation"}</dd>
+                      <dd className="mt-0.5 text-xs">{source.message}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            </section>
             <div className="mb-5 flex flex-col justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm sm:flex-row sm:items-center">
               <p>
                 <span className="font-bold">Policy:</span> higher of 30- or
@@ -836,7 +891,7 @@ export default function ReplenishmentPage() {
                 className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold disabled:opacity-60"
               >
                 <RefreshCw className="h-4 w-4" />
-                Refresh
+                Reload report
               </button>
             </div>
             <section className="mb-5 rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
@@ -1154,7 +1209,9 @@ export default function ReplenishmentPage() {
                       )}
                     </td>
                     <td className="bg-sky-50 px-3 py-3 text-right text-base font-bold text-sky-950">
-                      {number(item.localStock)}
+                      <span title={item.localStock === null && item.knownLocalStock !== null ? `${number(item.knownLocalStock)} units observed, but part of this SKU family is unknown. No total is assumed.` : item.localStockObservedAt ? `Oldest family stock observation: ${new Date(item.localStockObservedAt).toLocaleString()}` : undefined}>
+                        {number(item.localStock)}
+                      </span>
                     </td>
                     <td
                       className="bg-violet-50 px-3 py-3 text-right font-bold text-violet-900"
@@ -1166,16 +1223,16 @@ export default function ReplenishmentPage() {
                                   `${line.quoteNumber} · ${line.contactName} · ${line.quantity}${line.reference ? ` · ${line.reference}` : ""}`,
                               )
                               .join("\n")
-                          : "No current accepted Xero quote reservation"
+                          : item.reserved === null ? "Accepted quote reservations are unknown" : "No current accepted Xero quote reservation"
                       }
                     >
-                      {item.reserved ? number(item.reserved) : "—"}
+                      {item.reserved === null ? "Unknown" : item.reserved ? number(item.reserved) : "—"}
                     </td>
                     <td className="bg-green-50 px-3 py-3 text-right font-bold text-green-800">
                       {number(item.inbound)}
                     </td>
                     <td className="bg-orange-50 px-3 py-3 text-right font-bold text-orange-800">
-                      {item.backorder ? number(item.backorder) : "—"}
+                      {item.backorder === null ? "Unknown" : item.backorder ? number(item.backorder) : "—"}
                     </td>
                     <td className="border-r border-zinc-300 bg-amber-50 px-3 py-3 text-right font-bold text-amber-900">
                       {item.provisional ? number(item.provisional) : "—"}
@@ -1187,9 +1244,9 @@ export default function ReplenishmentPage() {
                     </td>
                     <td
                       className="border-l border-zinc-300 px-3 py-3 text-right font-bold"
-                      title={`Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}; Reserved on accepted quotes: ${item.reserved}`}
+                      title={item.suggestedOrder === null ? "No suggestion: required stock or demand inputs are unknown. See the data checks above and this row's explanation." : `Configured Min: ${item.minimumStock}; 7-day Target: ${item.reorderPoint}; 14-day Target: ${item.targetStock}; Reserved on accepted quotes: ${item.reserved}${item.confidence === "provisional" ? ". Provisional: review the data checks before ordering." : ""}`}
                     >
-                      {item.suggestedOrder ? (
+                      {item.suggestedOrder === null ? <span className="font-medium text-amber-900">Withheld</span> : item.suggestedOrder ? (
                         <span className="flex w-full items-baseline justify-between gap-2">
                           {item.priceBreakQty && (
                             <span
@@ -1211,6 +1268,17 @@ export default function ReplenishmentPage() {
                       )}
                     </td>
                     <td className="border-l border-zinc-300 px-4 py-3">
+                      {item.confidence !== "current" ? (
+                        <details className="max-w-64 text-xs text-amber-950">
+                          <summary className="cursor-pointer whitespace-nowrap font-semibold">
+                            {item.confidence === "unavailable" ? "Needs data" : "Provisional"}
+                          </summary>
+                          <div className="mt-2 space-y-1 leading-relaxed">
+                            {item.reviewReasons.map((reason) => <p key={reason}>{reason}</p>)}
+                            {Boolean(report?.dataHealth.sourceIssues.length || report?.dataHealth.warnings.length) && <p>See the source checks above for stock, demand and delivery issues.</p>}
+                          </div>
+                        </details>
+                      ) : (
                       <span
                         className={`inline-flex border px-2 py-0.5 text-xs font-semibold ${item.status === "order_now" ? "border-red-200 bg-red-50 text-red-800" : item.status === "top_up" || item.status === "in_cart" ? "border-amber-200 bg-amber-50 text-amber-900" : item.status === "satisfied" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-green-200 bg-green-50 text-green-800"}`}
                       >
@@ -1224,10 +1292,11 @@ export default function ReplenishmentPage() {
                                 ? "Satisfied"
                                 : "Covered"}
                       </span>
+                      )}
                     </td>
                   </tr>
                 ))}
-                {!loading && !items.length && (
+                {!loading && !loadFailed && !items.length && (
                   <tr>
                     <td
                       colSpan={12}

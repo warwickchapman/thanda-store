@@ -45,6 +45,32 @@ export default function ReplenishmentHowItWorksPage() {
           </section>
 
           <section className="border-t border-zinc-200 pt-5">
+            <h2 className="font-bold">Unknown or overdue data</h2>
+            <p className="mt-2 text-zinc-700">
+              The update times on Replenishment describe when each source was
+              observed. <b>Reload report</b> reads the saved data; it does not
+              contact Xero or the supplier. The data checks show failed,
+              incomplete and overdue updates separately from current observations.
+            </p>
+            <p className="mt-2 text-zinc-700">
+              <b>Unknown</b> stock is different from a confirmed zero. Stock
+              needs a tracked Xero item, a quantity and an observation time for
+              every article in its replacement family, including hidden
+              predecessors. A missing or untracked article leaves the family
+              total unknown. Base and retail packaging rows are counted once.
+            </p>
+            <p className="mt-2 text-zinc-700">
+              <b>Withheld</b> means Suggested cannot be calculated because stock,
+              sales and credit history, shipments and backorders, or accepted
+              quote reservations are unknown. <b>Provisional</b> retains a
+              calculation from older or incomplete updates and needs review
+              before ordering. Expand the row status for its explanation and
+              check the shared source warnings above the table. Supplier stock
+              affects confidence in availability, not the target quantity.
+            </p>
+          </section>
+
+          <section className="border-t border-zinc-200 pt-5">
             <h2 className="font-bold">Accepted Xero quotes</h2>
             <p className="mt-2 text-zinc-700">
               <b>Quotes</b>{" "}reserves matching Victron quantities on current

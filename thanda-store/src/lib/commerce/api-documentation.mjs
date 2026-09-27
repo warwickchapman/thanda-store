@@ -9,7 +9,7 @@ export const productProperties = {
   price_ex_vat: { type: ['number', 'null'], description: 'Your company’s discounted unit price excluding VAT. Null means no price is available; never treat it as zero.' },
   currency: { type: 'string', description: 'Currency code for the price, normally ZAR.' },
   thanda_stock: { type: ['number', 'null'], description: 'Last recorded Thanda stock on this SKU. Null means unknown, not zero. This is not a reservation or delivery promise.' },
-  supplier_stock: { type: ['number', 'null'], description: 'Last recorded supplier stock on this SKU. Null means unknown or not applicable; LoRa has no supplier stock. Kept separate from Thanda stock.' },
+  supplier_stock: { type: ['number', 'null'], description: 'Last recorded supplier stock on this SKU. Null means unknown or not applicable: LoRa has no supplier feed, and manually maintained Hubble availability has no counted quantity. Kept separate from Thanda stock.' },
   successor_sku: { type: ['string', 'null'], description: 'Explicit immediate replacement article code, where recorded. Null means none is recorded. Do not merge prices or stock with this SKU automatically.' },
   updated_at: timestamp('Local catalogue row update time. This alone does not prove that every stock or price source was refreshed.'),
   supplier_updated_at: timestamp('When supplier catalogue data was last observed; null if not recorded.'),

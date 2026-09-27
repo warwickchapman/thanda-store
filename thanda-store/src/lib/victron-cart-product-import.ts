@@ -1,5 +1,6 @@
 import pool from '@/lib/db';
 import { victronStockSku } from '@/lib/victron-sku';
+import { observeVictronSupplierStock } from '@/lib/data-freshness.mjs';
 
 type EOrderProduct = Record<string, unknown> & {
   sku?: unknown; description?: unknown; category?: unknown; subcategory?: unknown;
@@ -10,7 +11,6 @@ type EOrderProduct = Record<string, unknown> & {
 
 function text(value: unknown, fallback = '') { return String(value || fallback).trim(); }
 function number(value: unknown) { const result = Number(value); return Number.isFinite(result) ? result : null; }
-function stock(product: EOrderProduct) { return number(product.all_stock_by_warehouse?.af_sa_inzuzo) ?? number(product.stock_quantity) ?? 0; }
 
 export async function importVictronCartProducts(skus: string[]) {
   // Retail-packaging article codes end in R. Planning uses the canonical code,
@@ -34,9 +34,15 @@ export async function importVictronCartProducts(skus: string[]) {
   for (const sku of missing) {
     let product: EOrderProduct | null = null;
     let importSku = '';
+    let sourceObservedAt: string | null = null;
     for (const candidate of [sku, `${sku}R`]) {
       const response = await fetch(`${apiRoot}/products/${encodeURIComponent(candidate)}/?format=json`, { headers: { Authorization: apiKey, Accept: 'application/json', 'User-Agent': 'ThandaStoreCartImport/1.0' }, cache: 'no-store' });
-      if (response.ok) { product = await response.json() as EOrderProduct; importSku = candidate; break; }
+      if (response.ok) {
+        product = await response.json() as EOrderProduct;
+        sourceObservedAt = new Date().toISOString();
+        importSku = candidate;
+        break;
+      }
       if (response.status !== 404) throw new Error(`Victron could not import ${candidate} from E-Order (HTTP ${response.status}).`);
     }
     if (!product) throw new Error(`Victron could not import ${sku} or ${sku}R from E-Order (HTTP 404).`);
@@ -46,14 +52,16 @@ export async function importVictronCartProducts(skus: string[]) {
     const productData = product.product_data || {};
     const name = text(product.description || productData.name, importSku);
     const imageUrl = text(productData.main_images?.[0]?.url || productData.image);
-    const supplierStock = stock(product);
+    const stock = observeVictronSupplierStock(product, sourceObservedAt);
+    const supplierStock = stock.quantity;
     const category = text(product.category || product.subcategory || productData.category, 'uncategorized');
     const hidden = category.toLowerCase() === 'solar home system';
     const details = {
       originalPrice: recommendedRetailExVat, recommendedRetailExVat, recommendedRetailPriceVatMode: 'ex_vat',
       recommendedRetailSource: 'eorder_price_divided_by_thanda_discount_factor', distributorPriceExVat: accountPrice,
       thandaDiscountFactor: discountFactor, currency: text(product.currency, 'ZAR'), allStockByWarehouse: product.all_stock_by_warehouse || null,
-      supplierStockLabel: 'Victron Warehouse ZA', supplierAvailability: supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
+      supplierObservedAt: stock.observedAt, supplierStockStatus: stock.status,
+      supplierStockLabel: 'Victron Warehouse ZA', supplierAvailability: supplierStock === null ? 'Availability unknown' : supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
       hidden, importedFromEOrderCart: true,
     };
     await pool.query(`
@@ -62,7 +70,7 @@ export async function importVictronCartProducts(skus: string[]) {
       ON CONFLICT (supplier, sku) DO UPDATE SET supplier_item_id = EXCLUDED.supplier_item_id, name = EXCLUDED.name, price = EXCLUDED.price,
         image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url), category = EXCLUDED.category, stock_on_hand = EXCLUDED.stock_on_hand,
         details = products.details || EXCLUDED.details, last_updated = NOW()
-    `, [importSku, name, accountPrice, imageUrl, category, supplierStock, JSON.stringify(details)]);
+    `, [importSku, name, accountPrice, imageUrl, category, supplierStock ?? 0, JSON.stringify(details)]);
     imported.push(importSku);
   }
   return imported;

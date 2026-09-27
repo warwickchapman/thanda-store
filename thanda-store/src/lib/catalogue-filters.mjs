@@ -20,6 +20,7 @@ export const availabilityOptions = [
   { key: 'thanda', label: 'Thanda stock' },
   { key: 'supplier', label: 'Supplier stock' },
   { key: 'unavailable', label: 'Unavailable' },
+  { key: 'unknown', label: 'Stock unknown' },
 ];
 
 const keysByKind = {
@@ -213,13 +214,19 @@ export function deriveCatalogueAttributes(product) {
 
 export function productAvailability(product) {
   const result = [];
-  const local = Number(product.details?.localStockOnHand);
-  const stock = Number(product.stock_on_hand);
+  const quantity = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+  const local = ['missing', 'untracked'].includes(product.details?.xeroStockStatus) ? null : quantity(product.details?.localStockOnHand);
+  const stock = product.details?.supplierStockStatus === 'unknown' ? null : quantity(product.stock_on_hand);
   if (local > 0) result.push('thanda');
   // Hubble currently has an explicit manually maintained availability statement.
   const manual = String(product.details?.manualAvailability || '');
   if ((product.supplier !== 'lora' && stock > 0) || /^in stock\b/i.test(manual)) result.push('supplier');
-  if (!result.length) result.push('unavailable');
+  if (!result.length) {
+    const unknown = product.supplier === 'lora' ? local === null
+      : product.supplier === 'hubble' ? !/^out of stock\b/i.test(manual)
+      : stock === null || (product.supplier === 'victron' && local === null);
+    result.push(unknown ? 'unknown' : 'unavailable');
+  }
   return result;
 }
 

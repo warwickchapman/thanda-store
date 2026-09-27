@@ -4,6 +4,7 @@
 // Xero while rendering a customer's catalogue.
 import { hubFetch, hubStatus, assertHubSnapshot } from '../src/lib/xero/hub.mjs';
 import pg from 'pg';
+import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 
 const INVOICES_URL = '/Invoices';
 const CREDIT_NOTES_URL = '/CreditNotes';
@@ -21,6 +22,8 @@ async function xeroJson(url) {
 async function ensureSchema(client) {
   await client.query(`CREATE TABLE IF NOT EXISTS xero_invoice_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_successful_sync_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await client.query(`CREATE TABLE IF NOT EXISTS xero_credit_note_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_successful_sync_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await client.query('ALTER TABLE xero_invoice_sync_state ADD COLUMN IF NOT EXISTS source_observed_at TIMESTAMPTZ');
+  await client.query('ALTER TABLE xero_credit_note_sync_state ADD COLUMN IF NOT EXISTS source_observed_at TIMESTAMPTZ');
   await client.query(`CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (invoice_id TEXT NOT NULL, contact_id TEXT NOT NULL, invoice_date DATE NOT NULL, updated_at TIMESTAMPTZ NOT NULL, sku TEXT NOT NULL, quantity NUMERIC(14,3) NOT NULL CHECK (quantity <> 0), PRIMARY KEY (invoice_id, sku))`);
   await client.query('ALTER TABLE xero_sales_invoice_lines DROP CONSTRAINT IF EXISTS xero_sales_invoice_lines_quantity_check');
   await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'xero_sales_invoice_lines'::regclass AND conname = 'xero_sales_invoice_lines_quantity_nonzero_check') THEN ALTER TABLE xero_sales_invoice_lines ADD CONSTRAINT xero_sales_invoice_lines_quantity_nonzero_check CHECK (quantity <> 0); END IF; END $$`);
@@ -103,20 +106,23 @@ async function cacheInvoice(client, invoice, stats) {
   }
 }
 async function main() {
-  const token = await hubStatus();
-  if (!token.tenant_id) throw new Error('Xero token is missing tenant_id');
-  if (!String(token.scope || '').split(/\s+/).includes('accounting.invoices')) throw new Error('Xero must be reconnected with accounting.invoices before invoice history can sync');
   const pool = new pg.Pool({ connectionString: required('DATABASE_URL') });
   const client = await pool.connect();
   const stats = { pages: 0, invoices: 0, eligibleInvoices: 0, creditNotes: 0, eligibleCreditNotes: 0, cachedLines: 0 };
   try {
+    await startDataSync(client, 'sales');
+    const token = await hubStatus();
+    if (!token.tenant_id) throw new Error('Xero token is missing tenant_id');
+    if (!String(token.scope || '').split(/\s+/).includes('accounting.invoices')) throw new Error('Xero must be reconnected with accounting.invoices before invoice history can sync');
     await ensureSchema(client);
     await client.query('BEGIN');
     let invoiceSnapshot;
+    let invoiceObservedAt;
     for (let page = 1; ; page += 1) {
       const query = new URLSearchParams({ page: String(page), pageSize: '100', DateFrom: isoDate(INITIAL_WINDOW_DAYS), order: 'Date DESC' });
       const payload = await xeroJson(`${INVOICES_URL}?${query}`, token);
       invoiceSnapshot = assertHubSnapshot(payload, invoiceSnapshot);
+      invoiceObservedAt ||= payload._hub.observed_at;
       if (page > 1000) throw new Error("Invoice page limit exceeded");
       const invoices = Array.isArray(payload.Invoices) ? payload.Invoices : [];
       stats.pages += 1;
@@ -130,10 +136,12 @@ async function main() {
       if (invoices.length === 0) break;
     }
     let creditSnapshot;
+    let creditObservedAt;
     for (let page = 1; ; page += 1) {
       const query = new URLSearchParams({ page: String(page), pageSize: '100', DateFrom: isoDate(INITIAL_WINDOW_DAYS), order: 'Date DESC' });
       const payload = await xeroJson(`${CREDIT_NOTES_URL}?${query}`, token);
       creditSnapshot = assertHubSnapshot(payload, creditSnapshot);
+      creditObservedAt ||= payload._hub.observed_at;
       if (page > 1000) throw new Error("Credit note page limit exceeded");
       const creditNotes = Array.isArray(payload.CreditNotes) ? payload.CreditNotes : [];
       stats.pages += 1;
@@ -146,12 +154,14 @@ async function main() {
       for (const creditNote of [...summariesWithLines, ...detailedCreditNotes]) await cacheCreditNote(client, creditNote, stats);
       if (creditNotes.length === 0) break;
     }
-    await client.query(`INSERT INTO xero_invoice_sync_state (id, last_successful_sync_at) VALUES (true, NOW()) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, updated_at = NOW()`);
-    await client.query(`INSERT INTO xero_credit_note_sync_state (id, last_successful_sync_at) VALUES (true, NOW()) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, updated_at = NOW()`);
+    await client.query(`INSERT INTO xero_invoice_sync_state (id, last_successful_sync_at, source_observed_at) VALUES (true, NOW(), $1) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, source_observed_at=EXCLUDED.source_observed_at, updated_at = NOW()`, [invoiceObservedAt]);
+    await client.query(`INSERT INTO xero_credit_note_sync_state (id, last_successful_sync_at, source_observed_at) VALUES (true, NOW(), $1) ON CONFLICT (id) DO UPDATE SET last_successful_sync_at = EXCLUDED.last_successful_sync_at, source_observed_at=EXCLUDED.source_observed_at, updated_at = NOW()`, [creditObservedAt]);
+    await finishDataSync(client, 'sales', { observedAt: [invoiceObservedAt, creditObservedAt].sort()[0], counts: stats });
     await client.query('COMMIT');
     console.log(JSON.stringify(stats, null, 2));
   } catch (error) {
     await client.query('ROLLBACK');
+    await finishDataSync(client, 'sales', { status: 'failed', error }).catch(() => {});
     if (error?.code === 'XERO_DAILY_LIMIT') {
       console.log(`${error.message}. Future timer runs will skip until the recorded reset time.`);
       return;

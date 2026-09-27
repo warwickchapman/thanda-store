@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { CompanyAccess } from './company-access';
+import { ApiAccess, UserCompany, type Company } from './company-access';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
-type AdminUser = {
+export type AdminUser = {
   id: number;
   email: string;
   role: string;
@@ -120,7 +120,7 @@ async function fetchXeroContacts(email: string): Promise<XeroContact[]> {
   return data.contacts as XeroContact[];
 }
 
-function XeroContactFields({
+export function XeroContactFields({
   email,
   initialContactId = '',
   autoLookup = false,
@@ -239,7 +239,7 @@ function XeroContactFields({
   );
 }
 
-function XeroPeopleAccess({
+export function XeroPeopleAccess({
   organisationId,
   contactId,
   portalUsers,
@@ -298,14 +298,16 @@ function XeroPeopleAccess({
           <h4 className="text-sm font-bold">Xero people</h4>
           <p className="text-xs text-zinc-500">Primary contact and additional people eligible for this company.</p>
         </div>
-        <button type="button" onClick={loadPeople} disabled={loading} className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold disabled:opacity-60">{loading ? 'Refreshing' : 'Refresh people'}</button>
+        <button type="button" onClick={loadPeople} disabled={loading} className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold disabled:opacity-60">{loading ? 'Loading…' : people.length ? 'Refresh stored people' : 'Show eligible Xero people'}</button>
       </div>
       {people.length > 0 && <div className="mt-3 grid gap-2">
         {people.map((person) => {
           const portalUser = userByEmail.get(person.email);
           return <div key={person.email} className="flex flex-col justify-between gap-2 rounded-md border border-zinc-200 p-3 sm:flex-row sm:items-center">
             <div className="min-w-0"><p className="text-sm font-semibold">{person.name}</p><p className="truncate text-xs text-zinc-500">{person.email} · {person.kind === 'primary' ? 'Primary contact' : 'Additional person'}</p></div>
-            {portalUser?.is_active
+            {portalUser && Number(portalUser.organisation_id) !== Number(organisationId)
+              ? <Link href={`/admin/users/${portalUser.id}`} className="text-xs font-semibold underline">Belongs to another company · Review user</Link>
+              : portalUser?.is_active
               ? <span className="text-xs font-semibold text-green-700">Portal access enabled</span>
               : <button type="button" onClick={() => void enablePerson(person)} disabled={busyEmail === person.email} className="h-9 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60">{busyEmail === person.email ? 'Enabling' : portalUser ? 'Re-enable access' : 'Enable access'}</button>}
           </div>;
@@ -313,52 +315,6 @@ function XeroPeopleAccess({
       </div>}
       {message && <p className="mt-2 text-xs text-zinc-600">{message}</p>}
     </div>
-  );
-}
-
-function XeroLinkEditor({
-  user,
-  onSave,
-}: {
-  user: AdminUser;
-  onSave: (formData: FormData) => Promise<boolean>;
-}) {
-  const [editing, setEditing] = useState(!user.xero_contact_id);
-
-  if (!editing && user.xero_contact_id) {
-    return (
-      <div className="flex flex-col justify-between gap-3 border-y border-zinc-100 py-4 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Xero contact linked</p>
-          <p className="font-semibold text-zinc-900">{user.xero_contact_name}</p>
-          <p className="text-xs text-zinc-500">{user.xero_contact_id}</p>
-        </div>
-        <button type="button" onClick={() => setEditing(true)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit Xero link</button>
-      </div>
-    );
-  }
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void onSave(new FormData(event.currentTarget)).then((saved) => {
-          if (saved) setEditing(false);
-        });
-      }}
-      className="grid gap-3 border-y border-zinc-100 py-4"
-    >
-      <XeroContactFields
-        key={`${user.id}-${user.xero_contact_id || ''}`}
-        email={user.email}
-        initialContactId={user.xero_contact_id || ''}
-        autoLookup={!user.xero_contact_id}
-      />
-      <div className="flex flex-wrap gap-2">
-        <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Save link</button>
-        {user.xero_contact_id && <button type="button" onClick={() => setEditing(false)} className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-900">Cancel</button>}
-      </div>
-    </form>
   );
 }
 
@@ -411,76 +367,47 @@ export function XeroStatusPanel({
 }
 
 export function InviteUserForm({ onCreated }: { onCreated: () => Promise<void> }) {
-  const [email, setEmail] = useState('');
-  const [contact, setContact] = useState<XeroContact | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [role, setRole] = useState<'buyer' | 'admin'>('buyer');
-  const [canManageUsers, setCanManageUsers] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  async function createUser(formData: FormData) {
-    setSubmitting(true);
-    setError('');
-    setMessage('');
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const response = await fetch('/api/admin/companies', { cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to load companies.');
+        if (active) setCompanies(data.companies);
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to load companies.'); }
+    }
+    void load(); return () => { active = false; };
+  }, []);
+  async function createUser(form: HTMLFormElement) {
+    setSubmitting(true); setError(''); setMessage('');
+    const formData = new FormData(form);
     try {
-      const response = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.get('email'),
-          xeroContactId: formData.get('xeroContactId'),
-          role,
-          canManageUsers: role === 'admin' && canManageUsers,
-          victronDiscount: formData.get('victronDiscount'),
-          renogyDiscount: formData.get('renogyDiscount'),
-        }),
-      });
+      const response = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        email: formData.get('email'), organisationId: Number(formData.get('organisationId')), role,
+        canManageUsers: role === 'admin' && formData.get('canManageUsers') === 'on',
+      }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to create user.');
       setMessage(data.inviteSent ? 'User created and account setup email sent.' : 'User created, but the setup email could not be sent.');
-      setEmail('');
-      setContact(null);
-      await onCreated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user.');
-    } finally {
-      setSubmitting(false);
-    }
+      form.reset(); await onCreated();
+    } catch (error) { setError(error instanceof Error ? error.message : 'Failed to create user.'); }
+    finally { setSubmitting(false); }
   }
-
-  return (
-    <section className="border-t border-zinc-200 pt-6">
-      <div className="mb-4">
-        <h2 className="text-lg font-bold">Invite a user</h2>
-        <p className="text-sm text-zinc-500">Search the buyer email in Xero, select the customer contact, then send the setup email.</p>
-      </div>
-      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
-      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-      <form onSubmit={(event) => { event.preventDefault(); void createUser(new FormData(event.currentTarget)); }} className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:grid-cols-6">
-        <label className="grid gap-1 text-sm font-semibold lg:col-span-2">Access level
-          <select value={role} onChange={(event) => { const nextRole = event.target.value === 'admin' ? 'admin' : 'buyer'; setRole(nextRole); setContact(null); if (nextRole === 'buyer') setCanManageUsers(false); }} className="h-10 rounded-md border border-zinc-300 bg-white px-3 font-normal">
-            <option value="buyer">Buyer</option>
-            <option value="admin">Administrator</option>
-          </select>
-        </label>
-        {role === 'buyer' ? <XeroContactFields
-          email={email}
-          emailInput={<label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setContact(null); }} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>}
-          onContactSelected={setContact}
-        /> : <>
-          <label className="grid gap-1 text-sm font-semibold lg:col-span-4">Email<input name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-          <label className="flex items-center gap-2 text-sm font-medium lg:col-span-6"><input type="checkbox" checked={canManageUsers} onChange={(event) => setCanManageUsers(event.target.checked)} />Manage users</label>
-          <div className="flex items-end lg:col-span-6"><button disabled={submitting} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{submitting ? 'Creating' : 'Create and send setup email'}</button></div>
-        </>}
-        {role === 'buyer' && contact && <>
-          <label className="grid gap-1 text-sm font-semibold">Company Victron discount<input name="victronDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-          <label className="grid gap-1 text-sm font-semibold">Company Renogy discount<input name="renogyDiscount" type="number" min="0" max="40" step="0.01" defaultValue="30" required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-          <div className="flex items-end lg:col-span-4"><button disabled={submitting} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{submitting ? 'Creating' : 'Create and send setup email'}</button></div>
-        </>}
-      </form>
-    </section>
-  );
+  return <section className="mt-6 border-t border-zinc-200 pt-6"><h2 className="text-lg font-bold">Invite a user</h2><p className="mb-4 text-sm text-zinc-500">Buyers join an existing company and use its pricing. <Link href="/admin/companies" className="underline">Create or manage companies</Link>.</p>
+    {message && <p role="status" className="mb-3 text-sm text-green-800">{message}</p>}{error && <p role="alert" className="mb-3 text-sm text-red-800">{error}</p>}
+    <form onSubmit={(event) => { event.preventDefault(); void createUser(event.currentTarget); }} className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 sm:grid-cols-2">
+      <label className="grid gap-1 text-sm font-semibold">Access level<select value={role} onChange={(event) => setRole(event.target.value === 'admin' ? 'admin' : 'buyer')} className="h-10 rounded border bg-white px-3 font-normal"><option value="buyer">Buyer</option><option value="admin">Administrator</option></select></label>
+      <label className="grid gap-1 text-sm font-semibold">Email<input name="email" type="email" required className="h-10 rounded border px-3 font-normal" /></label>
+      {role === 'buyer' ? <label className="grid gap-1 text-sm font-semibold sm:col-span-2">Company<select name="organisationId" required defaultValue="" className="h-10 rounded border bg-white px-3 font-normal"><option value="" disabled>Select a company</option>{companies.filter((company) => company.xero_contact_id).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select><span className="text-xs font-normal text-zinc-500">The email must be an eligible person on this company’s Xero contact.</span></label> : <label className="flex items-center gap-2 text-sm sm:col-span-2"><input name="canManageUsers" type="checkbox" />Manage users</label>}
+      <div className="sm:col-span-2"><button disabled={submitting} className="h-10 rounded bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{submitting ? 'Creating…' : 'Create and send setup email'}</button></div>
+    </form>
+  </section>;
 }
 
 export function UserEditorPage({ userId }: { userId: number }) {
@@ -558,27 +485,6 @@ export function UserEditorPage({ userId }: { userId: number }) {
     }
   }
 
-  async function saveLink(user: AdminUser, formData: FormData): Promise<boolean> {
-    setError('');
-    setMessage('');
-    const response = await fetch('/api/admin/users', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        organisationId: user.organisation_id,
-        xeroContactId: formData.get('xeroContactId'),
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.error || 'Failed to save Xero link');
-      return false;
-    }
-    setMessage('Xero contact link saved.');
-    await loadUsers();
-    return true;
-  }
-
   async function updateEmail(user: AdminUser, formData: FormData) {
     setError('');
     setMessage('');
@@ -597,10 +503,10 @@ export function UserEditorPage({ userId }: { userId: number }) {
       return;
     }
     if (data.unchanged) {
-      setMessage('Email address is unchanged. The Xero link was left in place.');
+      setMessage('Email address is unchanged.');
       return;
     }
-    setMessage('Email updated. The Xero link was cleared; review the automatic match and save the new link.');
+    setMessage('Email updated and verified for this company. This user’s sessions and keys were revoked; colleagues are unaffected.');
     await loadUsers();
   }
 
@@ -674,19 +580,16 @@ export function UserEditorPage({ userId }: { userId: number }) {
           </div>
 
           {canManageUsers ? <>
-            <CompanyAccess key={`company-${user.id}-${user.xero_contact_id}`} user={user} onChanged={loadUsers} />
+            <UserCompany key={`company-${user.id}`} user={user} onChanged={loadUsers} />
+            <ApiAccess user={user} onChanged={loadUsers} />
             <UserAccessEditor key={`access-${user.id}-${user.role}-${user.can_manage_users}`} user={user} busy={busyUserId === user.id} onSave={(role, manager) => void saveAccess(user, role, manager)} />
             <form onSubmit={(event) => { event.preventDefault(); void updateEmail(user, new FormData(event.currentTarget)); }} className="mb-4 grid gap-3 border-y border-zinc-100 py-4 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="grid gap-1 text-sm font-semibold">Portal email
                 <input name="email" type="email" defaultValue={user.email} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" />
               </label>
               <button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Update email</button>
-              <p className="text-xs text-zinc-500 sm:col-span-2">Changing this email clears the organisation Xero link and signs this user out.</p>
+              <p className="text-xs text-zinc-500 sm:col-span-2">The new email must be an eligible person on this company’s Xero contact. Changing it signs only this user out and revokes their API keys.</p>
             </form>
-            <XeroLinkEditor user={user} onSave={(formData) => saveLink(user, formData)} />
-            {user.xero_contact_id && users.find((candidate) => candidate.organisation_id === user.organisation_id)?.id === user.id && (
-              <XeroPeopleAccess organisationId={user.organisation_id} contactId={user.xero_contact_id} portalUsers={users.filter((candidate) => candidate.organisation_id === user.organisation_id)} onEnabled={loadUsers} />
-            )}
             <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
               <button type="button" disabled={busyUserId === user.id} onClick={() => void sendSetupEmail(user)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.setup_expires_at ? 'Resend invite' : 'Send setup email'}</button>
               {(user.is_active || user.xero_person_kind === 'manual') && <button type="button" disabled={busyUserId === user.id} onClick={() => void setActive(user, !user.is_active)} className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{user.is_active ? 'Disable account' : 'Enable account'}</button>}

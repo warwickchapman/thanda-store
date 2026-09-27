@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
@@ -24,11 +25,6 @@ const PRODUCT_SOURCE = process.env.RENOGY_PRODUCT_SOURCE || 'export';
 const REQUEST_TIMEOUT_MS = Number(process.env.RENOGY_REQUEST_TIMEOUT_MS || 12000);
 
 let authToken = normalizeToken(INITIAL_TOKEN) || readCachedToken();
-
-if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) {
-  console.error('RENOGY_BEARER_TOKEN, cached Renogy token, or RENOGY_EMAIL plus RENOGY_PASSWORD is required.');
-  process.exit(1);
-}
 
 const pool = createPool();
 
@@ -223,7 +219,8 @@ async function fetchProductExportRows() {
     method: 'GET',
     headers: { Accept: 'text/csv, application/octet-stream, */*' },
   });
-  return parseProductCsv(csv);
+  const stockObservedAt = new Date().toISOString();
+  return parseProductCsv(csv).map(row => ({ ...row, stockObservedAt }));
 }
 
 async function loadProductRows() {
@@ -334,11 +331,15 @@ async function firstImageUrl(detail) {
   return cleanUrls.find((url) => !url.includes('.objectstorage.')) || cleanUrls[0] || '';
 }
 
-async function buildProduct(row, wrapper, detail) {
+async function buildProduct(row, wrapper, detail, observedAt) {
   const sku = row.SKU;
   const price = numberOrNull(detail.unitPrice) ?? numberOrNull(wrapper.data?.amount) ?? numberOrNull(detail.basic_price) ?? 0;
   const originalPrice = numberOrNull(detail.originalPrice);
-  const stockOnHand = numberOrNull(detail.inventory) ?? numberOrNull(wrapper.data?.inventory) ?? numberOrNull(row.Stock) ?? 0;
+  const liveStock = numberOrNull(detail.inventory) ?? numberOrNull(wrapper.data?.inventory);
+  const stockOnHand = liveStock ?? numberOrNull(row.Stock);
+  // Export stock was observed when the export was downloaded. A local CSV's
+  // age is unknown; reading it again must not make its quantities look fresh.
+  const stockObservedAt = liveStock !== null ? observedAt : row.stockObservedAt || null;
   const imageUrl = await firstImageUrl(detail);
 
   return {
@@ -349,10 +350,11 @@ async function buildProduct(row, wrapper, detail) {
     category: detail.item_view_type || wrapper.data?.item_view_type || 'uncategorized',
     price,
     image_url: imageUrl,
-    stock_on_hand: stockOnHand,
+    stock_on_hand: stockOnHand ?? 0,
     details: {
       originalPrice,
-      supplierObservedAt: new Date().toISOString(),
+      supplierObservedAt: stockObservedAt,
+      supplierStockStatus: stockOnHand === null ? 'unknown' : 'known',
       // Renogy's product-detail originalPrice is list price excluding VAT.
       // The partner portal renders the same amount with 15% VAT included.
       recommendedRetailExVat: originalPrice,
@@ -376,6 +378,8 @@ async function buildProduct(row, wrapper, detail) {
 }
 
 async function main() {
+  await startDataSync(pool, 'renogy');
+  if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) throw new Error('Renogy authentication is not configured.');
   await ensureAuthenticated();
   const rows = await loadProductRows();
   const client = await pool.connect();
@@ -398,7 +402,7 @@ async function main() {
           continue;
         }
         const detail = await fetchRenogyDetail(wrapper.id);
-        const product = await buildProduct(row, wrapper, detail);
+        const product = await buildProduct(row, wrapper, detail, new Date().toISOString());
         await upsertProduct(client, product);
         stats.synced += 1;
         if (!product.image_url) stats.missingImages.push(sku);
@@ -408,14 +412,21 @@ async function main() {
     }
   } finally {
     client.release();
-    await pool.end();
   }
 
+  await finishDataSync(pool, 'renogy', {
+    status: stats.failed.length || stats.notFound.length ? 'partial' : 'success',
+    // Per-product observations remain the stock freshness authority.
+    observedAt: new Date().toISOString(),
+    error: stats.failed.length || stats.notFound.length ? 'Incomplete catalogue update' : null,
+    counts: { synced: stats.synced, failed: stats.failed.length, missing: stats.notFound.length },
+  });
   console.log(JSON.stringify(stats, null, 2));
   if (stats.failed.length > 0) process.exitCode = 1;
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  await finishDataSync(pool, 'renogy', { status: 'failed', error }).catch(() => {});
   console.error(error);
-  process.exit(1);
-});
+  process.exitCode = 1;
+}).finally(() => pool.end());

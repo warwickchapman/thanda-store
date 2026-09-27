@@ -79,10 +79,13 @@ test('availability can match both warehouses; manual Hubble and local-only LoRa 
   const p = product('Product', 'Other', { localStockOnHand: 3 });
   p.stock_on_hand = 5;
   assert.deepEqual(productAvailability(p), ['thanda', 'supplier']);
-  assert.deepEqual(productAvailability({ ...p, details: {}, stock_on_hand: 0 }), ['unavailable']);
-  assert.deepEqual(productAvailability({ ...p, supplier: 'lora', details: {} }), ['unavailable']);
+  assert.deepEqual(productAvailability({ ...p, details: {}, stock_on_hand: 0 }), ['unknown']);
+  assert.deepEqual(productAvailability({ ...p, supplier: 'lora', details: {} }), ['unknown']);
   assert.deepEqual(productAvailability({ ...p, supplier: 'hubble', stock_on_hand: 0, details: { manualAvailability: 'In stock (3-5 days)' } }), ['supplier']);
   assert.deepEqual(productAvailability({ ...p, stock_on_hand: 0, details: { localStockOnHand: -1 } }), ['unavailable']);
+  assert.deepEqual(productAvailability({ ...p, stock_on_hand: 0, details: { localStockOnHand: 0, xeroStockStatus: 'missing' } }), ['unknown']);
+  assert.deepEqual(productAvailability({ ...p, supplier: 'renogy', stock_on_hand: 0, details: {} }), ['unavailable']);
+  assert.deepEqual(productAvailability({ ...p, stock_on_hand: null, details: { localStockOnHand: 0 } }), ['unknown']);
 });
 
 test('filters OR within a group and AND across groups; facet counts exclude their own selection', () => {
@@ -114,7 +117,7 @@ test('lightweight supplier upsert retains cached specifications and persists att
 test('discovery keeps successor and predecessor specifications and stock on their own saleable rows', () => {
   // Succession grouping is for fulfilment/planning. These literal catalogue
   // records must not borrow stock or product specifications from each other.
-  const old = { ...product('MultiPlus-II 48/3000/35-32 230V', 'Inverters'), sku: 'PMP482305010' };
+  const old = { ...product('MultiPlus-II 48/3000/35-32 230V', 'Inverters', { localStockOnHand: 0 }), sku: 'PMP482305010' };
   const current = { ...old, sku: 'PMP482305012', stock_on_hand: 2 };
   assert.deepEqual(productAvailability(old), ['unavailable']);
   assert.deepEqual(productAvailability(current), ['supplier']);

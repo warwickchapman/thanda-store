@@ -8,25 +8,30 @@ import {
   victronSkuFamilyResolver,
 } from "@/lib/victron-sku-family.mjs";
 import { backorderQuantityAfterInbound } from "@/lib/victron-order-sync.mjs";
+import { getDataHealth } from "@/lib/data-freshness";
+import { supplierStockObservation } from "@/lib/data-freshness.mjs";
+import {
+  REPLENISHMENT_POLICY,
+  replenishmentFamilyStocks,
+  replenishmentRecommendation,
+  replenishmentSourceKnown,
+} from "@/lib/victron-replenishment.mjs";
 
-const SALES_WINDOWS = { recent: 30, baseline: 90 };
-const LEAD_TIME_DAYS = 5;
-const SAFETY_STOCK_DAYS = 2;
-const TARGET_COVER_DAYS = 14;
+const SALES_WINDOWS = REPLENISHMENT_POLICY.salesWindows;
 
 type Succession = { predecessor_sku: string; successor_sku: string };
 type ProductRow = {
   sku: string;
   name: string;
   price: string | number;
-  local_stock: string | number | null;
-  supplier_stock: string | number;
+  stock_on_hand: string | number | null;
+  details: Record<string, unknown>;
   price_break_qty: string | number | null;
   price_break_price: string | number | null;
 };
 type LocalStockRow = {
   sku: string;
-  local_stock: string | number | null;
+  details: Record<string, unknown>;
 };
 type SaleRow = {
   sku: string;
@@ -67,9 +72,6 @@ type AcceptedQuoteStateRow = {
   last_stats: Record<string, number> | null;
 };
 
-function wholeUnits(value: number) {
-  return Math.max(0, Math.round(value));
-}
 export async function GET() {
   const user = await currentUser();
   if (!user || user.role !== "admin")
@@ -92,18 +94,16 @@ export async function GET() {
       acceptedQuoteState,
       successions,
       agedUnreceivedShipments,
+      dataHealth,
     ] = await Promise.all([
       pool.query<ProductRow>(`
-        SELECT sku, name, price,
-          COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock,
-          stock_on_hand AS supplier_stock,
+        SELECT sku, name, price, stock_on_hand, details,
           NULLIF(details->>'priceBreakQty', '')::numeric AS price_break_qty,
           NULLIF(details->>'priceBreakPrice', '')::numeric AS price_break_price
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
       `),
       pool.query<LocalStockRow>(`
-        SELECT sku,
-          COALESCE(NULLIF(details->>'localStockOnHand', '')::numeric, 0) AS local_stock
+        SELECT sku, details
         FROM products
         WHERE supplier = 'victron'
       `),
@@ -194,7 +194,23 @@ export async function GET() {
           AND inbound.status = 'open'
         ORDER BY shipment.shipping_date, inbound.supplier_order_number
       `),
+      getDataHealth(),
     ]);
+    // Source observations are read locally. Viewing or reloading this report
+    // makes no supplier or Xero request and never turns a missing input into 0.
+    const sourceFor = (id: string) => dataHealth.sources.find((source) => source.id === id);
+    const salesKnown = replenishmentSourceKnown(sourceFor("sales"));
+    const ordersKnown = replenishmentSourceKnown(sourceFor("victron-orders"));
+    const quotesKnown = replenishmentSourceKnown(sourceFor("accepted-quotes"));
+    const sharedPlanningIssues = dataHealth.sources.filter((source) =>
+      ["sales", "victron-orders", "accepted-quotes"].includes(source.id) && source.status !== "current",
+    );
+    const localStockState = sourceFor("thanda");
+    const supplierStockState = sourceFor("victron");
+    const stockByFamily = replenishmentFamilyStocks(localStocks.rows, successions.rows, {
+      checkedAt: dataHealth.checkedAt,
+      staleAfterMinutes: localStockState?.staleAfterMinutes || 120,
+    });
     const resolveFamily = victronSkuFamilyResolver(successions.rows);
     const predecessorSkus = new Set(
       successions.rows.map((row) => victronStockSku(row.predecessor_sku)),
@@ -223,7 +239,6 @@ export async function GET() {
           reference: string;
           quantity: number;
         }>;
-        localStock: number;
         minimumStock: number;
         lastSoldAt: string | null;
       }
@@ -240,7 +255,6 @@ export async function GET() {
         provisional: 0,
         reserved: 0,
         acceptedQuoteLines: [],
-        localStock: 0,
         minimumStock: 0,
         lastSoldAt: null,
       };
@@ -249,11 +263,6 @@ export async function GET() {
     };
     for (const product of products.rows)
       groupFor(product.sku).products.push(product);
-    // Xero may still hold stock under an older, hidden predecessor SKU. It is
-    // the same physical stock family as its successor, so it must contribute
-    // to the current SKU's Stock column and replenishment coverage.
-    for (const row of localStocks.rows)
-      groupFor(row.sku).localStock += Number(row.local_stock) || 0;
     for (const row of sales.rows) {
       const group = groupFor(row.sku);
       group.sales30 += Number(row.sales_30) || 0;
@@ -312,6 +321,16 @@ export async function GET() {
         Number(row.minimum_stock) || 0,
       );
     }
+    const unmatchedQuoteLines = acceptedQuotes.rows.filter((row) =>
+      !groups.get(resolveFamily(victronStockSku(row.sku)))?.products.length && /victron/i.test(row.description),
+    );
+    const planningWarnings = unmatchedQuoteLines.length
+      ? [`${unmatchedQuoteLines.length} Victron accepted quote line${unmatchedQuoteLines.length === 1 ? " is" : "s are"} unmatched. Reservations may be incomplete; review the quote lines below.`]
+      : [];
+    const overdueOrders = new Set(agedUnreceivedShipments.rows.map((row) => row.order_number));
+    const overdueFamilies = new Set(inbound.rows
+      .filter((row) => overdueOrders.has(row.order_number))
+      .map((row) => resolveFamily(victronStockSku(row.sku))));
 
     const items = [...groups.entries()]
       .flatMap(([family, group]) => {
@@ -331,57 +350,56 @@ export async function GET() {
               Number(right.sku.toUpperCase().endsWith("R")) ||
             left.sku.localeCompare(right.sku),
         )[0];
-        // Retail and base SKUs are alternate packaging, not extra stock. Prefer
-        // the base SKU (or the current successor) rather than adding both rows.
-        const localStock = group.localStock;
-        const supplierStock = Number(currentProduct.supplier_stock) || 0;
-        const dailyDemand = Math.max(
-          group.sales30 / SALES_WINDOWS.recent,
-          group.sales90 / SALES_WINDOWS.baseline,
-        );
-        const reorderPoint = Math.max(
-          wholeUnits(dailyDemand * (LEAD_TIME_DAYS + SAFETY_STOCK_DAYS)),
-          group.minimumStock,
-        );
-        const targetStock = Math.max(
-          wholeUnits(dailyDemand * TARGET_COVER_DAYS),
-          group.minimumStock,
-        );
-        const positionBeforeCart =
-          localStock +
-          group.inbound +
-          group.backorderCoverage -
-          group.reserved;
-        const recommendationBeforeCart = wholeUnits(
-          targetStock - positionBeforeCart,
-        );
-        const availablePosition = positionBeforeCart + group.provisional;
-        const suggestedOrder = wholeUnits(
-          recommendationBeforeCart - group.provisional,
-        );
-        const status =
-          suggestedOrder === 0
-            ? group.provisional > 0 && recommendationBeforeCart > 0
-              ? "satisfied"
-              : "covered"
-            : group.provisional > 0
-              ? "in_cart"
-              : positionBeforeCart <= reorderPoint
-                ? "order_now"
-                : "top_up";
+        const stock = stockByFamily.get(family);
+        const localStock = stock?.localStock ?? null;
+        const supplierObservation = supplierStockObservation(currentProduct);
+        const supplierStock = supplierObservation.quantity;
+        const reviewReasons: string[] = [];
+        if (localStock === null)
+          reviewReasons.push(`Thanda stock unknown for ${stock?.missingSkus.join(", ") || currentProduct.sku}.`);
+        if (stock?.staleSkus.length)
+          reviewReasons.push(`Thanda stock is overdue for ${stock.staleSkus.join(", ")}.`);
+        if (["failed", "partial"].includes(localStockState?.lastRunStatus || ""))
+          reviewReasons.push("The last Thanda stock sync did not complete; retained stock needs review.");
+        if (supplierStock === null)
+          reviewReasons.push("Supplier stock is unknown; confirm availability before ordering.");
+        else if (
+          supplierObservation.observedAt &&
+          Date.parse(dataHealth.checkedAt) - Date.parse(supplierObservation.observedAt) >
+            (supplierStockState?.staleAfterMinutes || 180) * 60_000
+        )
+          reviewReasons.push("Supplier stock is overdue; confirm availability before ordering.");
+        if (["failed", "partial"].includes(supplierStockState?.lastRunStatus || ""))
+          reviewReasons.push("The last supplier sync did not complete; retained availability needs review.");
+        if (overdueFamilies.has(family))
+          reviewReasons.push("An overdue shipment is still counted as inbound. Confirm receipt and check Xero stock before ordering.");
+        const recommendation = replenishmentRecommendation({
+          sales30: salesKnown ? group.sales30 : null,
+          sales90: salesKnown ? group.sales90 : null,
+          localStock,
+          inbound: ordersKnown ? group.inbound : null,
+          backorderCoverage: ordersKnown ? group.backorderCoverage : null,
+          reserved: quotesKnown ? group.reserved : null,
+          provisional: group.provisional,
+          minimumStock: group.minimumStock,
+        });
+        const confidence = recommendation.suggestedOrder === null
+          ? "unavailable"
+          : reviewReasons.length || sharedPlanningIssues.length || planningWarnings.length ? "provisional" : "current";
         return [
           {
             family,
             sku: currentProduct.sku,
             name: currentProduct.name,
-            sales30: group.sales30,
-            sales90: group.sales90,
-            dailyDemand,
+            sales30: salesKnown ? group.sales30 : null,
+            sales90: salesKnown ? group.sales90 : null,
             localStock,
-            inbound: group.inbound,
-            backorder: group.backorder,
+            knownLocalStock: stock?.knownStock ?? null,
+            localStockObservedAt: stock?.observedAt || null,
+            inbound: ordersKnown ? group.inbound : null,
+            backorder: ordersKnown ? group.backorder : null,
             provisional: group.provisional,
-            reserved: group.reserved,
+            reserved: quotesKnown ? group.reserved : null,
             acceptedQuoteLines: group.acceptedQuoteLines,
             supplierStock,
             unitPrice: Number(currentProduct.price) || 0,
@@ -393,23 +411,33 @@ export async function GET() {
             minimumStock: group.minimumStock,
             predecessorSkus: predecessorSkusForFamily(successions.rows, family),
             note: notesBySku.get(family) || null,
-            daysCover: dailyDemand ? availablePosition / dailyDemand : null,
-            reorderPoint,
-            targetStock,
-            suggestedOrder,
-            status,
+            ...recommendation,
+            confidence,
+            reviewReasons,
             lastSoldAt: group.lastSoldAt,
           },
         ];
       })
       .sort(
         (left, right) =>
-          right.suggestedOrder - left.suggestedOrder ||
-          right.dailyDemand - left.dailyDemand ||
+          (right.suggestedOrder ?? -1) - (left.suggestedOrder ?? -1) ||
+          (right.dailyDemand ?? -1) - (left.dailyDemand ?? -1) ||
           left.sku.localeCompare(right.sku),
       );
     return NextResponse.json({
       items,
+      dataHealth: {
+        checkedAt: dataHealth.checkedAt,
+        sources: dataHealth.sources.filter((source) =>
+          ["thanda", "victron", "sales", "victron-orders", "accepted-quotes"].includes(source.id),
+        ),
+        sourceIssues: dataHealth.sources.filter((source) =>
+          ["thanda", "victron", "sales", "victron-orders", "accepted-quotes"].includes(source.id) && source.status !== "current",
+        ),
+        warnings: planningWarnings,
+        provisionalCount: items.filter((item) => item.confidence === "provisional").length,
+        unavailableCount: items.filter((item) => item.confidence === "unavailable").length,
+      },
       provisionalCart: {
         lineCount: provisional.rows.length,
         uploadedAt: provisional.rows[0]?.uploaded_at || null,
@@ -425,9 +453,7 @@ export async function GET() {
           acceptedQuoteState.rows[0]?.last_successful_sync_at || null,
         lastError: acceptedQuoteState.rows[0]?.last_error || null,
         stats: acceptedQuoteState.rows[0]?.last_stats || {},
-        unmatchedLines: acceptedQuotes.rows
-          .filter((row) => groupFor(row.sku).products.length === 0)
-          .filter((row) => /victron/i.test(row.description))
+        unmatchedLines: unmatchedQuoteLines
           .map((row) => ({
             quoteNumber: row.quote_number,
             sku: row.sku,
@@ -440,12 +466,7 @@ export async function GET() {
         ageDays: Number(shipment.working_days) || 0,
         outstandingUnits: Number(shipment.outstanding_units) || 0,
       })),
-      policy: {
-        salesWindows: SALES_WINDOWS,
-        leadTimeDays: LEAD_TIME_DAYS,
-        safetyStockDays: SAFETY_STOCK_DAYS,
-        targetCoverDays: TARGET_COVER_DAYS,
-      },
+      policy: REPLENISHMENT_POLICY,
     });
   } catch (error) {
     console.error("Victron replenishment report error:", error);

@@ -1,11 +1,12 @@
 import pool from '@/lib/db';
+import { localStockObservation, supplierStockObservation } from '@/lib/data-freshness.mjs';
 
 type FulfilmentRow = {
   id: number;
   sku: string;
   supplier: string;
   stock_on_hand: string | number;
-  local_stock_on_hand: string | number | null;
+  details: Record<string, unknown>;
   is_predecessor: boolean;
   depth: number;
 };
@@ -18,8 +19,8 @@ export type FulfilmentProduct = {
   substituted: boolean;
 };
 
-function hasStock(row: Pick<FulfilmentRow, 'stock_on_hand' | 'local_stock_on_hand'>) {
-  return Number(row.stock_on_hand) > 0 || Number(row.local_stock_on_hand ?? 0) > 0;
+function hasStock(row: Pick<FulfilmentRow, 'supplier' | 'stock_on_hand' | 'details'>) {
+  return Number(supplierStockObservation(row).quantity) > 0 || Number(localStockObservation(row).quantity) > 0;
 }
 
 export function isSupplierProductAvailable(product: Pick<FulfilmentProduct, 'supplier' | 'hasStock'>) {
@@ -38,7 +39,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
         p.sku,
         p.supplier,
         p.stock_on_hand,
-        NULLIF(p.details->>'localStockOnHand', '')::numeric AS local_stock_on_hand,
+        p.details,
         ARRAY[UPPER(p.sku)]::text[] AS path,
         0 AS depth
       FROM products p
@@ -52,7 +53,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
         next_product.sku,
         next_product.supplier,
         next_product.stock_on_hand,
-        NULLIF(next_product.details->>'localStockOnHand', '')::numeric AS local_stock_on_hand,
+        next_product.details,
         family.path || UPPER(next_product.sku),
         family.depth + 1
       FROM sku_family family
@@ -74,7 +75,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
       family.sku,
       family.supplier,
       family.stock_on_hand,
-      family.local_stock_on_hand,
+      family.details,
       EXISTS (
         SELECT 1
         FROM victron_sku_successions succession
@@ -88,7 +89,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
     if (error.code !== '42P01') throw error;
     return pool.query<FulfilmentRow>(`
       SELECT id, sku, supplier, stock_on_hand,
-        NULLIF(details->>'localStockOnHand', '')::numeric AS local_stock_on_hand,
+        details,
         false AS is_predecessor,
         0 AS depth
       FROM products

@@ -24,7 +24,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const otp = await createLoginOtp(Number(user.id));
+    const otp = await createLoginOtp({ userId: Number(user.id), email: user.email,
+      organisationId: Number(user.organisation_id), passwordHash: user.password_hash });
+    if (!otp) return NextResponse.json({ error: 'Your account changed during sign-in. Please start again.' }, { status: 409 });
     await sendOtpEmail({ to: user.email, otp });
 
     return NextResponse.json({ ok: true, email: user.email.replace(/(^.).*(@.*$)/, '$1***$2') });
