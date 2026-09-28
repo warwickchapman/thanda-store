@@ -4,11 +4,12 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { SESSION_COOKIE } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
+import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
 
 async function changeImpersonation(request: Request, targetId: number | null) {
-  const origin = request.headers.get('origin');
-  const expectedOrigin = new URL(process.env.PORTAL_BASE_URL || request.url).origin;
-  if (origin && origin !== expectedOrigin) return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
+  if (!validCustomerViewOrigin(request, { portalBaseUrl: process.env.PORTAL_BASE_URL, nodeEnv: process.env.NODE_ENV })) {
+    return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
+  }
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return NextResponse.json({ error: 'Sign in required.' }, { status: 401 });
   await ensureAuthSchema();
