@@ -6,7 +6,6 @@ import { useState, useEffect, useRef } from 'react';
 import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
-import { StockFreshness } from '@/components/stock-freshness';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters, productAvailability } from '@/lib/catalogue-filters.mjs';
 
@@ -445,7 +444,6 @@ export default function Home() {
             <p className="text-zinc-500">Premium inventory from top-tier brands.</p>
           </div>
         </div>
-        <StockFreshness supplier={selectedSupplier} reloadKey={loadAttempt} />
 
         {/* Product Grid */}
         {loading ? (

@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Removed the operational stock-source status panel from the customer storefront. Product-level availability remains visible; sync warnings and source timestamps remain in Admin → Data health.
 - Creating a company now creates and invites its primary Xero contact in the same onboarding action. The company and buyer are saved together; an email failure is reported with a direct path to resend. Existing companies have an **Invite primary contact** action, including Mersat-style records created before this change.
 - Kept the Store light-only on devices that prefer dark mode. Data health now uses the same light admin surface and readable card, timestamp and button text as the other admin pages.
 - Condensed the Replenishment page controls. Overdue inbound receipts remain prominent; planning-data issues show their counts with expandable source details, while policy, accepted-quote checks and provisional-cart upload open on demand. The recommendation table now starts much higher on the page.
