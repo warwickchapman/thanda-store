@@ -3,6 +3,9 @@ import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import { getXeroContactDetails } from '@/lib/xero/oauth';
+import crypto from 'node:crypto';
+import { createAccountSetupToken, hashPassword } from '@/lib/auth/server';
+import { sendAccountSetupEmail } from '@/lib/email/resend';
 import { CompanyManagementError, defaultCompanyDiscount, createCompany, saveCompanyDiscounts } from '@/lib/admin/company-management.mjs';
 
 export async function GET() {
@@ -24,9 +27,24 @@ export async function POST(request: Request) {
   await ensureAuthSchema();
   const body = await request.json();
   try {
-    const company = await createCompany(pool, { contactId: String(body.xeroContactId || '').trim(), victron: body.victronDiscount,
-      renogy: body.renogyDiscount, actor: user, getContact: getXeroContactDetails });
-    return NextResponse.json({ ok: true, company }, { status: 201 });
+    const contactId = String(body.xeroContactId || '').trim();
+    if (!contactId) return NextResponse.json({ error: 'Select a Xero contact.' }, { status: 400 });
+    const contact = await getXeroContactDetails(contactId);
+    const primaryEmail = contact.people.find((person) => person.kind === 'primary')?.email;
+    if (!primaryEmail) return NextResponse.json({ error: 'This Xero contact has no primary email. Add one in Xero before creating the company.' }, { status: 400 });
+    const company = await createCompany(pool, { contactId, victron: body.victronDiscount,
+      renogy: body.renogyDiscount, actor: user, getContact: async () => contact,
+      primaryUser: { email: primaryEmail, passwordHash: await hashPassword(crypto.randomBytes(32).toString('hex')) } });
+    try {
+      const token = await createAccountSetupToken({ userId: Number(company.primaryUser.id), email: company.primaryUser.email,
+        organisationId: Number(company.id) });
+      if (!token) throw new Error('Account changed before the invitation was issued.');
+      await sendAccountSetupEmail({ to: company.primaryUser.email, token });
+      return NextResponse.json({ ok: true, company, inviteSent: true }, { status: 201 });
+    } catch (error) {
+      console.error('Created company and primary user but could not send setup email:', error);
+      return NextResponse.json({ ok: true, company, inviteSent: false }, { status: 202 });
+    }
   } catch (error) {
     if (error instanceof CompanyManagementError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('Could not create company:', error);

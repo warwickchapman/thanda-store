@@ -108,10 +108,16 @@ export async function saveCompanyDiscounts(pool, { organisationId, victron, reno
   });
 }
 
-export async function createCompany(pool, { contactId, victron, renogy, actor, getContact }) {
+export async function createCompany(pool, { contactId, victron, renogy, actor, getContact, primaryUser }) {
   validateDiscounts(victron, renogy);
   if (!String(contactId || '').trim()) throw new CompanyManagementError('Select a Xero contact.');
   const contact = await getContact(contactId);
+  if (primaryUser) {
+    const primary = contact.people.find((person) => person.kind === 'primary');
+    if (!primary?.email || primary.email.toLowerCase() !== primaryUser.email) {
+      throw new CompanyManagementError('The selected Xero contact needs a primary email before the company can be added.');
+    }
+  }
   return transaction(pool, async (db) => {
     const existing = await db.query('SELECT id FROM organisations WHERE xero_contact_id=$1', [contactId]);
     if (existing.rowCount) throw new CompanyManagementError('This Xero contact already has a company record. Open that company to manage its users or pricing.', 409);
@@ -119,7 +125,14 @@ export async function createCompany(pool, { contactId, victron, renogy, actor, g
       VALUES($1,$2,$1) RETURNING id`, [contact.name, contactId])).rows[0];
     await db.query(`INSERT INTO contact_supplier_discounts(contact_id,supplier,discount_percent)
       VALUES($1,'victron',$2),($1,'renogy',$3) ON CONFLICT DO NOTHING`, [contactId, victron, renogy]);
-    await audit(db, actor, 'company_created', 'organisation', company.id, { contactId });
+    if (primaryUser) {
+      company.primaryUser = (await db.query(`INSERT INTO portal_users
+        (organisation_id,email,password_hash,role,is_active,xero_person_kind,xero_person_email)
+        VALUES($1,$2,$3,'buyer',true,'primary',$2) RETURNING id,email,organisation_id`,
+      [company.id, primaryUser.email, primaryUser.passwordHash])).rows[0];
+    }
+    await audit(db, actor, 'company_created', 'organisation', company.id,
+      { contactId, primaryUserId: company.primaryUser?.id ?? null });
     return company;
   });
 }

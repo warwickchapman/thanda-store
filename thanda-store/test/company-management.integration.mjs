@@ -13,13 +13,15 @@ const contacts = {
   'company-a': { name: 'Company A', people: [{ email: 'a@example.test', kind: 'primary' }, { email: 'new-a@example.test', kind: 'additional' }, { email: 'peer@example.test', kind: 'additional' }] },
   'company-b': { name: 'Company B', people: [{ email: 'new-a@example.test', kind: 'additional' }, { email: 'moved-peer@example.test', kind: 'additional' }] },
   'company-c': { name: 'Company C', people: [] },
+  'company-d': { name: 'Company D', people: [{ email: 'primary-d@example.test', kind: 'primary' }] },
+  'company-e': { name: 'Company E', people: [{ email: 'a@example.test', kind: 'primary' }] },
 };
 const getContact = async (id) => { assert.ok(contacts[id]); return contacts[id]; };
 try {
   await admin.query(`CREATE SCHEMA ${schema}`);
   pool = new pg.Pool({ ...config, options: `-c search_path=${schema}` });
   await pool.query(`CREATE TABLE organisations(id BIGSERIAL PRIMARY KEY,name TEXT,xero_contact_id TEXT UNIQUE,xero_contact_name TEXT);
-    CREATE TABLE portal_users(id BIGINT PRIMARY KEY,email TEXT UNIQUE,role TEXT DEFAULT 'buyer',organisation_id BIGINT REFERENCES organisations(id),
+    CREATE TABLE portal_users(id BIGSERIAL PRIMARY KEY,email TEXT UNIQUE,password_hash TEXT,role TEXT DEFAULT 'buyer',organisation_id BIGINT REFERENCES organisations(id),
       can_manage_users BOOLEAN DEFAULT false,is_active BOOLEAN DEFAULT true,api_enabled BOOLEAN DEFAULT true,xero_person_kind TEXT DEFAULT 'primary',xero_person_email TEXT,updated_at TIMESTAMPTZ);
     CREATE TABLE portal_sessions(user_id BIGINT,token TEXT);
     CREATE TABLE login_otps(user_id BIGINT,consumed_at TIMESTAMPTZ);
@@ -31,6 +33,7 @@ try {
     INSERT INTO organisations(id,name,xero_contact_id) VALUES(1,'Company A','company-a'),(2,'Company B','company-b'),(3,'Staff',NULL);
     SELECT setval(pg_get_serial_sequence('organisations','id'),3);
     INSERT INTO portal_users(id,email,organisation_id) VALUES(1,'a@example.test',1),(2,'peer@example.test',1),(3,'b@example.test',2),(99,'admin@example.test',3);
+    SELECT setval(pg_get_serial_sequence('portal_users','id'),99);
     UPDATE portal_users SET role='admin',can_manage_users=true WHERE id=99;
     INSERT INTO contact_supplier_discounts VALUES('company-a','victron',30,now()),('company-a','renogy',20,now()),('company-b','victron',5,now());
     INSERT INTO portal_sessions VALUES(1,'a'),(2,'peer'),(3,'b');
@@ -97,6 +100,19 @@ try {
   assert.ok(created.id);
   await assert.rejects(() => createCompany(pool, { contactId: 'company-c', victron: 0, renogy: 0, actor, getContact }), /already has/);
   assert.equal((await pool.query("SELECT discount_percent FROM contact_supplier_discounts WHERE contact_id='company-c' AND supplier='victron'")).rows[0].discount_percent, '10');
+  const beforeMissingPrimary = await snapshot();
+  await assert.rejects(() => createCompany(pool, { contactId: 'company-c', victron: 10, renogy: 20, actor, getContact,
+    primaryUser: { email: 'missing@example.test', passwordHash: 'unused' } }), /primary email/);
+  assert.deepEqual(await snapshot(), beforeMissingPrimary);
+  const invited = await createCompany(pool, { contactId: 'company-d', victron: 15, renogy: 25, actor, getContact,
+    primaryUser: { email: 'primary-d@example.test', passwordHash: 'unusable-hash' } });
+  assert.equal(invited.primaryUser.email, 'primary-d@example.test');
+  assert.equal(Number(invited.primaryUser.organisation_id), Number(invited.id));
+  assert.equal((await userRow(invited.primaryUser.id)).xero_person_kind, 'primary');
+  const beforeDuplicate = await snapshot();
+  await assert.rejects(() => createCompany(pool, { contactId: 'company-e', victron: 15, renogy: 25, actor, getContact,
+    primaryUser: { email: 'a@example.test', passwordHash: 'unusable-hash' } }), /already/);
+  assert.deepEqual(await snapshot(), beforeDuplicate);
   const self = await updateUserEmail(pool, { userId: 99, email: 'new-admin@example.test', actor, getContact: async () => { throw new Error('Staff must not look up Xero'); } });
   assert.equal(self.signedOut, true);
   assert.equal((await userRow(99)).can_manage_users, true);

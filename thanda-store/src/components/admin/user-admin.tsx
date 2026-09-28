@@ -254,6 +254,7 @@ export function XeroPeopleAccess({
   const [loading, setLoading] = useState(false);
   const [busyEmail, setBusyEmail] = useState('');
   const [message, setMessage] = useState('');
+  const [invitedUserId, setInvitedUserId] = useState<number | null>(null);
 
   async function loadPeople() {
     setLoading(true);
@@ -290,6 +291,29 @@ export function XeroPeopleAccess({
     }
   }
 
+  async function invitePrimary() {
+    setLoading(true); setMessage(''); setInvitedUserId(null);
+    try {
+      const peopleResponse = await fetch(`/api/admin/xero/contact-people?contactId=${encodeURIComponent(contactId)}`, { cache: 'no-store' });
+      const peopleData = await peopleResponse.json();
+      if (!peopleResponse.ok) throw new Error(peopleData.error || 'Unable to load the primary Xero contact.');
+      const primary = (peopleData.people as XeroContactPerson[]).find((person) => person.kind === 'primary');
+      if (!primary) throw new Error('This company has no primary Xero contact email. Add one in Xero first.');
+      setPeople(peopleData.people);
+      const existing = portalUsers.find((user) => user.email.toLowerCase() === primary.email.toLowerCase());
+      if (existing && Number(existing.organisation_id) !== organisationId) throw new Error('The primary email belongs to another Store company. Review that user before inviting.');
+      const response = existing
+        ? await fetch('/api/admin/users', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: existing.id }) })
+        : await fetch('/api/admin/users', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'enableXeroPerson', organisationId, email: primary.email }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to invite the primary contact.');
+      setInvitedUserId(Number(existing?.id ?? data.userId));
+      setMessage(data.inviteSent === false ? `Buyer access was created for ${primary.email}, but the setup email could not be sent. Open the user and resend.` : `Setup invitation sent to ${primary.email}.`);
+      await onEnabled().catch(() => setMessage((current) => `${current} Reload this page to refresh the user list.`));
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to invite the primary contact.'); }
+    finally { setLoading(false); }
+  }
+
   const userByEmail = new Map(portalUsers.map((user) => [user.email.toLowerCase(), user]));
   return (
     <div className="mt-4 border-t border-zinc-100 pt-4">
@@ -298,7 +322,7 @@ export function XeroPeopleAccess({
           <h4 className="text-sm font-bold">Xero people</h4>
           <p className="text-xs text-zinc-500">Primary contact and additional people eligible for this company.</p>
         </div>
-        <button type="button" onClick={loadPeople} disabled={loading} className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold disabled:opacity-60">{loading ? 'Loading…' : people.length ? 'Refresh stored people' : 'Show eligible Xero people'}</button>
+        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void invitePrimary()} disabled={loading} className="h-9 rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white disabled:opacity-60">{loading ? 'Working…' : 'Invite primary contact'}</button><button type="button" onClick={loadPeople} disabled={loading} className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold disabled:opacity-60">{loading ? 'Loading…' : people.length ? 'Refresh stored people' : 'Show eligible Xero people'}</button></div>
       </div>
       {people.length > 0 && <div className="mt-3 grid gap-2">
         {people.map((person) => {
@@ -313,7 +337,7 @@ export function XeroPeopleAccess({
           </div>;
         })}
       </div>}
-      {message && <p className="mt-2 text-xs text-zinc-600">{message}</p>}
+      {message && <p className="mt-2 text-xs text-zinc-600">{message}{invitedUserId && <Link href={`/admin/users/${invitedUserId}`} className="ml-2 font-semibold underline">Open user</Link>}</p>}
     </div>
   );
 }
