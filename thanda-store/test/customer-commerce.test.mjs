@@ -6,6 +6,15 @@ import {productDetails,publicManufacturerUrl} from '../src/lib/product-details.m
 import {quoteNotificationPayloads,validRequestId} from '../src/lib/commerce/quote-requests.mjs';
 import {deliveryState} from '../src/lib/commerce/notifications.mjs';
 
+test('on-behalf quote notifications identify the acting admin without attributing submission to the buyer',()=>{
+ const quote={QuoteID:'quote-1',QuoteNumber:'Q-1',Reference:'Mersat',Status:'DRAFT',LineItems:[{Quantity:1,Description:'Charger'}]};
+ const notices=quoteNotificationPayloads(quote,{companyName:'Mersat',buyerEmail:'brendon@example.test',salesEmail:'sales@example.test',baseUrl:'https://store.example.test',source:'cart',actingAdminEmail:'admin@example.test'});
+ assert.match(notices.buyer.text,/Thanda created this quote request on your behalf/);
+ assert.doesNotMatch(notices.buyer.text,/You requested:/);
+ assert.match(notices.sales.text,/Acting administrator: admin@example.test/);
+ assert.match(notices.sales.text,/Portal user: brendon@example.test/);
+});
+
 test('keys contain 256 random bits, only a one-way hash is persisted',()=>{
  const a=newApiKey(),b=newApiKey();assert.match(a.token,/^ts_[\w-]{43}$/);assert.notEqual(a.token,b.token);assert.equal(a.hash,tokenHash(a.token));assert.notEqual(a.hash,a.token);assert.equal(a.prefix.length,11);
 });

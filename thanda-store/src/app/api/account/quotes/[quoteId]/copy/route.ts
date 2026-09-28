@@ -112,6 +112,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       Contact:{ContactID:user.xeroContactId},Date:date,Status:quoteStatus,LineAmountTypes:'Exclusive',
       Reference:`Reorder from ${source.QuoteNumber || 'quote'}`,LineItems:lineItems,
     }] },{source:'quote_copy',companyName:user.organisationName,buyerEmail:user.email,
+      ...(user.impersonatedBy ? { actingAdminId:user.impersonatedBy.id, actingAdminEmail:user.impersonatedBy.email } : {}),
       salesEmail:process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar',
       baseUrl:(process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/,''),
     });

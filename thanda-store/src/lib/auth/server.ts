@@ -18,6 +18,7 @@ export type PortalUser = {
   xeroContactId: string | null;
   xeroContactName: string | null;
   discounts: Record<string, number>;
+  impersonatedBy?: { id: number; email: string };
 };
 
 function sha256(value: string) {
@@ -92,9 +93,16 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
         o.id AS organisation_id,
         o.name AS organisation_name,
         o.xero_contact_id,
-        o.xero_contact_name
+        o.xero_contact_name,
+        actor.id AS actor_id,
+        actor.email AS actor_email,
+        s.impersonated_user_id
       FROM portal_sessions s
-      JOIN portal_users u ON u.id = s.user_id
+      JOIN portal_users actor ON actor.id = s.user_id
+      LEFT JOIN portal_users target ON target.id = s.impersonated_user_id
+      JOIN portal_users u ON u.id = CASE WHEN s.impersonation_expires_at > NOW()
+        AND actor.is_active AND actor.role = 'admin' AND actor.can_manage_users
+        AND target.is_active AND target.role = 'buyer' THEN target.id ELSE actor.id END
       JOIN organisations o ON o.id = u.organisation_id
       WHERE s.session_hash = $1
         AND s.expires_at > NOW()
@@ -128,6 +136,8 @@ export async function currentUserFromToken(token: string | undefined): Promise<P
     xeroContactId: row.xero_contact_id,
     xeroContactName: row.xero_contact_name,
     discounts,
+    ...(row.impersonated_user_id && Number(row.id) !== Number(row.actor_id)
+      ? { impersonatedBy: { id: Number(row.actor_id), email: row.actor_email } } : {}),
   };
 }
 

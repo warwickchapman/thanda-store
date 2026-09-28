@@ -110,6 +110,8 @@ async function ensureAuthSchemaOnce() {
       last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query('ALTER TABLE portal_sessions ADD COLUMN IF NOT EXISTS impersonated_user_id BIGINT REFERENCES portal_users(id) ON DELETE SET NULL');
+  await pool.query('ALTER TABLE portal_sessions ADD COLUMN IF NOT EXISTS impersonation_expires_at TIMESTAMPTZ');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS account_setup_tokens (

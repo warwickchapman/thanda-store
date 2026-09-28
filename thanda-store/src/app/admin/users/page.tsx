@@ -26,6 +26,7 @@ export default function AdminUsersPage() {
   const [message, setMessage] = useState('');
   const [resendingUserId, setResendingUserId] = useState<number | null>(null);
   const [resettingUserId, setResettingUserId] = useState<number | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<number | null>(null);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -83,6 +84,17 @@ export default function AdminUsersPage() {
     } finally {
       setResettingUserId(null);
     }
+  }
+
+  async function viewAs(user: PortalUser) {
+    if (!window.confirm(`View the store as ${user.email} at ${user.organisation_name}? Your actions will be recorded as acting on their behalf.`)) return;
+    setViewingUserId(user.id); setError('');
+    try {
+      const response = await fetch('/api/admin/impersonation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not start customer view.');
+      window.location.assign('/');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start customer view.'); setViewingUserId(null); }
   }
 
   useEffect(() => {
@@ -152,6 +164,7 @@ export default function AdminUsersPage() {
               <p className="text-sm text-zinc-600">{user.role === 'admin' ? user.can_manage_users ? 'Admin · Users' : 'Administrator' : 'Buyer'}</p>
               <div className="flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.setup_expires_at ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.setup_expires_at ? 'Setup pending' : user.is_active ? 'Active' : 'Disabled'}</span></div>
               <div className="flex flex-wrap gap-2 lg:justify-self-end">
+                {canManageUsers && user.role === 'buyer' && user.is_active && <button type="button" disabled={viewingUserId === user.id} onClick={() => void viewAs(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{viewingUserId === user.id ? 'Opening…' : 'View as'}</button>}
                 {canManageUsers && user.setup_expires_at && <button type="button" disabled={resendingUserId === user.id} onClick={() => void resendInvite(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resendingUserId === user.id ? 'Sending...' : 'Resend invite'}</button>}
                 {canManageUsers && user.is_active && !user.setup_expires_at && <button type="button" disabled={resettingUserId === user.id} onClick={() => void sendPasswordReset(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resettingUserId === user.id ? 'Sending...' : 'Send password reset'}</button>}
                 <Link href={`/admin/users/${user.id}`} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit</Link>

@@ -7,10 +7,10 @@ export function quoteNotificationPayloads(quote, context) {
   return {
     buyer: { from:'Thanda Store <sales@thanda.solar>',to:context.buyerEmail,
       subject:`We received your Thanda Store quote request (${quoteNumber})`,
-      text:`Hello,\n\nThank you for your quote request.\n${common}\n\nYou requested:\n${quote.LineItems.map(l=>`- ${l.Quantity} x ${l.Description}${l.ItemCode ? ` (${l.ItemCode})` : ''}`).join('\n')}\n\nThe Thanda sales team will send the final quotation shortly and confirm acceptance with you.\n\nView your request: ${context.baseUrl}/accounts?quote=${encodeURIComponent(quote.QuoteID)}\n\nRegards,\nThanda Sales` },
+      text:`Hello,\n\n${context.actingAdminEmail ? 'Thanda created this quote request on your behalf.' : 'Thank you for your quote request.'}\n${common}\n\n${context.actingAdminEmail ? 'Requested products' : 'You requested'}:\n${quote.LineItems.map(l=>`- ${l.Quantity} x ${l.Description}${l.ItemCode ? ` (${l.ItemCode})` : ''}`).join('\n')}\n\nThe Thanda sales team will send the final quotation shortly and confirm acceptance with you.\n\nView your request: ${context.baseUrl}/accounts?quote=${encodeURIComponent(quote.QuoteID)}\n\nRegards,\nThanda Sales` },
     sales: { from:'Thanda Store <sales@thanda.solar>',to:context.salesEmail,
       subject:`New Thanda Store quote ${quoteNumber} - ${context.companyName}`,
-      text:`A customer submitted a quote request from ${context.source === 'cart' ? 'their cart' : 'a copied quote'}.\n\n${common}\nPortal user: ${context.buyerEmail}\nXero status: ${quote.Status}\n\nReview the quote in Xero and contact the customer.\nNotification status: ${context.baseUrl}/admin/quote-requests` },
+      text:`${context.actingAdminEmail ? 'Thanda staff created a quote request on behalf of a customer' : 'A customer submitted a quote request'} from ${context.source === 'cart' ? 'their cart' : 'a copied quote'}.\n\n${common}\nPortal user: ${context.buyerEmail}${context.actingAdminEmail ? `\nActing administrator: ${context.actingAdminEmail}` : ''}\nXero status: ${quote.Status}\n\nReview the quote in Xero and contact the customer.\nNotification status: ${context.baseUrl}/admin/quote-requests` },
   };
 }
 export async function recordQuoteRequest(pool, user, id, payload, context) {
@@ -58,7 +58,7 @@ export async function resumeQuoteRequest(pool, user, id, hubFetch) {
       // A concurrent cart edit must survive completing an earlier checkout.
       for (const line of row.context.cart || []) await client.query(`DELETE FROM portal_cart_lines WHERE user_id=$1 AND product_id=$2 AND quantity=$3 AND updated_at=$4`,[user.id,line.product_id,line.quantity,line.updated_at]);
       await client.query(`INSERT INTO portal_activity_log(user_id,organisation_id,action,resource_type,resource_id,metadata)
-        VALUES($1,$2,'quote_requested','quote',$3,$4::jsonb)`,[user.id,user.organisationId,quote.QuoteID,JSON.stringify({requestId:id,source:row.source,quoteNumber:quote.QuoteNumber})]);
+        VALUES($1,$2,'quote_requested','quote',$3,$4::jsonb)`,[user.id,user.organisationId,quote.QuoteID,JSON.stringify({requestId:id,source:row.source,quoteNumber:quote.QuoteNumber,actingAdminId:row.context.actingAdminId ?? null})]);
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK'); throw error; }
     return quoteResult(quote,id);

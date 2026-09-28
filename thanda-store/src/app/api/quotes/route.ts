@@ -58,6 +58,7 @@ export async function POST(request: Request) {
       LineAmountTypes:'Exclusive',Reference:quoteReference,LineItems:lineItems,
     }] },{
       source:'cart',cart:cart.rows,companyName:user.organisationName,buyerEmail:user.email,
+      ...(user.impersonatedBy ? { actingAdminId:user.impersonatedBy.id, actingAdminEmail:user.impersonatedBy.email } : {}),
       salesEmail:process.env.SALES_QUOTE_NOTIFICATION_EMAIL || 'sales@thanda.solar',
       baseUrl:(process.env.PORTAL_BASE_URL || 'https://store.thanda.solar').replace(/\/$/,''),
     });

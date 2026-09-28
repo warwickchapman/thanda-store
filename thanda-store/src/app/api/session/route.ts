@@ -16,6 +16,7 @@ export async function GET() {
       xeroContactId: user.xeroContactId,
       xeroContactName: user.xeroContactName,
       discounts: user.discounts,
+      impersonatedBy: user.impersonatedBy ?? null,
     },
   });
 }
