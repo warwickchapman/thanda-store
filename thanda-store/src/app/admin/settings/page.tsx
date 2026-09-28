@@ -1,8 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { type XeroStatus, XeroStatusPanel } from '@/components/admin/user-admin';
+import { AdminMenu } from '@/components/admin/admin-menu';
 
 export default function AdminSettingsPage() {
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
@@ -56,7 +56,7 @@ export default function AdminSettingsPage() {
   }, []);
 
   return <main className="min-h-screen bg-zinc-50 text-zinc-950"><div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-4"><div><h1 className="text-2xl font-bold">Settings</h1><p className="text-sm text-zinc-500">Xero connection and quote creation</p></div><Link href="/admin/users" className="text-sm font-semibold underline">Back to User Admin</Link></header>
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-4"><div><h1 className="text-2xl font-bold">Settings</h1><p className="text-sm text-zinc-500">Xero connection and quote creation</p></div><AdminMenu /></header>
     {xeroError && <p role="alert" className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{xeroError} <button type="button" className="underline" onClick={() => void loadXeroStatus().catch((error) => setXeroError(error instanceof Error ? error.message : 'Failed to load Xero status.'))}>Retry</button></p>}
     {xeroStatus && <XeroStatusPanel xeroStatus={xeroStatus} onRefresh={() => void loadXeroStatus().catch((error) => setXeroError(error instanceof Error ? error.message : 'Failed to refresh Xero status.'))} />}
     {quoteError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{quoteError} <button type="button" className="underline" onClick={() => void loadQuoteSettings().catch((error) => setQuoteError(error instanceof Error ? error.message : 'Failed to load quote settings.'))}>Retry</button></p>}

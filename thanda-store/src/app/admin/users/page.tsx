@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { InviteUserForm, type XeroStatus } from '@/components/admin/user-admin';
+import { AdminMenu } from '@/components/admin/admin-menu';
 
 type PortalUser = {
   id: number;
@@ -131,7 +132,7 @@ export default function AdminUsersPage() {
             <h1 className="text-2xl font-bold">User Admin</h1>
             <p className="text-sm text-zinc-500">Find a portal user, then open their account to manage their email, permissions and company membership.</p>
           </div>
-          <div className="flex flex-wrap gap-4"><Link href="/admin/companies" className="text-sm font-semibold text-zinc-700">Companies</Link><Link href="/admin/data-health" className="text-sm font-semibold text-zinc-700">Data health</Link><Link href="/admin/quote-requests" className="text-sm font-semibold text-zinc-700">Quote requests & notifications</Link><Link href="/admin/settings" className="text-sm font-semibold text-zinc-700">Settings</Link><Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link></div>
+          <AdminMenu />
         </div>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
