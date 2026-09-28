@@ -820,7 +820,7 @@ export default function ReplenishmentPage() {
           </div>
         )}
         {report && report.agedUnreceivedShipments.length > 0 && (
-          <section className="mb-5 rounded-lg border border-pink-300 bg-pink-100 px-4 py-3 text-pink-950 shadow-sm">
+          <section className="mb-3 rounded-lg border border-pink-300 bg-pink-100 px-4 py-2 text-pink-950 shadow-sm">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <h2 className="font-bold">
@@ -833,9 +833,7 @@ export default function ReplenishmentPage() {
                     </span>
                   ))}
                 </p>
-                <p className="mt-1 text-sm font-medium">
-                  If this stock is already reflected in Xero, leaving it open here causes the replenishment calculation to count it twice.
-                </p>
+                <p className="text-sm font-medium">Check receipt before ordering: stock already in Xero may be counted twice.</p>
               </div>
               <Link
                 href="/admin/victron-inbound"
@@ -848,42 +846,45 @@ export default function ReplenishmentPage() {
         )}
         {report && (
           <>
-            <section className={`mb-5 rounded-lg border p-4 text-sm ${report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "border-amber-300 bg-amber-50 text-amber-950" : "border-zinc-200 bg-white text-zinc-700"}`}>
-              <h2 className="font-bold">
-                {report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "Review the data before ordering" : "Planning data checked"}
-              </h2>
-              <p className="mt-1">
-                {report.dataHealth.unavailableCount > 0 && `${report.dataHealth.unavailableCount} suggestion${report.dataHealth.unavailableCount === 1 ? " is" : "s are"} withheld because required data is unknown. `}
-                {report.dataHealth.provisionalCount > 0 && `${report.dataHealth.provisionalCount} suggestion${report.dataHealth.provisionalCount === 1 ? " uses" : "s use"} data that needs review. `}
-                Stock and demand use saved observations. Reloading this report does not refresh the source systems.
-              </p>
-              {(report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0) && (
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {report.dataHealth.sourceIssues.map((source) => <li key={source.id}>{source.label}: {source.message}</li>)}
-                  {report.dataHealth.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                </ul>
-              )}
-              <details className="mt-3">
-                <summary className="cursor-pointer font-semibold">Stock and demand update times</summary>
-                <dl className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {report.dataHealth.sources.map((source) => (
-                    <div key={source.id} className="min-w-0">
-                      <dt className="font-semibold">{source.label}</dt>
-                      <dd>{source.observedAt ? new Date(source.observedAt).toLocaleString() : "No confirmed observation"}</dd>
-                      <dd className="mt-0.5 text-xs">{source.message}</dd>
-                    </div>
-                  ))}
-                </dl>
+            <section className={`mb-3 rounded-lg border px-4 py-2 text-sm ${report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "border-amber-300 bg-amber-50 text-amber-950" : "border-zinc-200 bg-white text-zinc-700"}`}>
+              <details>
+                <summary className="cursor-pointer font-semibold">
+                  {report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "Review planning data" : "Planning data checked"}
+                  {report.dataHealth.unavailableCount > 0 && ` · ${report.dataHealth.unavailableCount} withheld`}
+                  {report.dataHealth.provisionalCount > 0 && ` · ${report.dataHealth.provisionalCount} need review`}
+                  {report.dataHealth.sourceIssues.length > 0 && ` · ${report.dataHealth.sourceIssues.length} source issue${report.dataHealth.sourceIssues.length === 1 ? "" : "s"}`}
+                </summary>
+                <div className="mt-2 border-t border-current/20 pt-2">
+                  <p>Stock and demand use saved observations. Reloading this report does not refresh the source systems.</p>
+                  {(report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0) && (
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {report.dataHealth.sourceIssues.map((source) => <li key={source.id}>{source.label}: {source.message}</li>)}
+                      {report.dataHealth.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                    </ul>
+                  )}
+                  <h3 className="mt-3 font-semibold">Stock and demand update times</h3>
+                  <dl className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {report.dataHealth.sources.map((source) => (
+                      <div key={source.id} className="min-w-0">
+                        <dt className="font-semibold">{source.label}</dt>
+                        <dd>{source.observedAt ? new Date(source.observedAt).toLocaleString() : "No confirmed observation"}</dd>
+                        <dd className="mt-0.5 text-xs">{source.message}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
               </details>
             </section>
-            <div className="mb-5 flex flex-col justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm sm:flex-row sm:items-center">
-              <p>
-                <span className="font-bold">Policy:</span> higher of 30- or
-                90-day sales rate, or the configured stock minimum;{" "}
-                {report.policy.leadTimeDays}-day lead time;{" "}
-                {report.policy.safetyStockDays}-day safety stock;{" "}
-                {report.policy.targetCoverDays}-day target cover.
-              </p>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm shadow-sm">
+              <details className="min-w-0">
+                <summary className="cursor-pointer font-semibold">Recommendation policy · {report.policy.targetCoverDays}-day cover</summary>
+                <p className="mt-2 max-w-3xl">
+                  Higher of 30- or 90-day sales rate, or the configured stock minimum;{" "}
+                  {report.policy.leadTimeDays}-day lead time;{" "}
+                  {report.policy.safetyStockDays}-day safety stock;{" "}
+                  {report.policy.targetCoverDays}-day target cover.
+                </p>
+              </details>
               <button
                 type="button"
                 onClick={() => void load()}
@@ -894,7 +895,15 @@ export default function ReplenishmentPage() {
                 Reload report
               </button>
             </div>
-            <section className="mb-5 rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
+            <div className="mb-3 grid gap-3 lg:grid-cols-2">
+            <section className="min-w-0 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 shadow-sm">
+              <details>
+                <summary className="cursor-pointer font-bold text-violet-950">
+                  Accepted quotes · {report.acceptedQuotes.stats.activeQuotes || 0} checked
+                  {report.acceptedQuotes.lastError && <span className="ml-2 text-red-800">· check failed</span>}
+                  {report.acceptedQuotes.unmatchedLines.length > 0 && <span className="ml-2">· {report.acceptedQuotes.unmatchedLines.length} unmatched</span>}
+                </summary>
+              <div className="mt-3 border-t border-violet-200 pt-3">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                   <h2 className="font-bold text-violet-950">
@@ -948,8 +957,16 @@ export default function ReplenishmentPage() {
                   . They do not yet affect Suggested.
                 </p>
               )}
+              </div>
+              </details>
             </section>
-            <section className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <section className="min-w-0 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 shadow-sm">
+              <details>
+                <summary className="cursor-pointer font-bold text-amber-950">
+                  E-Order cart · {report.provisionalCart.lineCount} line{report.provisionalCart.lineCount === 1 ? "" : "s"}
+                  {report.provisionalCart.unmatchedLines.length > 0 && <span className="ml-2">· {report.provisionalCart.unmatchedLines.length} unmatched</span>}
+                </summary>
+              <div className="mt-3 border-t border-amber-200 pt-3">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <h2 className="font-bold text-amber-950">
@@ -1017,7 +1034,10 @@ export default function ReplenishmentPage() {
                   . These lines do not reduce a replenishment recommendation.
                 </p>
               )}
+              </div>
+              </details>
             </section>
+            </div>
           </>
         )}
         <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
