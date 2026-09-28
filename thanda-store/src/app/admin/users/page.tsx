@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { InviteUserForm, type XeroStatus, XeroStatusPanel } from '@/components/admin/user-admin';
+import { InviteUserForm, type XeroStatus } from '@/components/admin/user-admin';
 
 type PortalUser = {
   id: number;
@@ -20,13 +20,12 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [canManageUsers, setCanManageUsers] = useState(false);
   const [xeroStatus, setXeroStatus] = useState<XeroStatus | null>(null);
+  const [xeroStatusError, setXeroStatusError] = useState(false);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [resendingUserId, setResendingUserId] = useState<number | null>(null);
   const [resettingUserId, setResettingUserId] = useState<number | null>(null);
-  const [draftsOnly, setDraftsOnly] = useState<boolean | null>(null);
-  const [savingQuoteSetting, setSavingQuoteSetting] = useState(false);
 
   async function loadUsers() {
     const response = await fetch('/api/admin/users', { cache: 'no-store' });
@@ -41,31 +40,7 @@ export default function AdminUsersPage() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to load Xero status.');
     setXeroStatus(data);
-  }
-
-  async function loadQuoteSettings() {
-    const response = await fetch('/api/admin/quote-settings', { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Failed to load quote settings.');
-    setDraftsOnly(Boolean(data.draftsOnly));
-  }
-
-  async function updateDraftsOnly(nextDraftsOnly: boolean) {
-    if (!nextDraftsOnly && !window.confirm('New client quote requests will be created as SENT quotes in Xero. Continue?')) return;
-    setSavingQuoteSetting(true);
-    setError('');
-    try {
-      const response = await fetch('/api/admin/quote-settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draftsOnly: nextDraftsOnly }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to update quote settings.');
-      setDraftsOnly(Boolean(data.draftsOnly));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update quote settings.');
-    } finally {
-      setSavingQuoteSetting(false);
-    }
+    setXeroStatusError(false);
   }
 
   async function resendInvite(user: PortalUser) {
@@ -114,12 +89,17 @@ export default function AdminUsersPage() {
     let active = true;
     async function loadInitialUsers() {
       try {
-        await Promise.all([loadUsers(), loadXeroStatus(), loadQuoteSettings()]);
+        await loadUsers();
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : 'Failed to load users.');
       }
     }
     void loadInitialUsers();
+    async function loadInitialXeroStatus() {
+      try { await loadXeroStatus(); }
+      catch { if (active) setXeroStatusError(true); }
+    }
+    void loadInitialXeroStatus();
     return () => {
       active = false;
     };
@@ -139,18 +119,15 @@ export default function AdminUsersPage() {
             <h1 className="text-2xl font-bold">User Admin</h1>
             <p className="text-sm text-zinc-500">Find a portal user, then open their account to manage their email, permissions and company membership.</p>
           </div>
-          <div className="flex flex-wrap gap-4"><Link href="/admin/companies" className="text-sm font-semibold text-zinc-700">Companies</Link><Link href="/admin/data-health" className="text-sm font-semibold text-zinc-700">Data health</Link><Link href="/admin/quote-requests" className="text-sm font-semibold text-zinc-700">Quote requests & notifications</Link><Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link></div>
+          <div className="flex flex-wrap gap-4"><Link href="/admin/companies" className="text-sm font-semibold text-zinc-700">Companies</Link><Link href="/admin/data-health" className="text-sm font-semibold text-zinc-700">Data health</Link><Link href="/admin/quote-requests" className="text-sm font-semibold text-zinc-700">Quote requests & notifications</Link><Link href="/admin/settings" className="text-sm font-semibold text-zinc-700">Settings</Link><Link href="/" className="text-sm font-semibold text-zinc-700">Back to store</Link></div>
         </div>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
         {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{message}</div>}
-        {xeroStatus && <XeroStatusPanel xeroStatus={xeroStatus} onRefresh={() => void loadXeroStatus().catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh Xero status.'))} />}
-        {draftsOnly !== null && <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div><h2 className="font-bold">Quote creation</h2><p className="mt-1 text-sm text-zinc-600">{draftsOnly ? 'New client quote requests create DRAFT quotes in Xero.' : 'New client quote requests create SENT quotes in Xero.'}</p></div>
-            <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={draftsOnly} disabled={savingQuoteSetting} onChange={(event) => void updateDraftsOnly(event.target.checked)} className="h-5 w-5 rounded border-zinc-300" />Send quotes as drafts only</label>
-          </div>
-        </section>}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          {canManageUsers && <><Link href="/admin/companies#add-company" className="inline-flex h-10 items-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold">Add company</Link><a href="#add-user" className="inline-flex h-10 items-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white">Add user</a></>}
+          <Link href="/admin/settings" className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold ${xeroStatusError ? 'bg-amber-100 text-amber-900' : xeroStatus?.connected && !xeroStatus.reconnectRequired ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`} title="View Xero connection details in Settings">{xeroStatusError ? 'Xero status unavailable' : xeroStatus ? xeroStatus.connected && !xeroStatus.reconnectRequired ? 'Xero connected' : 'Xero needs attention' : 'Checking Xero…'}</Link>
+        </div>
 
         <section>
           <div className="mb-4 flex flex-col justify-between gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end">
@@ -185,7 +162,7 @@ export default function AdminUsersPage() {
           </div>
         </section>
 
-        {canManageUsers && <InviteUserForm onCreated={loadUsers} />}
+        {canManageUsers && <div id="add-user" className="scroll-mt-6"><InviteUserForm onCreated={loadUsers} /></div>}
       </div>
     </main>
   );

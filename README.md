@@ -209,6 +209,8 @@ Administrators can view User Admin at `/admin/users`, including the global Xero 
 
 Administrators with **Manage users** manage people at `/admin/users` and company records at `/admin/companies`. Select **Edit** for a dedicated personal account page. To onboard a buyer:
 
+User Admin has **Add company** and **Add user** shortcuts that jump to the respective forms. Its Xero tag shows the current connection check; open **Settings** for the full Xero allowance, reconnect action and quote creation control. The status check reads the Hub's stored state and makes no Xero API call.
+
 1. Open **Companies**, find the company in the Hub's stored Xero contacts by primary email, and set its discounts. Reuse an existing company record if one exists. The company name comes from Xero and its Contact ID stays fixed.
 2. Invite the person into that company from User Admin, or explicitly show eligible Xero people on the company record and enable one. The email must belong to that contact's eligible primary/additional people. The portal emails a single-use setup link that expires after seven days.
 3. The buyer chooses their own password, then signs in with their email, password and a short-lived email OTP. The verification step lets them resend a code after 30 seconds.
@@ -386,11 +388,11 @@ https://store.thanda.solar/api/xero/connect?secret=<XERO_CONNECT_SECRET>
 
 Approve access to the correct Xero organisation. The callback stores the rotating refresh token and selected tenant in `XERO_TOKEN_FILE` with file mode `0600`.
 
-Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.invoices`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. `accounting.invoices` permits the sales-history read cache, draft-quote creation, and authenticated quote, invoice, and credit-note PDF retrieval. Admin users can reconnect Xero from `/admin/users`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
+Current scopes are `offline_access accounting.settings.read accounting.contacts.read accounting.invoices`. Item stock sync uses settings read access. Contact read access is for linking store organisations to Xero contacts and reconciling the primary contact plus Additional people. `accounting.invoices` permits the sales-history read cache, draft-quote creation, and authenticated quote, invoice, and credit-note PDF retrieval. Admin users can reconnect Xero from `/admin/settings`; the admin route avoids exposing `XERO_CONNECT_SECRET` in the browser.
 
-After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in User Admin. The connection status identifies any missing permission. Do not run sales-history sync, create quotes, or use document PDFs until `accounting.invoices` has been approved.
+After a deploy that changes scopes, sign in as an administrator and use **Reconnect Xero** in Settings. The connection status identifies any missing permission. Do not run sales-history sync, create quotes, or use document PDFs until `accounting.invoices` has been approved.
 
-User Admin also shows the latest Xero API allowance observed by the sales-history sync: remaining daily and minute calls, when it was observed, and any recorded `Retry-After` deadline. Opening that page does not make an extra Xero request. If the daily allowance is exhausted, the timer records the reset deadline and later runs exit without calling Xero until then.
+Settings shows the latest Xero API allowance observed by the Hub: remaining daily and minute calls, when it was observed, and any recorded `Retry-After` deadline. Opening that page does not make an extra Xero request. If the daily allowance is exhausted, the timer records the reset deadline and later runs exit without calling Xero until then.
 
 ## Database
 

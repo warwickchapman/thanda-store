@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added **Add company** and **Add user** shortcuts to User Admin. The detailed Xero connection panel and quote creation control now live under **Settings**, with a compact Xero connection indicator beside the shortcuts. The indicator distinguishes an unavailable status check from a confirmed connection.
 - Added **Admin → Companies** for shared Xero identity, discounts and people. Personal email changes validate against the existing company and no longer unlink colleagues. Explicitly moving one person to another company revokes that person's sessions and keys, disables their API access and clears their cart; company pricing and other members remain intact. Existing company identities cannot be silently repointed from a personal editor. Changes are audited and user-management permissions still apply.
 - Coordinated login, password setup and API-key creation with personal identity changes. In-flight requests now recheck the user under the same lock, so revoked credentials cannot be recreated after an email or company move. OTP consumption and session creation are atomic, and resending a code invalidates older unused codes.
 - Replaced the permanent **Warehouse Live** label with source-specific stock update times and warnings for unknown, overdue or failed updates. Unknown stock is distinct from confirmed zero, including Xero missing/untracked items, and has its own catalogue filter. Failed catalogue/favourites loads now show Retry instead of empty results.
