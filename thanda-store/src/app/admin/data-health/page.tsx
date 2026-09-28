@@ -32,18 +32,18 @@ export default function DataHealthPage() {
   }, [attempt]);
   const problems = sources.filter(source => !['current', 'manual'].includes(source.status));
   const sorted = [...sources].sort((a, b) => Number(['current', 'manual'].includes(a.status)) - Number(['current', 'manual'].includes(b.status)));
-  return <main className="mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-6">
+  return <main className="min-h-screen bg-zinc-50 text-zinc-950"><div className="mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-6">
     <nav className="flex flex-wrap gap-4 text-sm font-semibold"><Link href="/admin/users" className="underline">Admin</Link><Link href="/admin/replenishment" className="underline">Inventory planning</Link><Link href="/" className="underline">Store</Link></nav>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-bold">Data health</h1><p className="mt-2 text-sm text-zinc-600">Check which stock and planning sources need attention.</p></div>
-      <button type="button" disabled={loading} onClick={() => { setLoading(true); setAttempt(value => value + 1); }} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold disabled:opacity-50">{loading ? 'Checking…' : 'Check status'}</button>
+      <button type="button" disabled={loading} onClick={() => { setLoading(true); setAttempt(value => value + 1); }} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 disabled:opacity-50">{loading ? 'Checking…' : 'Check status'}</button>
     </div>
     <p className="text-xs text-zinc-500">This checks stored update records; it does not request new data from suppliers or Xero.{checkedAt && ` Status checked ${date(checkedAt)}.`}</p>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error} Use Check status to retry.</p>}
     {!loading && !error && <p role="status" className={`rounded-lg border p-4 text-sm ${problems.length ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-zinc-200 bg-white text-zinc-700'}`}>
       {problems.length ? `${problems.length} ${problems.length === 1 ? 'source needs' : 'sources need'} attention. Retained data may still be useful; review the warnings before relying on it.` : 'Scheduled sources are within their update windows. Manually maintained availability is listed separately.'}
     </p>}
-    <ul className="space-y-3">{sorted.map(source => <li key={source.id} className="rounded-lg border border-zinc-200 bg-white p-4">
+    <ul className="space-y-3">{sorted.map(source => <li key={source.id} className="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-2"><h2 className="font-semibold">{source.label}</h2><span className={`text-xs font-semibold ${['current', 'manual'].includes(source.status) ? 'text-zinc-600' : 'text-amber-800'}`}>{labels[source.status]}</span></div>
       <p className="mt-2 text-sm text-zinc-600">{source.message}</p>
       {source.mode !== 'manual' && <>
@@ -56,5 +56,5 @@ export default function DataHealthPage() {
         {source.lastError && <p className="mt-3 text-xs text-amber-800">{source.lastError}</p>}
       </>}
     </li>)}</ul>
-  </main>;
+  </div></main>;
 }

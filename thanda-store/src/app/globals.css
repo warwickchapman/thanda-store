@@ -26,17 +26,6 @@
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #050505;
-    --foreground: #f8fafc;
-    --card: #0a0a0a;
-    --card-foreground: #f8fafc;
-    --muted: #18181b;
-    --muted-foreground: #a1a1aa;
-  }
-}
-
 * {
   border-color: var(--muted);
 }
