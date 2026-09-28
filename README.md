@@ -539,7 +539,7 @@ Production is hosted at `https://store.thanda.solar`.
 
 - **Application checkout:** `/root/thanda-store`
 - **Next.js working directory:** `/root/thanda-store/thanda-store`
-- **Process manager:** PM2 process `thanda-store` (currently process id `0`)
+- **Process manager:** PM2 process `thanda-store`, running the Next.js entry point directly with file watching disabled
 - **Reverse proxy and TLS:** Nginx with the Certbot-managed `store.thanda.solar` certificate
 - **Supplier timers:** `thanda-store-renogy-sync.timer`, every five minutes; `thanda-store-victron-sync.timer`, hourly
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
@@ -548,19 +548,19 @@ Production is hosted at `https://store.thanda.solar`.
 - **Xero contact access timer:** `thanda-store-xero-contact-access.timer`, daily reconciliation
 - **Xero sales-history timer:** `thanda-store-xero-sales-history.timer`, daily reconciliation after Xero invoice consent
 
-Deploy a committed change from the VPS:
+Deploy a committed change from the VPS with the guarded command:
 
 ```bash
 cd /root/thanda-store
-git pull --rebase origin main
-cd thanda-store
-npm install
-npm run build
-pm2 restart thanda-store
-pm2 save
+bash deploy/deploy-store.sh --check
+bash deploy/deploy-store.sh
 ```
 
-Verify after deployment:
+The command reads the local Xero health note, refuses dirty tracked source or a divergent Git history, and uses a lock to prevent overlapping deployments. It stops the Store while Next.js replaces `.next`, builds the fetched `origin/main` commit, restarts PM2, and verifies the login page and its CSS before removing the previous build. This creates a short planned interruption during the build rather than serving a half-built page. If the build or health check fails, it restores the previous commit and build and attempts to restart it. A changed lockfile uses `npm ci`; ordinary source changes do not reinstall dependencies. Runtime product images remain in place.
+
+PM2 must run `node_modules/next/dist/bin/next start` directly with watch disabled. Running `npm run start` through a shell wrapper or enabling PM2 watch can leave an orphaned Next process on port 3000 when a build changes files. The deploy command checks this setting before stopping the service.
+
+Verify after deployment or a recovery:
 
 ```bash
 pm2 status thanda-store

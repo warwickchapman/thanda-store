@@ -5,6 +5,7 @@ All notable production-facing changes are recorded here. This project does not y
 ## Unreleased
 
 - Moved the Add a company form above the company search and list so it is immediately available on the Companies page.
+- Added a guarded Store deployment command that checks production health, Git and PM2 state, prevents overlapping deploys, stops Next before rebuilding, verifies the page and stylesheet, and restores the previous build if deployment fails. PM2 now starts Next directly without file watching, avoiding orphaned servers on port 3000.
 - Replaced the wrapping links in admin page headers with a compact Admin menu. It marks the current page and closes on selection, outside click or Escape.
 - Removed the operational stock-source status panel from the customer storefront. Product-level availability remains visible; sync warnings and source timestamps remain in Admin → Data health.
 - Creating a company now creates and invites its primary Xero contact in the same onboarding action. The company and buyer are saved together; an email failure is reported with a direct path to resend. Existing companies have an **Invite primary contact** action, including Mersat-style records created before this change.

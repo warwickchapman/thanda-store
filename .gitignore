@@ -1,5 +1,9 @@
 node_modules/
 .next/
+.next.predeploy/
+.next.failed.*/
+node_modules.predeploy/
+node_modules.failed.*/
 .env
 *.log
 *.csv
