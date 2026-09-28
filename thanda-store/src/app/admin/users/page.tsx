@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Search } from 'lucide-react';
+import { Eye, KeyRound, MailPlus, Pencil, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { InviteUserForm, type XeroStatus } from '@/components/admin/user-admin';
 import { AdminMenu } from '@/components/admin/admin-menu';
@@ -156,19 +156,19 @@ export default function AdminUsersPage() {
           </div>
 
           <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-            <div className="hidden grid-cols-[minmax(12rem,1.5fr)_minmax(14rem,1.5fr)_minmax(8rem,1fr)_minmax(7rem,.7fr)_auto] gap-4 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:grid">
-              <span>Company</span><span>Email</span><span>Access</span><span>Status</span><span className="text-right">Action</span>
+            <div className="hidden grid-cols-[minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,.75fr)_minmax(0,.75fr)_8.5rem] gap-4 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 lg:grid">
+              <span>Company</span><span>Email</span><span>Access</span><span>Status</span><span className="text-right">Actions</span>
             </div>
-            {filteredUsers.map((user) => <div key={user.id} className="grid gap-2 border-b border-zinc-100 px-4 py-4 last:border-b-0 lg:grid-cols-[minmax(12rem,1.5fr)_minmax(14rem,1.5fr)_minmax(8rem,1fr)_minmax(7rem,.7fr)_auto] lg:items-center lg:gap-4">
-              <div><p className="font-semibold">{user.organisation_name}</p>{user.xero_contact_name && user.xero_contact_name !== user.organisation_name && <p className="mt-1 text-xs text-zinc-500">Xero: {user.xero_contact_name}</p>}</div>
-              <p className="break-all text-sm text-zinc-600">{user.email}</p>
+            {filteredUsers.map((user) => <div key={user.id} className="grid gap-2 border-b border-zinc-100 px-4 py-4 last:border-b-0 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,.75fr)_minmax(0,.75fr)_8.5rem] lg:items-center lg:gap-4">
+              <div className="min-w-0"><p className="font-semibold">{user.organisation_name}</p>{user.xero_contact_name && user.xero_contact_name !== user.organisation_name && <p className="mt-1 text-xs text-zinc-500">Xero: {user.xero_contact_name}</p>}</div>
+              <p className="min-w-0 break-all text-sm text-zinc-600">{user.email}</p>
               <p className="text-sm text-zinc-600">{user.role === 'admin' ? user.can_manage_users ? 'Admin · Users' : 'Administrator' : 'Buyer'}</p>
               <div className="flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${user.setup_expires_at ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-green-100 text-green-800' : 'bg-zinc-200 text-zinc-700'}`}>{user.setup_expires_at ? 'Setup pending' : user.is_active ? 'Active' : 'Disabled'}</span></div>
-              <div className="flex flex-wrap gap-2 lg:justify-self-end">
-                {canManageUsers && user.role === 'buyer' && user.is_active && <button type="button" disabled={viewingUserId === user.id} onClick={() => void viewAs(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{viewingUserId === user.id ? 'Opening…' : 'View as'}</button>}
-                {canManageUsers && user.setup_expires_at && <button type="button" disabled={resendingUserId === user.id} onClick={() => void resendInvite(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resendingUserId === user.id ? 'Sending...' : 'Resend invite'}</button>}
-                {canManageUsers && user.is_active && !user.setup_expires_at && <button type="button" disabled={resettingUserId === user.id} onClick={() => void sendPasswordReset(user)} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60">{resettingUserId === user.id ? 'Sending...' : 'Send password reset'}</button>}
-                <Link href={`/admin/users/${user.id}`} className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900">Edit</Link>
+              <div className="flex gap-2 lg:justify-self-end">
+                {canManageUsers && user.role === 'buyer' && user.is_active && <button type="button" aria-label={`View store as ${user.email}`} title="View as customer" disabled={viewingUserId === user.id} onClick={() => void viewAs(user)} className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:opacity-60"><Eye size={18} aria-hidden="true" /></button>}
+                {canManageUsers && user.setup_expires_at && <button type="button" aria-label={`Resend invitation to ${user.email}`} title="Resend invitation" disabled={resendingUserId === user.id} onClick={() => void resendInvite(user)} className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:opacity-60"><MailPlus size={18} aria-hidden="true" /></button>}
+                {canManageUsers && user.is_active && !user.setup_expires_at && <button type="button" aria-label={`Send password reset to ${user.email}`} title="Send password reset" disabled={resettingUserId === user.id} onClick={() => void sendPasswordReset(user)} className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:opacity-60"><KeyRound size={18} aria-hidden="true" /></button>}
+                <Link href={`/admin/users/${user.id}`} aria-label={`Edit ${user.email}`} title="Edit user" className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"><Pencil size={18} aria-hidden="true" /></Link>
               </div>
             </div>)}
             {users.length === 0 && <p className="p-4 text-sm text-zinc-500">Loading users...</p>}

@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Aligned the User Admin table with shared fixed desktop columns and replaced row action text with monochrome icons for customer view, invitation, password reset and editing. Icons retain accessible names and hover titles.
 - Fixed administrator View as behind the production proxy: the route now checks the browser's origin against the configured public Store URL, or the Store's public default, instead of the internal localhost URL. Setup-pending active buyers remain eligible; no customer password or setup token is needed.
 - Moved the Add a company form above the company search and list so it is immediately available on the Companies page.
 - Added a guarded Store deployment command that checks production health, Git and PM2 state, prevents overlapping deploys, stops Next before rebuilding, verifies the page and stylesheet, and restores the previous build if deployment fails. PM2 now starts Next directly without file watching, avoiding orphaned servers on port 3000.
