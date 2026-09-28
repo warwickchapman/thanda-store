@@ -337,10 +337,10 @@ export async function PATCH(request: Request) {
 
     try {
       await sendSetupEmail(portalUser!);
-      return NextResponse.json({ ok: true, inviteSent: true });
+      return NextResponse.json({ ok: true, inviteSent: true, userId: portalUser!.id });
     } catch (error) {
       console.error('Enabled Xero person but could not send setup email:', error);
-      return NextResponse.json({ ok: true, inviteSent: false });
+      return NextResponse.json({ ok: true, inviteSent: false, userId: portalUser!.id });
     }
   }
 

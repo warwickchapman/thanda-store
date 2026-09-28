@@ -4,6 +4,7 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Creating a company now creates and invites its primary Xero contact in the same onboarding action. The company and buyer are saved together; an email failure is reported with a direct path to resend. Existing companies have an **Invite primary contact** action, including Mersat-style records created before this change.
 - Kept the Store light-only on devices that prefer dark mode. Data health now uses the same light admin surface and readable card, timestamp and button text as the other admin pages.
 - Condensed the Replenishment page controls. Overdue inbound receipts remain prominent; planning-data issues show their counts with expandable source details, while policy, accepted-quote checks and provisional-cart upload open on demand. The recommendation table now starts much higher on the page.
 - User managers can temporarily **View as** an active buyer from User Admin to build that buyer's cart and request a quote using the buyer's company pricing and Xero contact. A persistent banner names both identities and returns to Admin; the view expires after one hour. Start/stop actions and quotes retain the acting administrator in the audit trail, while API-key changes are blocked during customer view.
