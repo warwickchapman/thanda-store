@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DataSourceStatus } from "@/lib/data-freshness";
+import { planningHealthSignature } from "@/lib/planning-health-notice.mjs";
 
 type ReportItem = {
   sku: string;
@@ -47,6 +48,7 @@ type ReportItem = {
   status: "order_now" | "top_up" | "covered" | "satisfied" | "in_cart" | "review";
   confidence: "current" | "provisional" | "unavailable";
   reviewReasons: string[];
+  itemReviewReasons: string[];
   lastSoldAt: string | null;
 };
 type Report = {
@@ -105,7 +107,7 @@ type SortKey =
   | "status";
 type SortDirection = "asc" | "desc";
 
-function PlanningStatus({ item, health }: { item: ReportItem; health: Report["dataHealth"] }) {
+function PlanningStatus({ item }: { item: ReportItem }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const needsData = item.suggestedOrder === null;
   const label = needsData ? "Needs data" : item.status === "order_now" ? "Order"
@@ -118,19 +120,46 @@ function PlanningStatus({ item, health }: { item: ReportItem; health: Report["da
     : "border-green-200 bg-green-50 text-green-800";
   return <div className="flex items-center gap-1.5 whitespace-nowrap">
     <span className={`inline-flex border px-2 py-0.5 text-xs font-semibold ${colour}`}>{label}</span>
-    {item.confidence !== "current" && <>
+    {(needsData || item.itemReviewReasons.length > 0) && <>
       <button type="button" aria-label={`Review data for ${item.sku}`} title="Review data warnings" onClick={() => dialog.current?.showModal()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-amber-800 hover:bg-amber-50">
         <AlertTriangle className="h-4 w-4" />
       </button>
       <dialog ref={dialog} aria-label={`Data checks for ${item.sku}`} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }} className="fixed inset-0 m-auto max-h-[80vh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto whitespace-normal rounded-xl border border-zinc-300 bg-white p-5 text-sm text-zinc-900 shadow-xl backdrop:bg-black/30">
         <div className="flex items-start justify-between gap-4"><h3 className="font-bold">Data checks · {item.sku}</h3><button type="button" onClick={() => dialog.current?.close()} className="font-semibold text-sky-800">Close</button></div>
         <p className="mt-3">{needsData ? "Suggested is withheld because a required quantity is unknown. Review the affected items in Data health to resolve it." : `Ordering status: ${label}. The suggestion uses saved quantities; review these warnings before ordering.`}</p>
-        <ul className="mt-3 list-disc space-y-2 pl-5">{item.reviewReasons.map(reason => <li key={reason}>{reason}</li>)}{health.warnings.map(reason => <li key={reason}>{reason}</li>)}</ul>
-        <ul className="mt-3 space-y-2">{health.sourceIssues.map(source => <li key={source.id}><Link href={`/admin/data-health#${source.id}`} className="text-sky-800 underline">{source.label}: {source.message} View recovery steps</Link></li>)}</ul>
+        <ul className="mt-3 list-disc space-y-2 pl-5">{item.itemReviewReasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+        <Link href="/admin/victron-inbound" className="mt-3 inline-block text-sky-800 underline">Review Inbound</Link>
         <Link href="/admin/data-health" className="mt-4 inline-block font-semibold text-sky-800 underline">Find affected SKUs and resolution steps</Link>
       </dialog>
     </>}
   </div>;
+}
+function HealthDetails({ report, children }: { report: Report; children: React.ReactNode }) {
+  const signature = planningHealthSignature(report.dataHealth, report.items);
+  const [seen, setSeen] = useState<string | null>(() => {
+    try { return typeof window === "undefined" ? null : sessionStorage.getItem("planning-health-seen"); } catch { return null; }
+  });
+  const [open, setOpen] = useState(false);
+  const details = useRef<HTMLDetailsElement>(null);
+  const acknowledge = () => {
+    setSeen(signature);
+    try { sessionStorage.setItem("planning-health-seen", signature); } catch { /* Keep in-memory acknowledgement. */ }
+  };
+  useEffect(() => {
+    if (details.current?.open) {
+      try { sessionStorage.setItem("planning-health-seen", signature); } catch { /* Optional persistence. */ }
+    }
+  }, [signature]);
+  const hasIssues = report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0 || report.items.some(item => item.suggestedOrder === null || item.itemReviewReasons.length > 0);
+  return <details ref={details} onToggle={event => { setOpen(event.currentTarget.open); acknowledge(); }}>
+    <summary className="cursor-pointer font-semibold">
+      Data health{report.dataHealth.unavailableCount > 0 && ` · ${report.dataHealth.unavailableCount} withheld`}
+      {report.dataHealth.sourceIssues.length > 0 && ` · ${report.dataHealth.sourceIssues.length} source issues`}
+      {!hasIssues && " · No current issues"}
+      {hasIssues && !open && seen !== signature && <span className="ml-2 inline-block rounded-full bg-amber-200 px-2 py-0.5 text-xs text-amber-950">New changes</span>}
+    </summary>
+    {children}
+  </details>;
 }
 const number = (value: number | null, maximumFractionDigits = 0) =>
   value === null ? "Unknown" : new Intl.NumberFormat("en-ZA", { maximumFractionDigits }).format(value);
@@ -876,13 +905,7 @@ export default function ReplenishmentPage() {
         {report && (
           <>
             <section className={`mb-3 rounded-lg border px-4 py-2 text-sm ${report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "border-amber-300 bg-amber-50 text-amber-950" : "border-zinc-200 bg-white text-zinc-700"}`}>
-              <details>
-                <summary className="cursor-pointer font-semibold">
-                  {report.dataHealth.unavailableCount || report.dataHealth.provisionalCount || report.dataHealth.sourceIssues.length || report.dataHealth.warnings.length ? "Review planning data" : "Planning data checked"}
-                  {report.dataHealth.unavailableCount > 0 && ` · ${report.dataHealth.unavailableCount} withheld`}
-                  {report.dataHealth.provisionalCount > 0 && ` · ${report.dataHealth.provisionalCount} need review`}
-                  {report.dataHealth.sourceIssues.length > 0 && ` · ${report.dataHealth.sourceIssues.length} source issue${report.dataHealth.sourceIssues.length === 1 ? "" : "s"}`}
-                </summary>
+              <HealthDetails report={report}>
                 <div className="mt-2 border-t border-current/20 pt-2">
                   <p>Stock and demand use saved observations. Reloading this report does not refresh the source systems.</p>
                   {(report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0) && (
@@ -902,7 +925,7 @@ export default function ReplenishmentPage() {
                     ))}
                   </dl>
                 </div>
-              </details>
+              </HealthDetails>
             </section>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm shadow-sm">
               <details className="min-w-0">
@@ -1317,7 +1340,7 @@ export default function ReplenishmentPage() {
                       )}
                     </td>
                     <td className="border-l border-zinc-300 px-4 py-3">
-                      {report && <PlanningStatus item={item} health={report.dataHealth} />}
+                      {report && <PlanningStatus item={item} />}
                     </td>
                   </tr>
                 ))}

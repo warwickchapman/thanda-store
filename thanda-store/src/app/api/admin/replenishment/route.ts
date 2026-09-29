@@ -355,6 +355,15 @@ export async function GET() {
         const supplierObservation = supplierStockObservation(currentProduct);
         const supplierStock = supplierObservation.quantity;
         const reviewReasons: string[] = [];
+        const itemReviewReasons: string[] = [];
+        if (!salesKnown || !ordersKnown || !quotesKnown)
+          itemReviewReasons.push(`Suggested cannot be calculated: ${[!salesKnown && "sales", !ordersKnown && "inbound/backorders", !quotesKnown && "accepted quotes"].filter(Boolean).join(", ")} quantities are unknown. Open Data health for source recovery steps.`);
+        if (localStock === null)
+          itemReviewReasons.push(`Thanda stock unknown for ${stock?.missingSkus.join(", ") || currentProduct.sku}. Check the Xero item and stock tracking in Data health.`);
+        if (supplierStock === null)
+          itemReviewReasons.push("Supplier availability is unknown for this item. Check its E-Order listing before ordering.");
+        if (overdueFamilies.has(family))
+          itemReviewReasons.push("This item has an overdue inbound balance. Review Inbound and confirm only quantities physically received and captured in Xero.");
         if (localStock === null)
           reviewReasons.push(`Thanda stock unknown for ${stock?.missingSkus.join(", ") || currentProduct.sku}.`);
         if (stock?.staleSkus.length)
@@ -414,6 +423,7 @@ export async function GET() {
             ...recommendation,
             confidence,
             reviewReasons,
+            itemReviewReasons,
             lastSoldAt: group.lastSoldAt,
           },
         ];

@@ -603,6 +603,14 @@ The Victron sync:
 
 ### Victron shipment and backorder planning
 
+Replenishment's Data health section owns source-wide sync/freshness warnings. Its
+New changes badge compares issue states and affected items, not refresh timestamps;
+opening the section acknowledges it for this browser tab session. Unresolved
+issues remain in the section and resolved issues clear on the next report reload.
+Row warnings are reserved for missing item data and overdue inbound balances.
+Unknown required quantities still withhold Suggested. This display uses stored
+report data only and adds no provider requests.
+
 `npm run sync:victron-orders` makes two normal calls per run: one Shipments
 request and one Backorders request. At the hourly production cadence this is 48
 requests per day, plus one invoice-products request for each invoice not seen

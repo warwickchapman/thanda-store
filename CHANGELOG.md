@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Replenishment now keeps source-wide sync and freshness warnings in Data health instead of repeating them on every item. Row warnings identify missing item quantities or overdue inbound balances; operational statuses and withheld unknown recommendations are preserved. A New changes badge highlights changed health issues and is acknowledged by opening the section for the current browser tab session, without extra supplier calls.
+
 - Replaced the isolated Back to store link on API access with an account menu for Store, Accounts, API access, Admin when permitted, and Logout.
 - Made customer API access discoverable for every signed-in user from the Store and Admin menu. The page explains when an administrator still needs to enable access; the user editor now links to the signed-in account's key and guide page without implying an admin can create another person's secret.
 - Removed global Xero status from the Edit user page; it remains in Admin Settings. The editor now moves from company and email to permissions, customer API access and account actions. The Admin menu groups destinations by people and sales, stock and planning, and system settings, and the Add user form now sits above the user list like Add company does on Companies.
