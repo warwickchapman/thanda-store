@@ -1,9 +1,10 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 
 const RESEND_COOLDOWN_SECONDS = 30;
+const OTP_LENGTH = 6;
 
 export default function LoginPage() {
   return <Suspense fallback={<main className="min-h-screen bg-zinc-50" />}><LoginForm /></Suspense>;
@@ -19,6 +20,7 @@ function LoginForm() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [resendSeconds, setResendSeconds] = useState(0);
+  const otpInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (resendSeconds === 0) return;
@@ -44,8 +46,10 @@ function LoginForm() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not request login code');
       setStep('otp');
+      setOtp('');
       setResendSeconds(RESEND_COOLDOWN_SECONDS);
       setMessage(isResend ? `A new login code was sent to ${data.email}.` : `Login code sent to ${data.email}.`);
+      window.requestAnimationFrame(() => otpInputRef.current?.focus());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not request login code');
     } finally {
@@ -53,15 +57,15 @@ function LoginForm() {
     }
   }
 
-  async function verifyOtp(event: React.FormEvent) {
-    event.preventDefault();
+  async function verifyOtp(code: string) {
+    if (busy) return;
     setBusy(true);
     setError('');
     try {
       const response = await fetch('/api/auth/login/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp }),
+        body: JSON.stringify({ email, otp: code }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Invalid login code');
@@ -91,7 +95,8 @@ function LoginForm() {
               void requestOtp();
               return;
             }
-            void verifyOtp(event);
+            event.preventDefault();
+            void verifyOtp(otp);
           }}
           className="space-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
         >
@@ -128,9 +133,16 @@ function LoginForm() {
               <label className="mb-1 block text-sm font-semibold" htmlFor="otp">Email code</label>
               <input
                 id="otp"
+                ref={otpInputRef}
                 inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={OTP_LENGTH}
                 value={otp}
-                onChange={(event) => setOtp(event.target.value)}
+                onChange={(event) => {
+                  const code = event.target.value.replace(/\D/g, '').slice(0, OTP_LENGTH);
+                  setOtp(code);
+                  if (code.length === OTP_LENGTH) void verifyOtp(code);
+                }}
                 autoComplete="one-time-code"
                 className="h-11 w-full rounded-md border border-zinc-300 px-3 text-base tracking-widest outline-none focus:border-zinc-950"
               />

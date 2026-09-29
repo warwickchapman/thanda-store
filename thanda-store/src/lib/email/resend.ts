@@ -65,12 +65,19 @@ export async function sendOtpEmail({ to, otp }: SendOtpEmailInput) {
     to,
     subject: `Your Thanda Store login code: ${otp}`,
     html: `
-      <p>Hello,</p>
-      <p>Your Thanda Store login code is:</p>
-      <p style="font-size:24px;font-weight:700;letter-spacing:4px">${otp}</p>
-      <p>This code expires in 10 minutes.</p>
+      <div style="display:none;max-height:0;overflow:hidden;color:transparent;opacity:0;line-height:1px;mso-hide:all">Your Thanda Store login code is ${otp}. It expires in 10 minutes.</div>
+      <div style="margin:0;background-color:#f4f5f7;padding:20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1e293b">
+        <div style="max-width:480px;margin:0 auto;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:32px;text-align:center">
+          <h2 style="margin:0 0 8px;font-size:20px;font-weight:600">Your login code</h2>
+          <p style="margin:0 0 24px;color:#64748b;font-size:14px;line-height:1.5">Use this code to complete your Thanda Store sign-in. It expires in 10 minutes.</p>
+          <div style="display:inline-block;margin:0 0 24px;padding:16px 24px;border:1px dashed #cbd5e1;border-radius:6px;background-color:#f8fafc">
+            <span style="font-family:'Courier New',Courier,monospace;font-size:32px;font-weight:700;letter-spacing:6px;line-height:1.2;color:#0f172a;user-select:all;-webkit-user-select:all">${otp}</span>
+          </div>
+          <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.5">If you did not request this code, you can safely ignore this email.</p>
+        </div>
+      </div>
     `,
-    text: `Your Thanda Store login code is ${otp}. This code expires in 10 minutes.`,
+    text: `Your Thanda Store login code\n\n${otp}\n\nEnter or paste this six-digit code to sign in. This code expires in 10 minutes. If you did not request this code, you can safely ignore this email.`,
   });
 }
 
