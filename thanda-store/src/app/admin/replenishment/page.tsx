@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -103,6 +104,34 @@ type SortKey =
   | "suggestedOrder"
   | "status";
 type SortDirection = "asc" | "desc";
+
+function PlanningStatus({ item, health }: { item: ReportItem; health: Report["dataHealth"] }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const needsData = item.suggestedOrder === null;
+  const label = needsData ? "Needs data" : item.status === "order_now" ? "Order"
+    : item.status === "top_up" ? "Top up" : item.status === "in_cart" ? "Partial"
+    : item.status === "satisfied" ? "Satisfied" : "Covered";
+  const colour = needsData ? "border-amber-200 bg-amber-50 text-amber-900"
+    : item.status === "order_now" ? "border-red-200 bg-red-50 text-red-800"
+    : item.status === "top_up" || item.status === "in_cart" ? "border-amber-200 bg-amber-50 text-amber-900"
+    : item.status === "satisfied" ? "border-sky-200 bg-sky-50 text-sky-800"
+    : "border-green-200 bg-green-50 text-green-800";
+  return <div className="flex items-center gap-1.5 whitespace-nowrap">
+    <span className={`inline-flex border px-2 py-0.5 text-xs font-semibold ${colour}`}>{label}</span>
+    {item.confidence !== "current" && <>
+      <button type="button" aria-label={`Review data for ${item.sku}`} title="Review data warnings" onClick={() => dialog.current?.showModal()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-amber-800 hover:bg-amber-50">
+        <AlertTriangle className="h-4 w-4" />
+      </button>
+      <dialog ref={dialog} aria-label={`Data checks for ${item.sku}`} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }} className="fixed inset-0 m-auto max-h-[80vh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto whitespace-normal rounded-xl border border-zinc-300 bg-white p-5 text-sm text-zinc-900 shadow-xl backdrop:bg-black/30">
+        <div className="flex items-start justify-between gap-4"><h3 className="font-bold">Data checks · {item.sku}</h3><button type="button" onClick={() => dialog.current?.close()} className="font-semibold text-sky-800">Close</button></div>
+        <p className="mt-3">{needsData ? "Suggested is withheld because a required quantity is unknown. Review the affected items in Data health to resolve it." : `Ordering status: ${label}. The suggestion uses saved quantities; review these warnings before ordering.`}</p>
+        <ul className="mt-3 list-disc space-y-2 pl-5">{item.reviewReasons.map(reason => <li key={reason}>{reason}</li>)}{health.warnings.map(reason => <li key={reason}>{reason}</li>)}</ul>
+        <ul className="mt-3 space-y-2">{health.sourceIssues.map(source => <li key={source.id}><Link href={`/admin/data-health#${source.id}`} className="text-sky-800 underline">{source.label}: {source.message} View recovery steps</Link></li>)}</ul>
+        <Link href="/admin/data-health" className="mt-4 inline-block font-semibold text-sky-800 underline">Find affected SKUs and resolution steps</Link>
+      </dialog>
+    </>}
+  </div>;
+}
 const number = (value: number | null, maximumFractionDigits = 0) =>
   value === null ? "Unknown" : new Intl.NumberFormat("en-ZA", { maximumFractionDigits }).format(value);
 const money = (value: number | null) =>
@@ -858,7 +887,7 @@ export default function ReplenishmentPage() {
                   <p>Stock and demand use saved observations. Reloading this report does not refresh the source systems.</p>
                   {(report.dataHealth.sourceIssues.length > 0 || report.dataHealth.warnings.length > 0) && (
                     <ul className="mt-2 list-disc space-y-1 pl-5">
-                      {report.dataHealth.sourceIssues.map((source) => <li key={source.id}>{source.label}: {source.message}</li>)}
+                      {report.dataHealth.sourceIssues.map((source) => <li key={source.id}>{source.label}: {source.message} <Link href={`/admin/data-health#${source.id}`} className="font-semibold underline">View affected items and recovery steps</Link></li>)}
                       {report.dataHealth.warnings.map((warning) => <li key={warning}>{warning}</li>)}
                     </ul>
                   )}
@@ -1288,31 +1317,7 @@ export default function ReplenishmentPage() {
                       )}
                     </td>
                     <td className="border-l border-zinc-300 px-4 py-3">
-                      {item.confidence !== "current" ? (
-                        <details className="max-w-64 text-xs text-amber-950">
-                          <summary className="cursor-pointer whitespace-nowrap font-semibold">
-                            {item.confidence === "unavailable" ? "Needs data" : "Provisional"}
-                          </summary>
-                          <div className="mt-2 space-y-1 leading-relaxed">
-                            {item.reviewReasons.map((reason) => <p key={reason}>{reason}</p>)}
-                            {Boolean(report?.dataHealth.sourceIssues.length || report?.dataHealth.warnings.length) && <p>See the source checks above for stock, demand and delivery issues.</p>}
-                          </div>
-                        </details>
-                      ) : (
-                      <span
-                        className={`inline-flex border px-2 py-0.5 text-xs font-semibold ${item.status === "order_now" ? "border-red-200 bg-red-50 text-red-800" : item.status === "top_up" || item.status === "in_cart" ? "border-amber-200 bg-amber-50 text-amber-900" : item.status === "satisfied" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-green-200 bg-green-50 text-green-800"}`}
-                      >
-                        {item.status === "order_now"
-                          ? "Order"
-                          : item.status === "top_up"
-                            ? "Top up"
-                            : item.status === "in_cart"
-                              ? "Partial"
-                              : item.status === "satisfied"
-                                ? "Satisfied"
-                                : "Covered"}
-                      </span>
-                      )}
+                      {report && <PlanningStatus item={item} health={report.dataHealth} />}
                     </td>
                   </tr>
                 ))}

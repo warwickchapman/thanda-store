@@ -1,5 +1,8 @@
 import pool from '@/lib/db';
 import { DATA_SOURCES, localStockObservation, supplierStockObservation, observationTime, summarizeSource } from './data-freshness.mjs';
+import { sourceRecovery, stockHealthIssues } from './data-health-actions.mjs';
+import { activeStockReview } from './stock-review.mjs';
+import { familyMemberSkus, victronSkuFamilyResolver } from './victron-sku-family.mjs';
 
 export type StockSourceStatus = {
   id: string;
@@ -18,8 +21,18 @@ export type StockSourceStatus = {
   lastRunStatus: 'running' | 'success' | 'partial' | 'failed' | 'skipped' | null;
   message: string;
 };
-export type DataSourceStatus = StockSourceStatus & { lastError: string | null };
-export type DataHealth = { checkedAt: string; sources: DataSourceStatus[] };
+export type DataSourceStatus = StockSourceStatus & {
+  lastError: string | null;
+  recovery?: string[];
+  issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null }>;
+};
+export type StockReviewItem = {
+  supplier: string; sku: string; name: string; xeroStatus: string;
+  decision: 'do_not_stock' | 'retired' | null; active: boolean;
+  note: string; reviewedAt: string | null; observedAt: string | null;
+  family: string; familySkus: string[];
+};
+export type DataHealth = { checkedAt: string; sources: DataSourceStatus[]; stockReviews?: StockReviewItem[] };
 type StoredState = Record<string, unknown>;
 
 async function optionalRows(sql: string): Promise<StoredState[]> {
@@ -44,24 +57,28 @@ function existingRun(row: StoredState | undefined, observedAt: unknown, sourceId
   };
 }
 
-export async function getDataHealth(): Promise<DataHealth> {
+export async function getDataHealth({ includeIssues = false } = {}): Promise<DataHealth> {
   // All reads are local. Do not ask the Hub, Xero or a supplier for dashboard
   // evidence: this page must remain usable while an upstream service is down.
-  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows] = await Promise.all([
-    optionalRows(`SELECT supplier, sku, stock_on_hand, details FROM products WHERE COALESCE((details->>'hidden')::boolean, false)=false`),
+  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, successions] = await Promise.all([
+    optionalRows(`SELECT supplier, sku, name, stock_on_hand, details FROM products WHERE COALESCE((details->>'hidden')::boolean, false)=false`),
     optionalRows('SELECT * FROM data_sync_status'),
     optionalRows('SELECT * FROM victron_order_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM xero_accepted_quote_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM xero_invoice_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM xero_credit_note_sync_state WHERE id=true'),
+    optionalRows('SELECT * FROM product_stock_reviews'),
+    includeIssues ? optionalRows('SELECT predecessor_sku, successor_sku FROM victron_sku_successions') : Promise.resolve([]),
   ]);
+  const reviewsBySku = new Map(reviews.map(row => [`${row.supplier}:${row.sku}`, row]));
+  for (const product of products) product.stockReview = reviewsBySku.get(`${product.supplier}:${product.sku}`);
   const checkedAt = new Date().toISOString();
   const bySource = new Map(runs.map(row => [row.source_id, row]));
   const sources = DATA_SOURCES.map(source => {
     let observations: Array<{ quantity: number | null; observedAt: string | null }> = [];
     let run: StoredState = bySource.get(source.id) || {};
     if (source.id === 'thanda') {
-      observations = products.filter(row => row.supplier === 'victron' || row.supplier === 'lora').map(localStockObservation);
+      observations = products.filter(row => (row.supplier === 'victron' || row.supplier === 'lora') && !activeStockReview(row)).map(localStockObservation);
     } else if (['victron', 'renogy', 'hubble', 'lora'].includes(source.id)) {
       observations = products.filter(row => row.supplier === source.id).map(supplierStockObservation);
     } else if (source.id === 'sales') {
@@ -79,9 +96,31 @@ export async function getDataHealth(): Promise<DataHealth> {
       observations = [{ quantity: observedAt ? 1 : null, observedAt }];
       run = { ...existingRun(row, observedAt, source.id), ...run };
     }
-    return summarizeSource(source, observations, run, new Date(checkedAt)) as DataSourceStatus;
+    const status = summarizeSource(source, observations, run, new Date(checkedAt)) as DataSourceStatus;
+    if (includeIssues) {
+      status.recovery = sourceRecovery(status);
+      status.issues = stockHealthIssues(source, products, new Date(checkedAt));
+    }
+    return status;
   });
-  return { checkedAt, sources };
+  const familyFor = victronSkuFamilyResolver(successions);
+  const stockReviews = includeIssues ? products.filter(product => {
+    const details = product.details as Record<string, unknown>;
+    return ['victron', 'lora'].includes(String(product.supplier))
+      && (details?.xeroStockStatus === 'missing' || reviewsBySku.get(`${product.supplier}:${product.sku}`)?.decision);
+  }).map(product => {
+    const review = reviewsBySku.get(`${product.supplier}:${product.sku}`);
+    const details = product.details as Record<string, unknown>;
+    const sku = String(product.sku);
+    return {
+      supplier: String(product.supplier), sku, name: String(product.name), xeroStatus: String(details?.xeroStockStatus || 'unknown'),
+      decision: (review?.decision || null) as StockReviewItem['decision'], active: Boolean(activeStockReview(product)),
+      note: String(review?.note || ''), reviewedAt: observationTime(review?.reviewed_at), observedAt: observationTime(details?.xeroStockSyncedAt),
+      family: product.supplier === 'victron' ? familyFor(sku) : sku,
+      familySkus: product.supplier === 'victron' ? familyMemberSkus(successions, sku) : [sku],
+    };
+  }).sort((a, b) => a.sku.localeCompare(b.sku)) : undefined;
+  return { checkedAt, sources, ...(stockReviews ? { stockReviews } : {}) };
 }
 
 export async function getCatalogueStatus(): Promise<{ checkedAt: string; sources: StockSourceStatus[] }> {

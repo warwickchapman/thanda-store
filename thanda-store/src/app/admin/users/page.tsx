@@ -142,6 +142,8 @@ export default function AdminUsersPage() {
           <Link href="/admin/settings" className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold ${xeroStatusError ? 'bg-amber-100 text-amber-900' : xeroStatus?.connected && !xeroStatus.reconnectRequired ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`} title="View Xero connection details in Settings">{xeroStatusError ? 'Xero status unavailable' : xeroStatus ? xeroStatus.connected && !xeroStatus.reconnectRequired ? 'Xero connected' : 'Xero needs attention' : 'Checking Xero…'}</Link>
         </div>
 
+        {canManageUsers && <div id="add-user" className="mb-6 scroll-mt-6"><InviteUserForm onCreated={loadUsers} /></div>}
+
         <section>
           <div className="mb-4 flex flex-col justify-between gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end">
             <div>
@@ -176,7 +178,6 @@ export default function AdminUsersPage() {
           </div>
         </section>
 
-        {canManageUsers && <div id="add-user" className="scroll-mt-6"><InviteUserForm onCreated={loadUsers} /></div>}
       </div>
     </main>
   );

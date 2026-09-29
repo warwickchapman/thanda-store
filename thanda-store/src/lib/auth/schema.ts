@@ -2,10 +2,12 @@ import pool from "@/lib/db";
 import { INITIAL_VICTRON_STOCK_MINIMA } from "@/lib/victron-stock-minima";
 
 import { ensureCommerceSchema } from '@/lib/commerce/schema.mjs';
+import { ensureStockReviewSchema } from '@/lib/stock-review.mjs';
 
 let schemaPromise: Promise<void> | null = null;
 
 async function ensureAuthSchemaOnce() {
+  await ensureStockReviewSchema(pool);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS organisations (
       id BIGSERIAL PRIMARY KEY,

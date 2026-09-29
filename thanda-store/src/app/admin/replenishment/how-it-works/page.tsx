@@ -62,11 +62,15 @@ export default function ReplenishmentHowItWorksPage() {
             <p className="mt-2 text-zinc-700">
               <b>Withheld</b> means Suggested cannot be calculated because stock,
               sales and credit history, shipments and backorders, or accepted
-              quote reservations are unknown. <b>Provisional</b> retains a
-              calculation from older or incomplete updates and needs review
-              before ordering. Expand the row status for its explanation and
-              check the shared source warnings above the table. Supplier stock
+              quote reservations are unknown. Where a calculation is available,
+              the usual <b>Order</b>, <b>Top up</b>, <b>Partial</b>, <b>Satisfied</b>
+              {" "}or <b>Covered</b> status remains visible. A warning icon opens
+              the data checks without expanding the table row. Supplier stock
               affects confidence in availability, not the target quantity.
+              {" "}<a href="/admin/data-health" className="text-sky-800 underline">Data health</a>
+              {" "}lists affected SKUs, resolution steps and a downloadable
+              diagnostic report. Correct missing or untracked items in Xero;
+              supplier rate limits require waiting for the scheduled retry.
             </p>
           </section>
 

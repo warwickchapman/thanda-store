@@ -20,7 +20,7 @@ export function ApiAccess({ user, onChanged }: { user: User; onChanged: () => Pr
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to update API access.'); }
     finally { setBusy(false); }
   }
-  return <section className="my-4 space-y-2"><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={user.api_enabled} disabled={busy || !user.xero_contact_id} onChange={(event) => void save(event.target.checked)} />Enable API access for this user</label>{!user.xero_contact_id && <p className="text-xs text-zinc-500">API access requires membership of a linked company.</p>}{message && <p role="status" className="text-sm">{message}</p>}</section>;
+  return <section className="my-4 space-y-2"><h3 className="text-sm font-bold">Customer API</h3><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={user.api_enabled} disabled={busy || !user.xero_contact_id} onChange={(event) => void save(event.target.checked)} />Enable API access for this user</label>{!user.xero_contact_id && <p className="text-xs text-zinc-500">API access requires membership of a linked company.</p>}{message && <p role="status" className="text-sm">{message}</p>}<p className="text-xs text-zinc-600">The enabled user creates their own key and reads the guide under <Link href="/api-access" className="font-semibold underline">API access</Link>. This link opens API access for your signed-in account.</p></section>;
 }
 
 export function CompanyDiscounts({ company, onChanged }: { company: Company; onChanged: () => Promise<void> }) {

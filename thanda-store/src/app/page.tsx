@@ -411,7 +411,7 @@ export default function Home() {
                   Accounts
                 </Link>
               )}
-              {sessionUser?.apiEnabled && <Link href="/api-access" className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-sm font-medium">API access</Link>}
+              {sessionUser && <Link href="/api-access" className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">API access</Link>}
               {sessionUser?.role === 'admin' && (
                 <>
                   <a href="/admin/replenishment" className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">

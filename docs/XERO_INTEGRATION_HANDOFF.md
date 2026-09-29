@@ -218,7 +218,7 @@ All jobs that record Xero responses update the single-row `xero_api_usage` table
 
 The webhook worker preserves a 150-call daily reserve for stock, administration, and reconciliation. When the recorded daily reset is in the future, jobs must exit without calling Xero. On `429`, respect `Retry-After`; do not spin or blindly retry.
 
-User Admin displays the cached allowance. It must never make an API request merely to refresh that display.
+Admin Settings displays the cached allowance. It must never make an API request merely to refresh that display.
 
 The `thanda-store-xero-allowance-monitor.timer` reads the same local ledger every five minutes and writes `/root/thanda-store/runtime/CODEX_ALERTS.md`; it does not call Xero. Before a production Xero deployment, recovery, manual sync, or investigation, Codex must read this file. `WARNING` or `CRITICAL` means non-essential Xero work is blocked pending investigation.
 
@@ -227,17 +227,17 @@ The `thanda-store-xero-allowance-monitor.timer` reads the same local ledger ever
 ### Reconnect after expiry or changed scopes
 
 1. Confirm `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, redirect URI, and `XERO_CONNECT_SECRET` are present in the protected VPS environment.
-2. Use **Reconnect Xero** in User Admin, or open the protected connect URL.
+2. Use **Reconnect Xero** in Admin Settings, or open the protected connect URL.
 3. Approve the correct Thanda Solar organisation and all requested scopes.
 4. Confirm the callback says the correct tenant connected.
-5. Return to User Admin and use **Refresh status**. It must show no missing scopes.
+5. Return to Admin Settings and use **Refresh status**. It must show no missing scopes.
 6. Check that the token file remains mode `0600` and that the PM2 web process has `XERO_WEBHOOK_KEY` available.
 
 ### Configure or repair webhooks
 
 1. In [Xero Developer app management](https://developer.xero.com/app/manage), configure `https://store.thanda.solar/api/xero/webhooks` and Invoice, Credit Note, and Contact create/update event categories.
 2. Copy the webhook key only into protected server environment. It is not an OAuth credential.
-3. Restart PM2 with its environment refreshed, then verify User Admin reports the webhook receiver key as configured.
+3. Restart PM2 with its environment refreshed, then verify Admin Settings reports the webhook receiver key as configured.
 4. Use Xero's `Intent to receive` action. The endpoint must return success before relying on events.
 5. Confirm `thanda-store-xero-webhooks.timer` is enabled and check its journal after a test event.
 
@@ -261,7 +261,7 @@ Do not use manual runs as a substitute for fixing a failed OAuth connection, a m
 
 ### Safe troubleshooting sequence
 
-1. Read User Admin's cached connection, scopes, webhook-key-present, and allowance state.
+1. Read Admin Settings' cached connection, scopes, webhook-key-present, and allowance state.
 2. Inspect the appropriate systemd journal.
 3. Check queued webhook rows, sync state, and cached data in PostgreSQL before making another Xero call.
 4. If there is an OAuth error, reconnect once; do not repeatedly initiate consent.
@@ -304,7 +304,7 @@ For a changed Xero integration, also verify:
 4. An invoice update refreshes local stock only through the requested-stock path.
 5. A deleted Xero Additional person loses portal access after the event/reconciliation.
 6. A buyer cart quote has the expected `ContactID`, `ItemCode`, exclusive VAT amounts, and discount rate in Xero.
-7. Rate-limit headers appear in cached User Admin status after an API call, without User Admin itself adding a call.
+7. Rate-limit headers appear in cached Admin Settings status after an API call, without Settings itself adding a call.
 
 ## 11. Development rules
 
