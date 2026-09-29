@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import {useEffect,useState} from 'react';
+import { AccountMenu } from '@/components/account-menu';
 type Key={id:string;name:string;prefix:string;created_at:string;last_used_at:string|null;revoked_at:string|null};
 export default function ApiAccessPage(){
   const [keys,setKeys]=useState<Key[]>([]);const [enabled,setEnabled]=useState(false);const [name,setName]=useState('');const [secret,setSecret]=useState('');const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
@@ -8,7 +9,7 @@ export default function ApiAccessPage(){
   useEffect(()=>{const timer=setTimeout(()=>void load().catch(e=>setMessage(e.message)),0);return()=>clearTimeout(timer);},[]);
   async function create(){setBusy(true);setMessage('');setSecret('');try{const r=await fetch('/api/account/api-keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});const d=await r.json();if(!r.ok)throw new Error(d.error);setSecret(d.token);setName('');await load();}catch(e){setMessage(e instanceof Error?e.message:'Unable to create key.');}finally{setBusy(false);}}
   async function revoke(id:string){setBusy(true);setSecret('');try{const r=await fetch(`/api/account/api-keys?id=${encodeURIComponent(id)}`,{method:'DELETE'});if(!r.ok)throw new Error('Unable to revoke key.');await load();}catch(e){setMessage(e instanceof Error?e.message:'Unable to revoke key.');}finally{setBusy(false);}}
-  return <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 px-4 py-8"><header className="flex justify-between gap-4"><h1 className="text-3xl font-bold">API access</h1><Link href="/" className="underline">Back to store</Link></header>
+  return <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 px-4 py-8"><header className="flex items-center justify-between gap-4"><h1 className="text-3xl font-bold">API access</h1><AccountMenu /></header>
     <p className="text-sm text-zinc-600">Connect your systems to your company prices and current stock. Prices exclude VAT. Keys only read catalogue data.</p>
     <a href="/api/account/catalogue.csv" className="inline-block rounded-lg border px-4 py-2 font-semibold">Download catalogue CSV</a>
     {enabled&&<section className="space-y-3 rounded-xl bg-zinc-50 p-4 text-sm"><h2 className="text-lg font-bold">Build your integration</h2><p>Read the setup guide, examples and field reference. Download the OpenAPI JSON specification for your developer or AI assistant.</p><div className="flex flex-wrap gap-3"><Link href="/api-access/guide" className="rounded-lg bg-zinc-950 px-4 py-2 font-semibold text-white">Read API guide</Link><a href="/api/account/api-docs" className="rounded-lg border px-4 py-2 font-semibold">Download OpenAPI JSON</a></div><p className="text-zinc-600">The documentation contains no API secrets or customer data. Keep your real key separate.</p></section>}
