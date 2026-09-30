@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Sign-in, password reset and password setup now remain accessible when a browser retains an expired session cookie. Previously, the cookie's mere presence redirected recovery back to the store before a reset request could be submitted.
+
 - Removed live E-Order product lookups from provisional-cart uploads. A supplier outage or rate limit no longer blocks a saved HTML cart: all valid lines are retained atomically, replacement-family matches count toward coverage, and unmatched SKUs remain visible with resolution guidance until the local catalogue can match them.
 
 - Login-code emails now include a Gmail-friendly preheader, isolated six-digit code and a clean visual code card for email clients without a native copy action. The sign-in page focuses the field after a code is sent and automatically verifies a complete typed or pasted code.
