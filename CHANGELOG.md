@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Removed live E-Order product lookups from provisional-cart uploads. A supplier outage or rate limit no longer blocks a saved HTML cart: all valid lines are retained atomically, replacement-family matches count toward coverage, and unmatched SKUs remain visible with resolution guidance until the local catalogue can match them.
+
 - Login-code emails now include a Gmail-friendly preheader, isolated six-digit code and a clean visual code card for email clients without a native copy action. The sign-in page focuses the field after a code is sent and automatically verifies a complete typed or pasted code.
 
 - Replenishment now keeps source-wide sync and freshness warnings in Data health instead of repeating them on every item. Row warnings identify missing item quantities or overdue inbound balances; operational statuses and withheld unknown recommendations are preserved. A New changes badge highlights changed health issues and is acknowledged by opening the section for the current browser tab session, without extra supplier calls.

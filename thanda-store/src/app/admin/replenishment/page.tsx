@@ -753,11 +753,7 @@ export default function ReplenishmentPage() {
         throw new Error(data.error || "Unable to read this provisional cart.");
       setCartFile(null);
       if (cartFileInput.current) cartFileInput.current.value = "";
-      setMessage(
-        data.imported?.length
-          ? `Loaded ${data.lineCount} cart lines and imported ${data.imported.join(", ")} from E-Order.`
-          : `Loaded ${data.lineCount} cart lines.`,
-      );
+      setMessage(`Loaded ${data.lineCount} cart lines. Any unmatched items are listed in the E-Order cart section.`);
       await load();
     } catch (cause) {
       setError(
@@ -1083,7 +1079,10 @@ export default function ReplenishmentPage() {
                   {report.provisionalCart.unmatchedLines
                     .map((line) => `${line.sku} × ${line.quantity}`)
                     .join(", ")}
-                  . These lines do not reduce a replenishment recommendation.
+                  . These lines are saved but do not reduce Suggested until matched.
+                  Check the article code in your saved basket and review the catalogue
+                  or SKU succession in Details. A later catalogue update will match
+                  saved lines automatically; no re-upload is needed.
                 </p>
               )}
               </div>

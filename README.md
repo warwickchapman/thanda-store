@@ -603,6 +603,13 @@ The Victron sync:
 
 ### Victron shipment and backorder planning
 
+Provisional E-Order cart HTML uploads make zero supplier/Xero calls (including
+cold-cache uploads and retries). All parsed SKU quantities are saved in one
+transaction. The existing succession-family resolver applies matched quantities;
+unmatched lines remain saved and visible, and are reconsidered on each report
+reload as the local catalogue changes. Unknown lines never fabricate stock or
+silently reduce Suggested. Catalogue enrichment remains the scheduled job's job.
+
 Replenishment's Data health section owns source-wide sync/freshness warnings. Its
 New changes badge compares issue states and affected items, not refresh timestamps;
 opening the section acknowledges it for this browser tab session. Unresolved
