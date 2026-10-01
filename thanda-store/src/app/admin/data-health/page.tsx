@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { DataSourceStatus, StockReviewItem } from '@/lib/data-freshness';
 import { StockItemReview } from '@/components/admin/stock-item-review';
 import { AdminMenu } from '@/components/admin/admin-menu';
+import { VictronApiActivity, type VictronActivity } from '@/components/admin/victron-api-activity';
 
 type HealthSource = DataSourceStatus;
 const labels: Record<string, string> = { current: 'Current', stale: 'Update overdue', missing: 'Incomplete data', error: 'Update failed or incomplete', manual: 'Manual' };
@@ -56,6 +57,7 @@ function Recovery({ source }: { source: HealthSource }) {
 }
 
 export default function DataHealthPage() {
+  const [victron, setVictron] = useState<VictronActivity | null>(null);
   const [sources, setSources] = useState<HealthSource[]>([]);
   const [stockReviews, setStockReviews] = useState<StockReviewItem[]>([]);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export default function DataHealthPage() {
       if (!response.ok) throw new Error(data.error || 'Unable to load data health.');
       if (!Array.isArray(data.sources)) throw new Error('Unable to load data health.');
       setSources(data.sources);
+      setVictron(data.victron || null);
       setStockReviews(data.stockReviews || []);
       setCheckedAt(data.checkedAt);
       setError('');
@@ -88,6 +91,7 @@ export default function DataHealthPage() {
     {!loading && !error && <p role="status" className={`rounded-lg border p-4 text-sm ${problems.length ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-zinc-200 bg-white text-zinc-700'}`}>
       {problems.length ? `${problems.length} ${problems.length === 1 ? 'source needs' : 'sources need'} attention. Retained data may still be useful; review the warnings before relying on it.` : 'Scheduled sources are within their update windows. Manually maintained availability is listed separately.'}
     </p>}
+    {!error && victron && <VictronApiActivity activity={victron} onChanged={() => setAttempt(value => value + 1)} />}
     {!error && <StockItemReview items={stockReviews} onChanged={() => setAttempt(value => value + 1)} />}
     <ul className="space-y-3">{sorted.map(source => <li id={source.id} key={source.id} className="scroll-mt-6 rounded-lg border border-zinc-200 bg-white p-4 text-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-2"><h2 className="font-semibold">{source.label}</h2><span className={`text-xs font-semibold ${['current', 'manual'].includes(source.status) ? 'text-zinc-600' : 'text-amber-800'}`}>{labels[source.status]}</span></div>

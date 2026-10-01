@@ -1,3 +1,4 @@
+import { createVictronHttp, VictronPaused } from './victron-http.mjs';
 const DEFAULT_API_ROOT = "https://eorder.victronenergy.com/api/v1";
 const DEFAULT_TIMEOUT_MS = 20_000;
 const TRANSIENT_RETRY_DELAY_MS = 1_000;
@@ -224,11 +225,19 @@ async function fetchText(url, { fetchImpl, timeoutMs }) {
   }
 }
 
-async function resolvedTrackingUrl(invoice, fetchOptions) {
+export async function resolvedTrackingUrl(invoice, fetchOptions) {
   if (!invoice.trackingUrl) return invoice.trackingUrl;
+  const db = fetchOptions.pool;
+  const cached = (await db.query('SELECT * FROM victron_tracking_cache WHERE source_url=$1', [invoice.trackingUrl])).rows[0];
+  if (cached?.resolved || (cached && Date.now() - new Date(cached.checked_at).getTime() < 24 * 60 * 60_000))
+    return cached.resolved_url || invoice.trackingUrl;
   try {
     const page = await fetchText(invoice.trackingUrl, fetchOptions);
-    return epxTrackingUrl(epxWaybillFromTrackingPage(page)) || invoice.trackingUrl;
+    const direct = epxTrackingUrl(epxWaybillFromTrackingPage(page));
+    const url = direct || invoice.trackingUrl;
+    await db.query(`INSERT INTO victron_tracking_cache(source_url,resolved_url,resolved) VALUES($1,$2,$3)
+      ON CONFLICT(source_url) DO UPDATE SET resolved_url=$2,resolved=$3,checked_at=NOW()`, [invoice.trackingUrl, url, Boolean(direct)]);
+    return url;
   } catch {
     // A supplier tracking page must never interrupt the inbound stock sync.
     return invoice.trackingUrl;
@@ -494,6 +503,7 @@ export async function syncVictronOrders({
   configuredCutoverDate = "",
   fetchImpl = fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  trigger = 'scheduled',
 }) {
   if (!apiKey) throw new Error("VICTRON_EORDER_API_KEY is required.");
   const client = await pool.connect();
@@ -506,9 +516,11 @@ export async function syncVictronOrders({
     locked = lock.rows[0]?.locked === true;
     if (!locked) return { skipped: true, reason: "already_running" };
     const allowance = await client.query(
-      `SELECT next_allowed_at FROM victron_order_sync_state WHERE id = true`,
+      `SELECT next_allowed_at,last_started_at FROM victron_order_sync_state WHERE id = true`,
     );
     const nextAllowedAt = allowance.rows[0]?.next_allowed_at;
+    if (trigger === 'manual' && new Date(allowance.rows[0]?.last_started_at || 0).getTime() + 5 * 60_000 > Date.now())
+      return { skipped: true, reason: 'recent_attempt', retryAt: new Date(new Date(allowance.rows[0].last_started_at).getTime() + 5 * 60_000).toISOString() };
     if (nextAllowedAt && new Date(nextAllowedAt).getTime() > Date.now())
       return {
         skipped: true,
@@ -519,7 +531,8 @@ export async function syncVictronOrders({
       `UPDATE victron_order_sync_state SET last_started_at = NOW(), last_error = NULL, updated_at = NOW() WHERE id = true`,
     );
 
-    const fetchOptions = { apiKey, fetchImpl, timeoutMs };
+    const http = createVictronHttp({ pool, apiKey, apiRoot, component: 'orders', trigger, fetchImpl, timeoutMs });
+    const fetchOptions = { apiKey, fetchImpl: http.request, timeoutMs, pool };
     const [shipmentPayload, backorderPayload] = await Promise.all([
       fetchJson(
         `${apiRoot.replace(/\/$/, "")}/orders/shipments/?format=json`,
@@ -659,7 +672,7 @@ export async function syncVictronOrders({
     return stats;
   } catch (error) {
     const retryAfterSeconds =
-      error instanceof VictronRateLimitError
+      error instanceof VictronRateLimitError || error instanceof VictronPaused
         ? error.retryAfterSeconds
         : 0;
     await client

@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Reduced Victron catalogue checks to every four hours and separated the hourly shipment/backorder timer, so catalogue failures no longer block receiving updates. Added shared database-backed request pacing, persistent scoped cooldowns, bounded request counts and attribution by job/manual action. Data health now shows request activity, returned quota headers and retry deadlines, with a cooldown-protected catalogue retry. Resolved tracking links are cached; existing active cooldowns are preserved across deployment. Supplier stock freshness now allows five hours between observations; real unknown quantities remain unknown.
+
 - Sign-in, password reset and password setup now remain accessible when a browser retains an expired session cookie. Previously, the cookie's mere presence redirected recovery back to the store before a reset request could be submitted.
 
 - Removed live E-Order product lookups from provisional-cart uploads. A supplier outage or rate limit no longer blocks a saved HTML cart: all valid lines are retained atomically, replacement-family matches count toward coverage, and unmatched SKUs remain visible with resolution guidance until the local catalogue can match them.

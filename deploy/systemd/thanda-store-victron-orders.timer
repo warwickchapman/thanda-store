@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync Victron shipments and backorders hourly
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=1min
+RandomizedDelaySec=90s
+Persistent=true
+Unit=thanda-store-victron-orders.service
+
+[Install]
+WantedBy=timers.target

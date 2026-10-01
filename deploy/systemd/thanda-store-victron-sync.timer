@@ -1,8 +1,8 @@
 [Unit]
-Description=Run Thanda Store Victron full catalogue sync hourly
+Description=Run Thanda Store Victron full catalogue sync every four hours
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*-*-* 00/4:00:00 UTC
 AccuracySec=1min
 RandomizedDelaySec=90s
 Persistent=true

@@ -47,7 +47,7 @@ export function sourceRecovery(source) {
     actions.push('Check again after the next scheduled update. If it still fails, download the diagnostic report for the Store maintainer to check the scheduled job and provider response. Saved quantities remain available.');
   }
   if (source.id === 'thanda') actions.push('Review the affected SKUs below. Missing Xero items and untracked inventory require an item or mapping correction, not another refresh. Stock imports run every 30 minutes from the shared Hub.');
-  if (source.id === 'victron') actions.push('Victron stock is checked hourly. Confirm availability in E-Order if ordering before recovery. Supplier availability warnings do not change the calculated order quantity.');
+  if (source.id === 'victron') actions.push('Victron stock is checked every four hours. Review Victron API activity for request counts and cooldown deadlines; Retry catalogue is available outside the cooldown. Confirm availability in E-Order if ordering before recovery. Supplier availability warnings do not change the calculated order quantity.');
   if (source.id === 'renogy') actions.push('Renogy stock is checked every five minutes. For individual missing items, verify the SKU in the supplier portal and ask the Store maintainer to check its catalogue mapping.');
   if (source.id === 'sales') actions.push('Sales and credit history is imported daily. If incomplete, ask the Store maintainer to check both invoice and credit-note snapshots in the shared Hub before retrying the import.');
   if (source.id === 'accepted-quotes') actions.push('Quote reservations are checked every 30 minutes. Use Check accepted quotes on Replenishment for an immediate check; if it fails, download the diagnostic report for the Store maintainer.');

@@ -5,7 +5,7 @@
 // not promises that the source was contacted on that schedule.
 export const DATA_SOURCES = [
   { id: 'thanda', label: 'Thanda stock', supplier: null, mode: 'scheduled', staleAfterMinutes: 120 },
-  { id: 'victron', label: 'Victron supplier stock', supplier: 'victron', mode: 'scheduled', staleAfterMinutes: 180 },
+  { id: 'victron', label: 'Victron supplier stock', supplier: 'victron', mode: 'scheduled', staleAfterMinutes: 300 },
   { id: 'renogy', label: 'Renogy supplier stock', supplier: 'renogy', mode: 'scheduled', staleAfterMinutes: 20 },
   { id: 'hubble', label: 'Hubble availability', supplier: 'hubble', mode: 'manual', staleAfterMinutes: null },
   { id: 'lora', label: 'LoRa supplier stock', supplier: 'lora', mode: 'manual', staleAfterMinutes: null },

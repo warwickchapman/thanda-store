@@ -60,7 +60,7 @@ function existingRun(row: StoredState | undefined, observedAt: unknown, sourceId
 export async function getDataHealth({ includeIssues = false } = {}): Promise<DataHealth> {
   // All reads are local. Do not ask the Hub, Xero or a supplier for dashboard
   // evidence: this page must remain usable while an upstream service is down.
-  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, successions] = await Promise.all([
+  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, successions, victronCooldowns] = await Promise.all([
     optionalRows(`SELECT supplier, sku, name, stock_on_hand, details FROM products WHERE COALESCE((details->>'hidden')::boolean, false)=false`),
     optionalRows('SELECT * FROM data_sync_status'),
     optionalRows('SELECT * FROM victron_order_sync_state WHERE id=true'),
@@ -69,6 +69,7 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
     optionalRows('SELECT * FROM xero_credit_note_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM product_stock_reviews'),
     includeIssues ? optionalRows('SELECT predecessor_sku, successor_sku FROM victron_sku_successions') : Promise.resolve([]),
+    optionalRows("SELECT scope, MAX(blocked_until) AS blocked_until FROM victron_http_state WHERE blocked_until>NOW() GROUP BY scope"),
   ]);
   const reviewsBySku = new Map(reviews.map(row => [`${row.supplier}:${row.sku}`, row]));
   for (const product of products) product.stockReview = reviewsBySku.get(`${product.supplier}:${product.sku}`);
@@ -97,6 +98,9 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       run = { ...existingRun(row, observedAt, source.id), ...run };
     }
     const status = summarizeSource(source, observations, run, new Date(checkedAt)) as DataSourceStatus;
+    const cooldownScopes = source.id === 'victron' ? ['catalogue','account'] : source.id === 'victron-orders' ? ['orders','account'] : [];
+    const retryAt = Math.max(0, ...victronCooldowns.filter(row => cooldownScopes.includes(String(row.scope))).map(row => new Date(String(row.blocked_until)).getTime()));
+    if (retryAt > Date.now()) status.message = `Victron requested a cooldown until ${new Date(retryAt).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST. Retained data is shown; scheduled attempts skip locally until then.`;
     if (includeIssues) {
       status.recovery = sourceRecovery(status);
       status.issues = stockHealthIssues(source, products, new Date(checkedAt));

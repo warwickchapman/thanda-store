@@ -31,6 +31,7 @@ export async function POST() {
         "https://eorder.victronenergy.com/api/v1",
       configuredCutoverDate: process.env.VICTRON_ORDERS_CUTOVER_DATE || "",
       timeoutMs: Number(process.env.VICTRON_REQUEST_TIMEOUT_MS || 20_000),
+      trigger: 'manual',
     });
     return NextResponse.json({ ok: true, result });
   } catch (error) {

@@ -72,9 +72,9 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | Command | Purpose | When to run it |
 | --- | --- | --- |
 | `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | The VPS runs it every five minutes. |
-| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | The VPS runs the full paginated E-Order read hourly. Do not add it to a five-minute job. |
-| `npm run sync:victron-orders` | Refresh E-Order shipment invoices and the transient backorder snapshot. | The VPS runs it after the hourly catalogue sync; Admin also offers an explicit manual sync. |
-| `npm run sync:victron:scheduled` | Run the hourly catalogue and order-planning syncs sequentially. | Production systemd use only. |
+| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | Full paginated read every four hours; persistent schedule and cooldown gates also apply to CLI runs. |
+| `npm run sync:victron-orders` | Refresh E-Order shipment invoices and the transient backorder snapshot. | Independent hourly timer; Admin manual attempts have a five-minute interval. |
+| `npm run sync:victron:scheduled` | Legacy sequential wrapper. | Not used by production timers; use the independent services. |
 | `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | Manual recovery only. Production uses separate timers to protect Victron's API allowance. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
@@ -439,7 +439,7 @@ The export itself contains SKU, description, available stock, in-transit quantit
 Renogy and Victron have different API characteristics and must not share one timer:
 
 - `thanda-store-renogy-sync.timer` runs every five minutes.
-- `thanda-store-victron-sync.timer` runs the full paginated E-Order catalogue read and then the shipment/backorder planning sync hourly. The catalogue sync waits one second between result pages and honours Victron `429 Retry-After` responses through `/var/lib/thanda-store/victron-rate-limit.json`.
+- `thanda-store-victron-sync.timer` runs the catalogue every four hours (UTC 00/04/08/12/16/20). `thanda-store-victron-orders.timer` runs shipments/backorders independently every hour. Both use the PostgreSQL-backed Victron request controller; the old JSON cooldown is imported without shortening its deadline.
 
 Both services load credentials from `/etc/thanda-store-supplier.env`, owned by `root:root` with mode `0600`. Never store supplier or database credentials in unit files, documentation, shell history, or source control.
 
@@ -547,7 +547,7 @@ Production is hosted at `https://store.thanda.solar`.
 - **Next.js working directory:** `/root/thanda-store/thanda-store`
 - **Process manager:** PM2 process `thanda-store`, running the Next.js entry point directly with file watching disabled
 - **Reverse proxy and TLS:** Nginx with the Certbot-managed `store.thanda.solar` certificate
-- **Supplier timers:** `thanda-store-renogy-sync.timer`, every five minutes; `thanda-store-victron-sync.timer`, hourly
+- **Supplier timers:** `thanda-store-renogy-sync.timer`, every five minutes; `thanda-store-victron-sync.timer`, every four hours; `thanda-store-victron-orders.timer`, hourly
 - **Xero timer:** `thanda-store-xero-stock.timer`, every 30 minutes
 - **Xero invoice-stock timer:** `thanda-store-xero-stock-webhook.timer`, every five minutes and no external call when no invoice refresh is pending
 - **Xero webhook worker:** `thanda-store-xero-webhooks.timer`, every five minutes, zero external calls when idle
@@ -602,6 +602,45 @@ The Victron sync:
 6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`.
 
 ### Victron shipment and backorder planning
+
+#### Victron API budget and diagnostics
+
+Every production catalogue/order/tracking request uses `victron-http.mjs`.
+PostgreSQL serialises requests per credential fingerprint (no credential is
+logged), spaces request starts by at least one second, and stores cooldowns by
+catalogue/orders/tracking scope. Numeric and HTTP-date Retry-After values are
+honoured; a 429 without a usable header pauses for one hour. Set
+`VICTRON_ACCOUNT_WIDE_COOLDOWN=1` in both web and supplier service environments
+only if Victron confirms a shared account restriction. Redirects are refused
+rather than forwarding credentials to an unexpected host.
+
+Catalogue: six scheduled runs/day, up to 20 requests/run (safety ceiling 120/day,
+not a provider quota). Actual pagination is now measured, not inferred from
+product counts. Manual catalogue retry is limited to one attempt per 15 minutes,
+uses the same advisory lock/cooldown, and times out after 50 seconds. Extended
+catalogue maintenance is explicit and capped at 100 requests/run; do not schedule
+it routinely. Orders: normally 2 calls/run = 48/day, plus new invoice details and
+uncached tracking pages, capped at 80 requests/run including retries. Manual order
+attempts require five minutes between starts. A 5xx order request has one retry;
+429 never retries in-place. Successful EPX resolutions are reused until their
+source URL changes; other successful tracking-page checks are cached for 24h.
+Cart uploads and status/page reads make zero provider calls. Account allowance
+remains unverified; these are application safeguards, not promised headroom.
+
+Data health shows a rolling 24-hour breakdown by component, trigger and endpoint,
+recent 429/transport failures, returned quota headers and persisted retry dates.
+The ledger retains 30 days (pruned at catalogue runs). Interrupted requests remain
+`started`, so attempted traffic is not silently lost. Normal cooldown skips do not
+overwrite the previous sync result or pretend to be a fresh failure. The stock
+freshness window is five hours to accommodate the four-hour catalogue timer.
+
+When deploying these schedules, install the checked-in `thanda-store-victron-sync`
+and `thanda-store-victron-orders` service/timer pairs to `/etc/systemd/system/`,
+run `systemctl daemon-reload`, restart the catalogue timer, and enable/start the
+orders timer. Run `node scripts/init-victron-http.mjs` with the supplier environment
+loaded to initialise tables and preserve the legacy cooldown before enabling jobs
+or manual retry. Do not manually trigger a
+supplier sync simply to verify deployment.
 
 Provisional E-Order cart HTML uploads make zero supplier/Xero calls (including
 cold-cache uploads and retries). All parsed SKU quantities are saved in one

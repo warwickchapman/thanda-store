@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '../src/lib/victron-http.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
 import path from 'node:path';
@@ -29,6 +30,11 @@ const RATE_LIMIT_CACHE_FILE = process.env.VICTRON_RATE_LIMIT_CACHE_FILE
   || path.resolve(__dirname, '../../.victron-rate-limit.json');
 
 const pool = createPool();
+const http = createVictronHttp({ pool, apiKey: API_KEY || '', apiRoot: API_ROOT,
+  component: FETCH_EXTENDED ? 'catalogue-extended' : 'catalogue',
+  trigger: process.argv.includes('--manual') ? 'manual' : 'scheduled', timeoutMs: REQUEST_TIMEOUT_MS, maxRequests: FETCH_EXTENDED ? 100 : 20 });
+let runClient;
+let runLocked = false;
 
 function readRateLimitCache() {
   try {
@@ -36,26 +42,6 @@ function readRateLimitCache() {
   } catch {
     return null;
   }
-}
-
-function writeRateLimitCache(retryAfterSeconds) {
-  const retryUntil = new Date(Date.now() + retryAfterSeconds * 1000).toISOString();
-  fs.mkdirSync(path.dirname(RATE_LIMIT_CACHE_FILE), { recursive: true });
-  fs.writeFileSync(RATE_LIMIT_CACHE_FILE, `${JSON.stringify({ retryUntil }, null, 2)}\n`, { mode: 0o600 });
-  return retryUntil;
-}
-
-function skipIfRateLimited() {
-  const cache = readRateLimitCache();
-  const retryUntilMs = Date.parse(cache?.retryUntil || '');
-  if (!Number.isFinite(retryUntilMs) || retryUntilMs <= Date.now()) return false;
-  console.log(JSON.stringify({
-    supplier: 'victron',
-    skipped: true,
-    reason: 'rate_limited',
-    retryUntil: new Date(retryUntilMs).toISOString(),
-  }, null, 2));
-  return true;
 }
 
 function loadAllowedSkus() {
@@ -67,7 +53,7 @@ async function fetchJson(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    const response = await http.request(url, {
       signal: controller.signal,
       headers: {
         Authorization: API_KEY,
@@ -84,7 +70,6 @@ async function fetchJson(url) {
     }
     if (!response.ok) {
       const retryAfter = response.headers.get('retry-after');
-      if (response.status === 429 && retryAfter) writeRateLimitCache(Number(retryAfter));
       const retryMessage = retryAfter ? ` retry after ${retryAfter}s` : '';
       const message = body?.detail || body?.message || text.slice(0, 200);
       throw new Error(`Victron HTTP ${response.status}:${retryMessage} ${message}`);
@@ -217,12 +202,28 @@ async function upsertSkuSuccession(client, product) {
 }
 
 async function main() {
-  await startDataSync(pool, 'victron');
   if (!API_KEY) throw new Error('VICTRON_EORDER_API_KEY is required.');
-  if (skipIfRateLimited()) {
-    await finishDataSync(pool, 'victron', { status: 'failed', error: 'HTTP 429: waiting for recorded retry deadline' });
+  await ensureVictronHttpSchema(pool);
+  runClient = await pool.connect();
+  runLocked = (await runClient.query("SELECT pg_try_advisory_lock(hashtext('victron-catalogue-sync')) AS locked")).rows[0]?.locked;
+  if (!runLocked) return console.log('Catalogue sync already running; skipped.');
+  // Migrate the old file cooldown without discarding an active supplier deadline.
+  const legacy = Date.parse(readRateLimitCache()?.retryUntil || '');
+  if (Number.isFinite(legacy) && legacy > Date.now())
+    await pool.query(`INSERT INTO victron_http_state(account,scope,blocked_until) VALUES($1,'catalogue',$2)
+      ON CONFLICT(account,scope) DO UPDATE SET blocked_until=GREATEST(victron_http_state.blocked_until,EXCLUDED.blocked_until)`, [http.account, new Date(legacy)]);
+  const blocked = (await pool.query(`SELECT MAX(blocked_until) AS until FROM victron_http_state WHERE account=$1 AND scope IN ('catalogue','account')`, [http.account])).rows[0]?.until;
+  const schedule = (await pool.query('SELECT * FROM victron_catalogue_schedule WHERE id=true')).rows[0];
+  const manual = process.argv.includes('--manual');
+  const due = manual ? new Date(schedule?.last_attempt_at || 0).getTime() + 15 * 60_000 : new Date(schedule?.next_scheduled_at || 0).getTime();
+  if (new Date(blocked || 0).getTime() > Date.now() || due > Date.now()) {
+    console.log(JSON.stringify({ skipped: true, reason: blocked && new Date(blocked).getTime() > Date.now() ? 'rate_limited' : 'not_due', retryAt: new Date(Math.max(due, new Date(blocked || 0).getTime())).toISOString() }));
     return;
   }
+  await pool.query(`INSERT INTO victron_catalogue_schedule(id,last_attempt_at,next_scheduled_at) VALUES(true,NOW(),$1)
+    ON CONFLICT(id) DO UPDATE SET last_attempt_at=NOW(),next_scheduled_at=EXCLUDED.next_scheduled_at`, [nextCatalogueRun()]);
+  await pool.query("DELETE FROM victron_http_usage WHERE requested_at<NOW()-INTERVAL '30 days'");
+  await startDataSync(pool, 'victron');
 
   const allowedSkus = loadAllowedSkus();
   const products = await fetchPagedProducts('products');
@@ -314,4 +315,8 @@ main().catch(async (error) => {
   await finishDataSync(pool, 'victron', { status: 'failed', error }).catch(() => {});
   console.error(error);
   process.exitCode = 1;
-}).finally(() => pool.end());
+}).finally(async () => {
+  if (runLocked) await runClient.query("SELECT pg_advisory_unlock(hashtext('victron-catalogue-sync'))");
+  runClient?.release();
+  await pool.end();
+});
