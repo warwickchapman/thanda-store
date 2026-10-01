@@ -2,6 +2,7 @@
 
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
+import { matchingXeroItem } from '../src/lib/admin/store-products.mjs';
 
 import { createPool, ensureProductSchema } from './product-sync-lib.mjs';
 
@@ -82,10 +83,11 @@ async function ensureSyncState(client) {
 
 async function targetProducts(client) {
   const result = await client.query(`
-    SELECT supplier, sku
+    SELECT supplier, sku, details
     FROM products
     WHERE supplier = 'victron'
        OR (supplier = 'lora' AND sku = 'LORA-RS-00120')
+       OR details->>'storeManaged' = 'true'
     ORDER BY supplier, sku
   `);
   return result.rows;
@@ -94,7 +96,7 @@ async function targetProducts(client) {
 async function updateLocalStock(client, product, localStock, xeroItem, observedAt) {
   const xeroSalesPrice = moneyOrNull(xeroItem?.SalesDetails?.UnitPrice);
   const xeroPurchasePrice = moneyOrNull(xeroItem?.PurchaseDetails?.UnitPrice);
-  const shouldSyncXeroPrice = product.supplier === 'lora';
+  const shouldSyncXeroPrice = product.supplier === 'lora' && product.details?.storeManaged !== true;
 
   await client.query(
     `
@@ -192,7 +194,9 @@ async function main() {
     const xeroItems = fetched.items;
     stats.xeroItems = xeroItems.length;
     const xeroItemsBySku = new Map();
+    const xeroItemsById = new Map();
     for (const item of xeroItems) {
+      if (item.ItemID) xeroItemsById.set(item.ItemID, item);
       const sku = normalizeSku(item.Code);
       if (sku) xeroItemsBySku.set(sku, item);
     }
@@ -202,7 +206,7 @@ async function main() {
     stats.targetProducts = products.length;
 
     for (const product of products) {
-      const xeroItem = xeroItemsBySku.get(normalizeSku(product.sku));
+      const xeroItem = matchingXeroItem(product, xeroItemsBySku, xeroItemsById);
       if (!xeroItem) {
         stats.missing += 1;
         await updateLocalStock(client, product, null, null, fetched.observedAt);

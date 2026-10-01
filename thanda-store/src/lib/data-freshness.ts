@@ -82,7 +82,9 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
     let observations: Array<{ quantity: number | null; observedAt: string | null }> = [];
     let run: StoredState = bySource.get(source.id) || {};
     if (source.id === 'thanda') {
-      observations = products.filter(row => (row.supplier === 'victron' || row.supplier === 'lora') && !activeStockReview(row)).map(localStockObservation);
+      observations = products.filter(row => (row.supplier === 'victron' || row.supplier === 'lora'
+        || ((row.details as StoredState)?.storeManaged === true && (row.details as StoredState)?.xeroStockStatus !== 'untracked'))
+        && !activeStockReview(row)).map(localStockObservation);
     } else if (['victron', 'renogy', 'hubble', 'lora'].includes(source.id)) {
       observations = products.filter(row => row.supplier === source.id).map(supplierStockObservation);
     } else if (source.id === 'sales') {

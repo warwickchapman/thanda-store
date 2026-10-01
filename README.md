@@ -285,6 +285,58 @@ LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble
 
 ## Product image thumbnails
 
+### Add a store product from Xero
+
+Open **Admin menu → Products → Add from Xero**, search by item code, name or
+description, then select an item. Search uses the saved Thanda Xero listing and
+shows its source observation time. Only items marked for sale in Xero are
+offered. Already imported item codes (including hidden products and Victron
+retail aliases) are identified so they cannot be added again. Explicit Victron
+Replaces / Replaced by relationships come from `victron_sku_successions`; each
+distinct saleable code retains its own stock and price, without family totals.
+
+Tidy the store name and description, choose a category, upload a JPG/PNG/WebP
+photo, and confirm the **selling price in ZAR excluding VAT**. This is a fixed
+customer selling price; company discounts do not reduce it further. Xero's
+saved price is a suggestion that the administrator must review. **Add to store**
+publishes the item unless **Visible in the store** is unchecked. Reopen it under
+**Added from Xero** to edit it or hide it. These products appear under **Thanda**;
+existing supplier-managed products continue to use their normal import paths.
+
+Edits never update Xero. The original Xero item ID and code remain linked;
+the existing 30-minute stock projection refreshes inventory only and preserves
+the store name, description, photo and price. Untracked, missing or renamed
+Xero items show stock unknown rather than zero. A reused item code cannot
+silently attach the product to a different Xero item.
+
+Photos are decoded with a 25-megapixel limit, resized to at most 1200×1200 and
+converted to WebP with metadata stripped. Uploads are limited to 8 MB. They are
+stored transactionally in PostgreSQL `store_product_images` alongside the
+product edit, served through `/api/store-product-images/[id]`, and included in
+normal database backups. No filesystem upload directory or deployment copy is
+needed. The image table is created on first save. Product details retain the
+last editing administrator and edit time.
+
+The Store's Nginx HTTPS server block must set `client_max_body_size 9m;` to
+allow an 8 MB photograph plus multipart form fields. Keep the application's
+8 MB photo and 9 MB request limits in place. Back up the proxy configuration,
+run `nginx -t`, and reload Nginx after changing this setting.
+
+API budget review: search and new-product validation each read one complete
+stored `/Items` collection from the tenant-scoped Hub; they never refresh it or
+call Xero. Page loads, edits, photos and customer reads use PostgreSQL only.
+Cold-cache/backfill cost, added calls per run/day and reserve impact are all
+**zero provider calls**. There are no retries or polling. Incomplete/unavailable
+Hub evidence stops search/import with a retryable error; it is not shown as an
+empty list. Existing Hub synchronisation supplies invalidation and allowance
+monitoring. No Xero operation, scope, schedule or provider limit changes.
+
+Validation: `node --test test/store-products.test.mjs` covers input, duplicate
+and succession handling, stored-source failure and stock identity semantics.
+`RUN_STORE_PRODUCTS_DB_TESTS=1 node test/store-products.integration.mjs` uses a
+disposable local schema and fake Hub to test imports, concurrent duplicates,
+photos, edits and subsequent stock sync without contacting Xero.
+
 The storefront should not render supplier originals directly when a local thumbnail exists. Supplier images can be very large, inconsistently framed, or temporarily unavailable.
 
 The authenticated catalogue API lazily queues thumbnail generation when it first encounters a product with an `image_url` but no local WebP. That request still uses the supplier image immediately, so browsing never waits for image processing; a later request uses the local WebP. The worker is detached from the request and retries a missing thumbnail at most once every five minutes per app process.

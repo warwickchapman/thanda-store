@@ -12,6 +12,7 @@ const groups = [
     { href: '/admin/quote-requests', label: 'Quote requests' },
   ] },
   { label: 'Stock & planning', destinations: [
+    { href: '/admin/products', label: 'Products' },
     { href: '/admin/replenishment', label: 'Inventory planning' },
     { href: '/admin/data-health', label: 'Data health' },
   ] },

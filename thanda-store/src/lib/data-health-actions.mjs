@@ -6,7 +6,8 @@ export function stockHealthIssues(source, products, now = new Date()) {
   if (source.mode === 'manual') return [];
   return products.flatMap(product => {
     const local = source.id === 'thanda';
-    if (local ? !['victron', 'lora'].includes(product.supplier) : product.supplier !== source.id) return [];
+    const managedInventory = product.details?.storeManaged === true && product.details?.xeroStockStatus !== 'untracked';
+    if (local ? !['victron', 'lora'].includes(product.supplier) && !managedInventory : product.supplier !== source.id) return [];
     if (local && activeStockReview(product)) return [];
     const observation = local ? localStockObservation(product) : supplierStockObservation(product);
     const details = product.details || {};

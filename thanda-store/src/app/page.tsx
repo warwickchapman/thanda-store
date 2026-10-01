@@ -81,7 +81,7 @@ function stockLines(product: Product) {
   const localStock = numberDetail(product.details.localStockOnHand);
   const supplierLabelText = supplierStockLabel(product);
 
-  if (supplier === 'lora') {
+  if (supplier === 'lora' || product.details.storeManaged === true) {
     return [localStock === null ? 'Thanda stock unknown' : `${localStock} in stock (KZN)`];
   }
 
@@ -111,7 +111,7 @@ function primaryStockBadge(product: Product) {
   if (localStock !== null && localStock > 0) return `${localStock} in stock (KZN)`;
   if (productAvailability(product).includes('unknown')) return 'Stock unknown';
   if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Stock unknown';
-  if (product.supplier === 'lora') return `${localStock} in stock (KZN)`;
+  if (product.supplier === 'lora' || product.details.storeManaged === true) return `${localStock} in stock (KZN)`;
   if (productAvailability(product).includes('unavailable')) return 'Out of stock';
   return product.supplier === 'renogy' ? '4-7 days' : product.supplier === 'victron' ? '3-5 days' : 'Check stock';
 }

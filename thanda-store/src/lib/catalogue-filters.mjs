@@ -222,7 +222,7 @@ export function productAvailability(product) {
   const manual = String(product.details?.manualAvailability || '');
   if ((product.supplier !== 'lora' && stock > 0) || /^in stock\b/i.test(manual)) result.push('supplier');
   if (!result.length) {
-    const unknown = product.supplier === 'lora' ? local === null
+    const unknown = product.supplier === 'lora' || product.details?.storeManaged === true ? local === null
       : product.supplier === 'hubble' ? !/^out of stock\b/i.test(manual)
       : stock === null || (product.supplier === 'victron' && local === null);
     result.push(unknown ? 'unknown' : 'unavailable');

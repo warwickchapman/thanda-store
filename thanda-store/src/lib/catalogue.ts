@@ -71,6 +71,7 @@ function displayDetails(details: Record<string, unknown>, price: unknown, imageF
     supplierStockLabel: typeof details.supplierStockLabel === 'string' ? details.supplierStockLabel : null,
     supplierAvailability: typeof details.supplierAvailability === 'string' ? details.supplierAvailability : null,
     manualAvailability: typeof details.manualAvailability === 'string' ? details.manualAvailability : null,
+    storeManaged: details.storeManaged === true,
     is120vAc: details.is120vAc === true,
     productNotes: Array.isArray(details.productNotes) ? details.productNotes.filter((note) => typeof note === 'string') : [],
     xeroStockStatus: typeof details.xeroStockStatus === 'string' ? details.xeroStockStatus : null,
@@ -89,8 +90,9 @@ function thumbnailUrl(product: { id: number; supplier: string; sku: string }) {
 
 export function presentProduct(row: CatalogueRow, discounts: Record<string, number>, imageFallback: ImageFallback | null = null): CatalogueProduct {
   const retail = recommendedRetailExVat(row);
-  const discount = row.supplier.toLowerCase() === 'lora' ? 0 : configuredDiscountPercent(row.supplier, discounts);
-  const ownThumbnailUrl = thumbnailUrl(row);
+  const fixedPrice = row.supplier.toLowerCase() === 'lora' || row.details?.storeManaged === true;
+  const discount = fixedPrice ? 0 : configuredDiscountPercent(row.supplier, discounts);
+  const ownThumbnailUrl = row.details?.storeManaged === true ? row.image_url : thumbnailUrl(row);
   const ownImageUrl = row.image_url.trim();
   const hasOwnImage = Boolean(ownThumbnailUrl || ownImageUrl);
   const useFallback = !hasOwnImage && imageFallback !== null;
@@ -110,7 +112,7 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
     details: displayDetails(row.details || {}, row.price, useFallback ? imageFallback.predecessorSku : null),
     thumbnail_url: ownThumbnailUrl || (useFallback ? imageFallback.thumbnailUrl : ''),
     recommended_retail_ex_vat: retail,
-    your_price_ex_vat: retail === null ? null : row.supplier.toLowerCase() === 'lora' ? retail : roundMoney(retail * (1 - discount / 100)),
+    your_price_ex_vat: retail === null ? null : fixedPrice ? retail : roundMoney(retail * (1 - discount / 100)),
     b2b_discount_percent: discount,
   };
 }
