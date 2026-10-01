@@ -9,7 +9,7 @@ function configuration() {
 export async function hubRequest(path, init = {}) {
   const { base, token } = configuration();
   return fetch(`${base}/v1/thanda-solar/${path}`, {
-    ...init, cache: 'no-store', signal: AbortSignal.timeout(40_000),
+    ...init, cache: 'no-store', signal: init.signal || AbortSignal.timeout(40_000),
     headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${token}` },
   });
 }

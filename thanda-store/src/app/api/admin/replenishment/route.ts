@@ -101,6 +101,7 @@ export async function GET() {
           NULLIF(details->>'priceBreakQty', '')::numeric AS price_break_qty,
           NULLIF(details->>'priceBreakPrice', '')::numeric AS price_break_price
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
+          AND (NULLIF(details->>'purchasingRetiredReason','') IS NULL OR details->>'purchasingRetirementOverride'='true')
       `),
       pool.query<LocalStockRow>(`
         SELECT sku, details

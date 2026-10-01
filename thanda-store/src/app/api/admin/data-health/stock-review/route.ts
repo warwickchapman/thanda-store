@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const action = body?.action;
   const note = typeof body?.note === 'string' ? body.note.trim() : '';
   if (!sku || sku.length > 100 || !['victron', 'lora'].includes(supplier)
-      || ![...STOCK_REVIEW_DECISIONS, 'undo', 'check'].includes(action) || note.length > 1000
+      || ![...STOCK_REVIEW_DECISIONS, 'undo', 'check', 'restore_purchasing', 'archive_purchasing'].includes(action) || note.length > 1000
       || (action === 'retired' && (supplier !== 'victron' || !note)))
     return NextResponse.json({ error: 'Choose a valid item and action. A retirement decision requires a reason or supplier evidence.' }, { status: 400 });
 
@@ -31,6 +31,14 @@ export async function POST(request: Request) {
     const result = await client.query('SELECT supplier, sku, details FROM products WHERE supplier=$1 AND UPPER(sku)=$2', [supplier, sku]);
     if (result.rows.length !== 1) return NextResponse.json({ error: 'A unique catalogue item was not found.' }, { status: 404 });
     const product = result.rows[0];
+    if (['restore_purchasing', 'archive_purchasing'].includes(action)) {
+      if (supplier !== 'victron' || !product.details?.purchasingRetiredReason) return NextResponse.json({ error: 'No supplier retirement evidence exists for this item.' }, { status: 409 });
+      await client.query('BEGIN'); inTransaction = true;
+      await client.query(`UPDATE products SET details=details || jsonb_build_object('purchasingRetirementOverride',$3::boolean) WHERE supplier=$1 AND sku=$2`, [supplier, sku, action === 'restore_purchasing']);
+      await client.query(`INSERT INTO product_stock_review_events(supplier,sku,action,note,actor_id) VALUES($1,$2,$3,$4,$5)`, [supplier, sku, action, note, user.id]);
+      await client.query('COMMIT'); inTransaction = false;
+      return NextResponse.json({ message: action === 'restore_purchasing' ? 'Restored to purchasing review. Supplier retirement evidence still prevents automatic Xero creation. No stock or history changed.' : 'Archived from purchasing again. No stock or history changed.' });
+    }
     if (action === 'check') {
       // Same lock as the scheduled stock importer: never race a newer import.
       locked = Boolean((await client.query('SELECT pg_try_advisory_lock(742033) AS locked')).rows[0]?.locked);

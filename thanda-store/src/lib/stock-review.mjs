@@ -2,8 +2,8 @@ export const STOCK_REVIEW_DECISIONS = ['do_not_stock', 'retired'];
 
 export function activeStockReview(product) {
   return product.details?.xeroStockStatus === 'missing'
-    && STOCK_REVIEW_DECISIONS.includes(product.stockReview?.decision)
-    ? product.stockReview : null;
+    && (STOCK_REVIEW_DECISIONS.includes(product.stockReview?.decision) || (product.details?.purchasingRetiredReason && !product.details?.purchasingRetirementOverride))
+    ? product.stockReview || { decision: 'retired' } : null;
 }
 
 export function checkedXeroItem(items, sku, observedAt) {

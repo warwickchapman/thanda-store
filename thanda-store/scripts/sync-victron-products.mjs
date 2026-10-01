@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { recordCatalogueLifecycle } from '../src/lib/xero-item-create.mjs';
 import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '../src/lib/victron-http.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
@@ -82,14 +83,22 @@ async function fetchJson(url) {
 
 async function fetchPagedProducts(endpoint, pageSize = PAGE_SIZE) {
   const products = [];
+  let expectedCount = null;
   let url = `${API_ROOT.replace(/\/$/, '')}/${endpoint}/?format=json&limit=${pageSize}`;
   while (url) {
     const page = await fetchJson(url);
-    const rows = Array.isArray(page) ? page : page.results || [];
+    if (!Array.isArray(page) && (!page || !Array.isArray(page.results) || !Object.hasOwn(page, 'next') || (page.next !== null && (typeof page.next !== 'string' || !page.next)))) throw new Error('Incomplete catalogue response');
+    if (!Array.isArray(page) && page.count != null) {
+      if (expectedCount !== null && expectedCount !== Number(page.count)) throw new Error('Catalogue changed during pagination');
+      expectedCount = Number(page.count);
+    }
+    const rows = Array.isArray(page) ? page : page.results;
+    if (rows.some(row => !row || typeof row.sku !== 'string' || !row.sku.trim())) throw new Error('Invalid catalogue SKU');
     products.push(...rows);
     url = Array.isArray(page) ? '' : page.next;
     if (url && PAGE_REQUEST_DELAY_MS > 0) await sleep(PAGE_REQUEST_DELAY_MS);
   }
+  if (!products.length || new Set(products.map(row => row.sku)).size !== products.length || (expectedCount !== null && expectedCount !== products.length)) throw new Error('Incomplete or duplicate catalogue; retained data unchanged');
   return products;
 }
 
@@ -296,6 +305,11 @@ async function main() {
     // infer replacements from similarly named article codes.
     for (const product of explicitSuccessionProducts) {
       if (await upsertSkuSuccession(client, product)) stats.skuSuccessions += 1;
+    }
+    if (!stats.failed.length) {
+      await client.query('BEGIN');
+      try { await recordCatalogueLifecycle(client, products, observedAt); await client.query('COMMIT'); }
+      catch (error) { await client.query('ROLLBACK'); throw error; }
     }
   } finally {
     client.release();

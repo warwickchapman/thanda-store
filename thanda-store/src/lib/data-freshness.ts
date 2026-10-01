@@ -31,6 +31,8 @@ export type StockReviewItem = {
   decision: 'do_not_stock' | 'retired' | null; active: boolean;
   note: string; reviewedAt: string | null; observedAt: string | null;
   family: string; familySkus: string[];
+  purchasingRetiredReason?: string | null; creationPending?: boolean;
+  purchasingRestored?: boolean;
 };
 export type DataHealth = { checkedAt: string; sources: DataSourceStatus[]; stockReviews?: StockReviewItem[] };
 type StoredState = Record<string, unknown>;
@@ -111,7 +113,7 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
   const stockReviews = includeIssues ? products.filter(product => {
     const details = product.details as Record<string, unknown>;
     return ['victron', 'lora'].includes(String(product.supplier))
-      && (details?.xeroStockStatus === 'missing' || reviewsBySku.get(`${product.supplier}:${product.sku}`)?.decision);
+      && (details?.xeroStockStatus === 'missing' || details?.purchasingRetiredReason || reviewsBySku.get(`${product.supplier}:${product.sku}`)?.decision);
   }).map(product => {
     const review = reviewsBySku.get(`${product.supplier}:${product.sku}`);
     const details = product.details as Record<string, unknown>;
@@ -122,6 +124,9 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       note: String(review?.note || ''), reviewedAt: observationTime(review?.reviewed_at), observedAt: observationTime(details?.xeroStockSyncedAt),
       family: product.supplier === 'victron' ? familyFor(sku) : sku,
       familySkus: product.supplier === 'victron' ? familyMemberSkus(successions, sku) : [sku],
+      purchasingRetiredReason: details?.purchasingRetiredReason ? String(details.purchasingRetiredReason) : null,
+      creationPending: Boolean(details?.xeroCreatedItemId && details?.xeroStockStatus === 'missing'),
+      purchasingRestored: details?.purchasingRetirementOverride === true,
     };
   }).sort((a, b) => a.sku.localeCompare(b.sku)) : undefined;
   return { checkedAt, sources, ...(stockReviews ? { stockReviews } : {}) };
