@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createVictronHttp, requestKind, retryDeadline, nextCatalogueRun, VictronPaused } from '../src/lib/victron-http.mjs';
+import { createVictronHttp, requestKind, retryDeadline, nextCatalogueRun, transportErrorKind, VictronPaused } from '../src/lib/victron-http.mjs';
 import { resolvedTrackingUrl } from '../src/lib/victron-order-sync.mjs';
 
 const root = 'https://eorder.victronenergy.com/api/v1';
@@ -13,13 +13,13 @@ function database() {
     if (sql.includes('pg_advisory_unlock')) { locked = false; return { rows: [] }; }
     if (sql.startsWith('SELECT * FROM victron_http_state')) return { rows: [states.get(values[1]), states.get('account')].filter(Boolean) };
     if (sql.startsWith('INSERT INTO victron_http_usage')) { usage.push({ values, outcome: sql.includes("'skipped'") ? 'skipped' : 'started' }); return { rows: [{ id: usage.length }] }; }
-    if (sql.startsWith('UPDATE victron_http_usage')) { Object.assign(usage[values[0] - 1], sql.includes("outcome='transport_error'") ? { outcome: 'transport_error' } : { status: values[1], outcome: values[2] }); return { rows: [] }; }
+    if (sql.startsWith('UPDATE victron_http_usage')) { Object.assign(usage[values[0] - 1], sql.includes('error_kind=') ? { outcome: values[1], errorKind: values[2] } : { status: values[1], outcome: values[2] }); return { rows: [] }; }
     if (sql.startsWith('INSERT INTO victron_http_state')) {
       if (sql.includes("'account'")) { states.set('account', { blocked_until: values[1] }); }
       else states.set(values[1], { blocked_until: values[2], last_status: values[3], quota: values[4] });
       return { rows: [] };
     }
-    if (sql.startsWith('CREATE')) return { rows: [] };
+    if (sql.startsWith('CREATE') || sql.startsWith('ALTER')) return { rows: [] };
     throw new Error(`Unexpected test query: ${sql}`);
   }, release() {} };
   return { states, usage, query: db.query, connect: async () => db };
@@ -74,10 +74,18 @@ test('concurrent clients cannot overlap their transport', async () => {
 });
 test('transport failures are attributed and request lock is released', async () => {
   const pool = database();
-  await assert.rejects(createVictronHttp({ pool, apiKey: 'test', apiRoot: root, component: 'orders', fetchImpl: async () => { throw new Error('network'); } }).request(`${root}/orders/shipments/`));
+  await assert.rejects(createVictronHttp({ pool, apiKey: 'test', apiRoot: root, component: 'orders', fetchImpl: async () => { throw Object.assign(new Error('private URL'), { cause: Object.assign(new Error('getaddrinfo'), { code: 'ENOTFOUND' }) }); } }).request(`${root}/orders/shipments/`));
   assert.equal(pool.usage.length, 1);
   assert.equal(pool.usage[0].outcome, 'transport_error');
+  assert.equal(pool.usage[0].errorKind, 'dns');
+  assert.equal(JSON.stringify(pool.usage).includes('private URL'), false);
   assert.equal((await pool.query('SELECT pg_try_advisory_lock')).rows[0].locked, true);
+});
+test('transport categories remain bounded and distinguish redirects, timeouts and body failures', () => {
+  assert.equal(transportErrorKind(new Error('fetch failed', { cause: new Error('unexpected redirect') })), 'redirect_refused');
+  assert.equal(transportErrorKind(new Error('fetch failed'), { aborted: true }), 'timeout');
+  assert.equal(transportErrorKind(new Error('private response data'), null, 'response_body'), 'response_body');
+  assert.equal(transportErrorKind(new Error('unknown private URL')), 'request_failed');
 });
 test('persisted account-wide cooldown blocks every API scope without requests', async () => {
   const pool = database();

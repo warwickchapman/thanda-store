@@ -4,8 +4,13 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Data health now names the safe failure category for new Victron request failures, including redirect, DNS, TLS, connection, timeout and interrupted response. Older failures say their cause was not recorded. Raw errors and tracking URLs stay out of the ledger; this adds no supplier calls.
 - Added admin-reviewed creation of missing Victron products in Xero through the shared Hub. A price preview uses normal E-Order cost and cost / 0.525 selling price, excluding VAT. Creation never sends stock quantities or updates an existing SKU; duplicate and uncertain attempts are protected and audited.
 - Complete E-Order catalogue scans now archive unavailable predecessors and exhausted "Available until stock 0" products from purchasing and the missing-Xero queue. Reviewed / archived retains the supplier reason and a restore control. Existing Thanda stock, succession relationships, Xero records and sales history are preserved; incomplete scans cannot establish retirement.
+
+- Added the shared Admin menu to Inventory planning so its navigation matches the other admin pages.
+
+- Removed the technical cutover date from the Inbound sync summary. The last sync time and excluded RMA count remain visible; the historical import boundary is unchanged.
 
 - Reduced Victron catalogue checks to every four hours and separated the hourly shipment/backorder timer, so catalogue failures no longer block receiving updates. Added shared database-backed request pacing, persistent scoped cooldowns, bounded request counts and attribution by job/manual action. Data health now shows request activity, returned quota headers and retry deadlines, with a cooldown-protected catalogue retry. Resolved tracking links are cached; existing active cooldowns are preserved across deployment. Supplier stock freshness now allows five hours between observations; real unknown quantities remain unknown.
 

@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AdminMenu } from "@/components/admin/admin-menu";
 import type { DataSourceStatus } from "@/lib/data-freshness";
 import { planningHealthSignature } from "@/lib/planning-health-notice.mjs";
 
@@ -825,9 +826,7 @@ export default function ReplenishmentPage() {
               open inbound deliveries.
             </p>
           </div>
-          <Link href="/" className="text-sm font-semibold text-zinc-700">
-            Back to store
-          </Link>
+          <AdminMenu />
         </div>
         <nav
           className="mb-6 flex gap-1 border-b border-zinc-200"

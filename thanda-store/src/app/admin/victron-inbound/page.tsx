@@ -373,7 +373,7 @@ export default function VictronInboundPage() {
               </p>
               <p className="mt-2 text-xs text-sky-800">
                 {syncState?.last_successful_sync_at
-                  ? `Last synchronized ${new Date(syncState.last_successful_sync_at).toLocaleString()} · cutover ${syncState.effective_cutover_date || "not set"} · ${syncState.last_stats?.rmaShipmentsExcluded || 0} RMA shipments excluded`
+                  ? `Last synchronized ${new Date(syncState.last_successful_sync_at).toLocaleString()} · ${syncState.last_stats?.rmaShipmentsExcluded || 0} RMA shipments excluded`
                   : "No successful API synchronization has been recorded yet."}
               </p>
               {syncState?.last_error && (

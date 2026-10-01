@@ -629,6 +629,9 @@ remains unverified; these are application safeguards, not promised headroom.
 
 Data health shows a rolling 24-hour breakdown by component, trigger and endpoint,
 recent 429/transport failures, returned quota headers and persisted retry dates.
+New transport failures retain only a fixed, non-sensitive cause category (redirect,
+DNS, TLS, connection, timeout, interrupted response or unknown); old entries have
+no recorded cause. This changes no request schedule, retry or API budget.
 The ledger retains 30 days (pruned at catalogue runs). Interrupted requests remain
 `started`, so attempted traffic is not silently lost. Normal cooldown skips do not
 overwrite the previous sync result or pretend to be a fresh failure. The stock

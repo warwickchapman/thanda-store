@@ -5,10 +5,19 @@ export type VictronActivity = {
   checkedAt: string;
   states: Array<{ scope: string; blocked_until: string | null; last_status: number | null; quota: Record<string, string> }>;
   usage: Array<{ component: string; trigger: string; endpoint: string; requests: number; throttled: number; skipped: number }>;
-  recent: Array<{ requested_at: string; component: string; endpoint: string; status: number | null; outcome: string; retry_at: string | null }>;
+  recent: Array<{ requested_at: string; component: string; endpoint: string; status: number | null; outcome: string; error_kind: string | null; retry_at: string | null }>;
   schedule: { last_attempt_at: string | null; next_scheduled_at: string | null } | null;
 };
 const date = (value: string) => new Date(value).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' });
+const errorLabels: Record<string, string> = {
+  timeout: 'Request timed out',
+  redirect_refused: 'Redirect refused',
+  dns: 'DNS lookup failed',
+  tls: 'TLS or certificate failed',
+  connection: 'Connection failed',
+  response_body: 'Response interrupted',
+  request_failed: 'Request failed',
+};
 export function VictronApiActivity({ activity, onChanged }: { activity: VictronActivity; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -39,7 +48,7 @@ export function VictronApiActivity({ activity, onChanged }: { activity: VictronA
       {!activity.usage.length && <p>No requests recorded since monitoring was enabled.</p>}
       <p className="mt-2">Victron’s account allowance is not yet verified. Returned limit headers are retained below; request counts are not a claimed remaining quota.</p>
       {activity.states.filter(state => Object.keys(state.quota).length).map(state => <p key={state.scope} className="mt-1 break-words text-xs">{state.scope}: {Object.entries(state.quota).map(([key, value]) => `${key}: ${value}`).join(' · ')}</p>)}
-      <ul className="mt-2">{activity.recent.map((row, index) => <li key={index}>{date(row.requested_at)} · {row.component} / {row.endpoint} · {row.status || row.outcome}{row.retry_at && ` · retry after ${date(row.retry_at)}`}</li>)}</ul>
+      <ul className="mt-2">{activity.recent.map((row, index) => <li key={index}>{date(row.requested_at)} · {row.component} / {row.endpoint} · {row.status || (row.outcome === 'transport_error' ? row.error_kind ? errorLabels[row.error_kind] || 'Request failed' : 'Transport failed (cause not recorded)' : row.outcome === 'internal_error' ? 'Local processing failed' : row.outcome)}{row.retry_at && ` · retry after ${date(row.retry_at)}`}</li>)}</ul>
     </details>
   </section>;
 }

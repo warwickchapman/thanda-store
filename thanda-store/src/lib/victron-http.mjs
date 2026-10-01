@@ -24,6 +24,20 @@ export function requestKind(url) {
   if (path.includes('/orders/backorders/')) return { scope: 'orders', endpoint: 'backorders' };
   return { scope: 'orders', endpoint: 'invoice-products' };
 }
+// Persist only fixed categories. Fetch errors can contain supplier URLs and
+// request details, so their raw messages must not enter the usage ledger.
+export function transportErrorKind(error, signal, phase = 'request') {
+  if (signal?.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError') return 'timeout';
+  const causes = [error, error?.cause, error?.cause?.cause].filter(Boolean);
+  const codes = causes.map(cause => String(cause.code || '').toUpperCase());
+  const messages = causes.map(cause => String(cause.message || '').toLowerCase());
+  if (codes.some(code => code.includes('REDIRECT')) || messages.some(message => /redirect/.test(message))) return 'redirect_refused';
+  if (codes.some(code => ['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL'].includes(code))) return 'dns';
+  if (codes.some(code => code.startsWith('ERR_TLS') || code.startsWith('CERT_') || code.includes('SSL'))
+      || messages.some(message => /certificate|tls handshake/.test(message))) return 'tls';
+  if (codes.some(code => ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(code))) return 'connection';
+  return phase === 'response_body' ? 'response_body' : 'request_failed';
+}
 export class VictronPaused extends Error {
   constructor(until, reason = 'cooldown') {
     super(`Victron ${reason}: next permitted attempt ${new Date(until).toISOString()}.`);
@@ -42,6 +56,7 @@ export async function ensureVictronHttpSchema(db) {
     scope TEXT NOT NULL, endpoint TEXT NOT NULL, status INTEGER, outcome TEXT NOT NULL,
     duration_ms INTEGER, retry_at TIMESTAMPTZ)`);
   await db.query(`CREATE INDEX IF NOT EXISTS victron_http_usage_time ON victron_http_usage(requested_at)`);
+  await db.query('ALTER TABLE victron_http_usage ADD COLUMN IF NOT EXISTS error_kind TEXT');
   await db.query(`CREATE TABLE IF NOT EXISTS victron_catalogue_schedule (
     id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id), last_attempt_at TIMESTAMPTZ,
     next_scheduled_at TIMESTAMPTZ)`);
@@ -67,6 +82,7 @@ export function createVictronHttp({ pool, apiKey, apiRoot, component, trigger = 
     const db = await pool.connect();
     let locked = false;
     let ledgerId;
+    let transportKind = null;
     const started = Date.now();
     try {
       // Avoid an unbounded wait when another process is holding the request lock.
@@ -90,11 +106,16 @@ export function createVictronHttp({ pool, apiKey, apiRoot, component, trigger = 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, 30_000));
       let response, body;
+      let phase = 'request';
       try {
         response = await fetchImpl(url, { ...options, redirect: 'error', signal: controller.signal,
           headers: { Accept: scope === 'tracking' ? 'text/html' : 'application/json',
             ...(scope !== 'tracking' ? { Authorization: apiKey } : {}), 'User-Agent': `ThandaStore/${component}` } });
+        phase = 'response_body';
         body = await response.text();
+      } catch (error) {
+        transportKind = transportErrorKind(error, controller.signal, phase);
+        throw error;
       } finally { clearTimeout(timer); }
       const quota = {};
       for (const [key, value] of response.headers) {
@@ -116,7 +137,8 @@ export function createVictronHttp({ pool, apiKey, apiRoot, component, trigger = 
       // Return a buffered response so the timeout covers the body as well.
       return new Response([204, 205, 304].includes(response.status) ? null : body, { status: response.status, headers: response.headers });
     } catch (error) {
-      if (ledgerId) await db.query(`UPDATE victron_http_usage SET outcome='transport_error',duration_ms=$2 WHERE id=$1`, [ledgerId, Date.now() - started]);
+      if (ledgerId) await db.query(`UPDATE victron_http_usage SET outcome=$2,error_kind=$3,duration_ms=$4 WHERE id=$1`,
+        [ledgerId, transportKind ? 'transport_error' : 'internal_error', transportKind, Date.now() - started]);
       throw error;
     } finally {
       if (locked) await db.query('SELECT pg_advisory_unlock(hashtext($1))', [`victron-http:${account}`]);
@@ -133,8 +155,8 @@ export async function victronUsage(db) {
     db.query(`SELECT component,trigger,scope,endpoint,COUNT(*) FILTER(WHERE outcome<>'skipped')::int AS requests,
       COUNT(*) FILTER(WHERE status=429)::int AS throttled,COUNT(*) FILTER(WHERE outcome='skipped')::int AS skipped
       FROM victron_http_usage WHERE requested_at>NOW()-INTERVAL '24 hours' GROUP BY component,trigger,scope,endpoint ORDER BY component,endpoint`),
-    db.query(`SELECT requested_at,component,endpoint,status,outcome,retry_at FROM victron_http_usage
-      WHERE status=429 OR outcome='transport_error' ORDER BY requested_at DESC LIMIT 10`),
+    db.query(`SELECT requested_at,component,endpoint,status,outcome,error_kind,retry_at FROM victron_http_usage
+      WHERE status=429 OR outcome IN ('transport_error','internal_error') ORDER BY requested_at DESC LIMIT 10`),
     db.query('SELECT last_attempt_at,next_scheduled_at FROM victron_catalogue_schedule WHERE id=true'),
   ]);
   return { checkedAt: new Date().toISOString(), states: states.rows, usage: usage.rows, recent: recent.rows, schedule: schedule.rows[0] || null };
