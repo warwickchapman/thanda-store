@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Made Admin → Companies a compact one-row-per-company list. Click a row to expand its pricing and people controls; links to a specific company open the right row automatically.
+
 - Kept the Thanda Store logo and product search at the top of every signed-in portal page. Search still filters the catalogue as you type; from other pages, Enter opens the matching catalogue results. The header stacks neatly on narrow screens, while sign-in and recovery keep their own focused layouts.
 
 - Added a dismissible product-details tip above the catalogue for each signed-in user's first visit on a browser, plus a permanent View details action on each card. Opening a product also dismisses the tip; returning visits stay clear of it.

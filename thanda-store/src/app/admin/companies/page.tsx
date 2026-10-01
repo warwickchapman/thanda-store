@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { CompanyDiscounts, type Company } from '@/components/admin/company-access';
 import { XeroContactFields, XeroPeopleAccess, type AdminUser } from '@/components/admin/user-admin';
 import { AdminMenu } from '@/components/admin/admin-menu';
@@ -36,6 +37,21 @@ export default function CompaniesPage() {
     }
     void loadInitialCompanies();
   }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    function openLinkedCompany() {
+      const id = window.location.hash.slice(1);
+      if (!/^company-\d+$/.test(id)) return;
+      const row = document.getElementById(id);
+      if (row instanceof HTMLDetailsElement) {
+        row.open = true;
+        row.scrollIntoView({ block: 'start' });
+      }
+    }
+    openLinkedCompany();
+    window.addEventListener('hashchange', openLinkedCompany);
+    return () => window.removeEventListener('hashchange', openLinkedCompany);
+  }, [loaded]);
 
   async function create(form: HTMLFormElement) {
     setBusy(true); setMessage(''); setError(''); setInvitedUserId(null); setInviteFailed(false);
@@ -67,13 +83,13 @@ export default function CompaniesPage() {
       <button disabled={busy || !contactId} className="h-10 justify-self-start rounded lg:col-span-6 bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{busy ? 'Creating and inviting…' : 'Create company and invite primary contact'}</button>
     </form></section>}
     <label className="mb-4 grid gap-1 text-sm font-semibold">Search companies<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Company name or Xero contact ID" className="h-10 rounded border bg-white px-3 font-normal" /></label>
-    <div className="space-y-4">{matching.map((company) => {
+    <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">{matching.map((company) => {
       const people = users.filter((user) => Number(user.organisation_id) === Number(company.id));
-      return <section id={`company-${company.id}`} key={company.id} className="scroll-mt-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:p-5"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="text-lg font-bold">{company.name}</h2><p className="mt-1 break-all text-xs text-zinc-500">{company.xero_contact_id ? `Xero contact: ${company.xero_contact_id}` : 'No Xero contact — staff or unlinked account group'}</p></div><span className="text-sm text-zinc-500">{people.length} {people.length === 1 ? 'user' : 'users'}</span></div>
+      return <details id={`company-${company.id}`} key={company.id} className="group scroll-mt-4"><summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-950 [&::-webkit-details-marker]:hidden"><span className="min-w-0 flex-1 truncate font-semibold" title={company.name}>{company.name}</span>{company.xero_contact_id && <span className="hidden shrink-0 text-sm text-zinc-500 sm:inline">Victron {company.discounts.victron ?? 30}% · Renogy {company.discounts.renogy ?? 30}%</span>}<span className="shrink-0 text-sm text-zinc-500">{people.length} {people.length === 1 ? 'user' : 'users'}</span><ChevronDown aria-hidden="true" size={18} className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180" /></summary><div className="border-t border-zinc-100 px-4 pb-4 pt-3 sm:px-5"><p className="mb-3 break-all text-xs text-zinc-500">{company.xero_contact_id ? `Xero contact: ${company.xero_contact_id}` : 'No Xero contact — staff or unlinked account group'}</p>
         {company.xero_contact_id && (canManage ? <CompanyDiscounts key={company.id} company={company} onChanged={load} /> : <p className="my-4 text-sm">Victron {company.discounts.victron ?? 30}% · Renogy {company.discounts.renogy ?? 30}% company discounts</p>)}
         <div className="border-t border-zinc-100 pt-3"><h3 className="mb-2 text-sm font-bold">Portal users</h3>{people.length ? <ul className="divide-y divide-zinc-100">{people.map((user) => <li key={user.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><div className="min-w-0"><p className="break-all font-medium">{user.email}</p><p className="text-xs text-zinc-500">{user.role === 'admin' ? 'Administrator' : 'Buyer'} · {user.is_active ? 'Active' : 'Disabled'}{user.api_enabled ? ' · API enabled' : ''}</p></div><Link href={`/admin/users/${user.id}`} className="font-semibold underline">{canManage ? 'Edit user' : 'View user'}</Link></li>)}</ul> : <p className="text-sm text-zinc-500">No portal users yet.</p>}</div>
         {canManage && company.xero_contact_id && <XeroPeopleAccess organisationId={Number(company.id)} contactId={company.xero_contact_id} portalUsers={users} onEnabled={load} />}
-      </section>;
+      </div></details>;
     })}</div>
     {!loaded && !error && <p className="py-4 text-sm text-zinc-500">Loading companies…</p>}
     {loaded && !matching.length && <p className="py-4 text-sm text-zinc-500">{companies.length ? 'No companies match your search.' : 'No companies yet.'}</p>}
