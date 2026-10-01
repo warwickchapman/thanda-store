@@ -3,6 +3,14 @@ function stockSku(value) {
   return sku.endsWith('R') ? sku.slice(0, -1) : sku;
 }
 
+export function skuReplacementContext(successions, sku) {
+  const article = stockSku(sku);
+  return {
+    replaces: [...new Set(successions.filter(row => stockSku(row.successor_sku) === article && stockSku(row.predecessor_sku) !== article).map(row => row.predecessor_sku))].sort(),
+    replacedBy: [...new Set(successions.filter(row => stockSku(row.predecessor_sku) === article && stockSku(row.successor_sku) !== article).map(row => row.successor_sku))].sort(),
+  };
+}
+
 /**
  * Returns a canonical key for a Victron replacement family. The predecessor
  * is the stable key, so historical sales and current successor stock group

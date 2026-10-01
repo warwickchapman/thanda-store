@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Simplified missing-Xero-item review: Create in Xero now opens the saved-price confirmation directly, while Other actions handles checks and stocking decisions separately. Added distinct Needs action, Awaiting Xero sync and Reviewed / archived views with non-overlapping counts. Replacement labels now explicitly say Replaces / Replaced by; accounting details and optional notes stay collapsed until needed. Product creation still requires confirmation and never changes stock quantities.
+
 - Data health now names the safe failure category for new Victron request failures, including redirect, DNS, TLS, connection, timeout and interrupted response. Older failures say their cause was not recorded. Raw errors and tracking URLs stay out of the ledger; this adds no supplier calls.
 - Added admin-reviewed creation of missing Victron products in Xero through the shared Hub. A price preview uses normal E-Order cost and cost / 0.525 selling price, excluding VAT. Creation never sends stock quantities or updates an existing SKU; duplicate and uncertain attempts are protected and audited.
 - Complete E-Order catalogue scans now archive unavailable predecessors and exhausted "Available until stock 0" products from purchasing and the missing-Xero queue. Reviewed / archived retains the supplier reason and a restore control. Existing Thanda stock, succession relationships, Xero records and sales history are preserved; incomplete scans cannot establish retirement.

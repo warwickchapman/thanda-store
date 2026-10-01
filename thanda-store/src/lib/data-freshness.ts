@@ -2,7 +2,7 @@ import pool from '@/lib/db';
 import { DATA_SOURCES, localStockObservation, supplierStockObservation, observationTime, summarizeSource } from './data-freshness.mjs';
 import { sourceRecovery, stockHealthIssues } from './data-health-actions.mjs';
 import { activeStockReview } from './stock-review.mjs';
-import { familyMemberSkus, victronSkuFamilyResolver } from './victron-sku-family.mjs';
+import { familyMemberSkus, victronSkuFamilyResolver, skuReplacementContext } from './victron-sku-family.mjs';
 
 export type StockSourceStatus = {
   id: string;
@@ -33,6 +33,7 @@ export type StockReviewItem = {
   family: string; familySkus: string[];
   purchasingRetiredReason?: string | null; creationPending?: boolean;
   purchasingRestored?: boolean;
+  replaces: string[]; replacedBy: string[];
 };
 export type DataHealth = { checkedAt: string; sources: DataSourceStatus[]; stockReviews?: StockReviewItem[] };
 type StoredState = Record<string, unknown>;
@@ -124,6 +125,7 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       note: String(review?.note || ''), reviewedAt: observationTime(review?.reviewed_at), observedAt: observationTime(details?.xeroStockSyncedAt),
       family: product.supplier === 'victron' ? familyFor(sku) : sku,
       familySkus: product.supplier === 'victron' ? familyMemberSkus(successions, sku) : [sku],
+      ...(product.supplier === 'victron' ? skuReplacementContext(successions, sku) : { replaces: [], replacedBy: [] }),
       purchasingRetiredReason: details?.purchasingRetiredReason ? String(details.purchasingRetiredReason) : null,
       creationPending: Boolean(details?.xeroCreatedItemId && details?.xeroStockStatus === 'missing'),
       purchasingRestored: details?.purchasingRetirementOverride === true,
