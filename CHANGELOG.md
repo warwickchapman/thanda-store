@@ -4,6 +4,9 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added admin-reviewed creation of missing Victron products in Xero through the shared Hub. A price preview uses normal E-Order cost and cost / 0.525 selling price, excluding VAT. Creation never sends stock quantities or updates an existing SKU; duplicate and uncertain attempts are protected and audited.
+- Complete E-Order catalogue scans now archive unavailable predecessors and exhausted "Available until stock 0" products from purchasing and the missing-Xero queue. Reviewed / archived retains the supplier reason and a restore control. Existing Thanda stock, succession relationships, Xero records and sales history are preserved; incomplete scans cannot establish retirement.
+
 - Reduced Victron catalogue checks to every four hours and separated the hourly shipment/backorder timer, so catalogue failures no longer block receiving updates. Added shared database-backed request pacing, persistent scoped cooldowns, bounded request counts and attribution by job/manual action. Data health now shows request activity, returned quota headers and retry deadlines, with a cooldown-protected catalogue retry. Resolved tracking links are cached; existing active cooldowns are preserved across deployment. Supplier stock freshness now allows five hours between observations; real unknown quantities remain unknown.
 
 - Sign-in, password reset and password setup now remain accessible when a browser retains an expired session cookie. Previously, the cookie's mere presence redirected recovery back to the store before a reset request could be submitted.
