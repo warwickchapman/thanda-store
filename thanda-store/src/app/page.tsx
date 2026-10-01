@@ -167,6 +167,7 @@ export default function Home() {
   const [cartOpen, setCartOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product|null>(null);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const [showDetailsHint, setShowDetailsHint] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -199,7 +200,14 @@ export default function Home() {
     fetch('/api/session')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data?.user) setSessionUser(data.user);
+        if (data?.user) {
+          setSessionUser(data.user);
+          try {
+            setShowDetailsHint(localStorage.getItem(`thanda-product-details-hint:${data.user.id}`) !== 'seen');
+          } catch {
+            setShowDetailsHint(true);
+          }
+        }
       })
       .catch(() => {});
 
@@ -207,6 +215,18 @@ export default function Home() {
       if (data) setCart(data);
     }).catch(() => {});
   }, []);
+
+  function dismissDetailsHint() {
+    setShowDetailsHint(false);
+    if (sessionUser) {
+      try { localStorage.setItem(`thanda-product-details-hint:${sessionUser.id}`, 'seen'); } catch { /* Storage may be unavailable. */ }
+    }
+  }
+
+  function openProductDetails(product: Product) {
+    setDetailProduct(product);
+    if (showDetailsHint) dismissDetailsHint();
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -539,6 +559,12 @@ export default function Home() {
                   </span>
                 </div>
               </div>
+              {showDetailsHint && (selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length > 0 && (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  <p><span className="font-semibold">Product details:</span> Select a product photo or name to see its description, specifications, stock, and available datasheets or manuals.</p>
+                  <button type="button" onClick={dismissDetailsHint} aria-label="Dismiss product details tip" className="shrink-0 rounded p-1 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"><X className="h-4 w-4" aria-hidden="true" /></button>
+                </div>
+              )}
               {selectedSupplier !== 'home' && activeFilterChips.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2" aria-label="Applied filters">
                   {activeFilterChips.map((chip) => <button key={chip.key} type="button" onClick={chip.remove}
@@ -555,7 +581,7 @@ export default function Home() {
                 {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (
                     <div key={product.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white transition-all duration-300 hover:shadow-2xl hover:-translate-y-1">
                       <div className="relative aspect-square w-full bg-zinc-50/50 overflow-hidden flex items-center justify-center p-6">
-                        <button type="button" onClick={() => setDetailProduct(product)} aria-label={`View details for ${product.name}`} className="h-full w-full"><ProductImage product={product} /></button>
+                        <button type="button" onClick={() => openProductDetails(product)} aria-label={`View details for ${product.name}`} className="h-full w-full"><ProductImage product={product} /></button>
                         {isUnavailable(product) && (
                           <span className="pointer-events-none absolute -right-10 top-7 z-20 w-40 rotate-45 bg-red-700 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-sm">
                             Not available
@@ -584,8 +610,9 @@ export default function Home() {
                         </div>
                         
                         <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
-                          <button type="button" onClick={() => setDetailProduct(product)} className="text-left hover:underline">{product.name}</button>
+                          <button type="button" onClick={() => openProductDetails(product)} className="text-left hover:underline">{product.name}</button>
                         </h3>
+                        <button type="button" onClick={() => openProductDetails(product)} className="mb-4 self-start text-xs font-semibold text-zinc-700 underline decoration-zinc-300 underline-offset-4 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700">View details</button>
                         <div className="mb-4 space-y-1 text-xs font-medium text-zinc-500">
                           {stockLines(product).map((line) => (
                             <div key={line}>{line}</div>
