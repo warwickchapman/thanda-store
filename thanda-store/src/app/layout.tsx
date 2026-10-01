@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ImpersonationBanner } from '@/components/impersonation-banner';
+import { StoreHeader, StoreSearchProvider } from '@/components/store-search';
 
 export const metadata: Metadata = {
   title: "Thanda Store",
@@ -14,7 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col"><ImpersonationBanner />{children}</body>
+      <body className="min-h-full flex flex-col"><ImpersonationBanner /><StoreSearchProvider><StoreHeader />{children}</StoreSearchProvider></body>
     </html>
   );
 }

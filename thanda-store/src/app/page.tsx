@@ -1,10 +1,11 @@
 'use client';
 import { formatCurrency } from "@/lib/utils";
 import Link from 'next/link';
-import { Search, Package, ShoppingCart, Info, LogOut, ReceiptText, Menu, X } from "lucide-react";
+import { Package, ShoppingCart, Info, LogOut, ReceiptText, Menu, X } from "lucide-react";
 import { useState, useEffect, useRef } from 'react';
 import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
+import { useStoreSearch } from '@/components/store-search';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters, productAvailability } from '@/lib/catalogue-filters.mjs';
@@ -155,7 +156,7 @@ export default function Home() {
   const [catalogueError, setCatalogueError] = useState('');
   const [favouritesError, setFavouritesError] = useState('');
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [query, setQuery] = useState('');
+  const { query, setQuery } = useStoreSearch();
   const [activeSupplier, setActiveSupplier] = useState('home');
   const [activeCategory, setActiveCategory] = useState('');
   const [attributeFilters, setAttributeFilters] = useState<SelectedFilters>({});
@@ -168,7 +169,6 @@ export default function Home() {
   const [detailProduct, setDetailProduct] = useState<Product|null>(null);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [showDetailsHint, setShowDetailsHint] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -294,13 +294,13 @@ export default function Home() {
         setQuery('');
         setActiveCategory('');
         setAttributeFilters({});
-        searchInputRef.current?.blur();
+        document.getElementById('store-product-search')?.blur();
         return;
       }
 
       if (event.key === 'Backspace') {
         event.preventDefault();
-        searchInputRef.current?.focus();
+        document.getElementById('store-product-search')?.focus();
         setQuery((current) => current.slice(0, -1));
         setActiveCategory('');
         setAttributeFilters({});
@@ -309,7 +309,7 @@ export default function Home() {
 
       if (event.key.length !== 1) return;
       event.preventDefault();
-      searchInputRef.current?.focus();
+      document.getElementById('store-product-search')?.focus();
       setQuery((current) => `${current}${event.key}`);
       setActiveCategory('');
       setAttributeFilters({});
@@ -317,6 +317,12 @@ export default function Home() {
 
     window.addEventListener('keydown', handleGlobalSearch);
     return () => window.removeEventListener('keydown', handleGlobalSearch);
+  }, [setQuery]);
+
+  useEffect(() => {
+    const clearSearchFilters = () => { setActiveCategory(''); setAttributeFilters({}); };
+    window.addEventListener('store-search-change', clearSearchFilters);
+    return () => window.removeEventListener('store-search-change', clearSearchFilters);
   }, []);
 
   const catalogueProducts = products.filter(isStorefrontProduct);
@@ -386,40 +392,12 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 font-sans text-zinc-900">
-      {/* Top Bar - Minimal */}
-      <header ref={headerRef} className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:min-h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-4">
-              <img
-                src="/logos/logo_icon_color.png"
-                alt="Thanda Store Icon"
-                className="h-10 w-10 shrink-0 object-contain"
-              />
-              <span className="truncate text-xl font-bold tracking-tight text-zinc-900">
-                THANDA STORE
-              </span>
-            </div>
-            <button ref={menuButtonRef} type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} aria-controls="store-navigation" onClick={() => setMobileMenuOpen(open => !open)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 sm:hidden">
-              {mobileMenuOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
-            </button>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search SKU or name..."
-                aria-label="Search products"
-                onFocus={() => setMobileMenuOpen(false)}
-                value={query}
-                onChange={(event) => { setQuery(event.target.value); setActiveCategory(''); setAttributeFilters({}); }}
-                className="h-9 w-full rounded-full border border-zinc-200 bg-zinc-50 pl-10 pr-4 text-sm focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
-              />
-            </div>
-            <nav id="store-navigation" aria-label="Main navigation" onClick={event => { if ((event.target as Element).closest('a, button')) setMobileMenuOpen(false); }} className={`${mobileMenuOpen ? 'flex' : 'hidden'} max-h-[calc(100dvh-8rem)] flex-col gap-2 overflow-y-auto border-t border-zinc-200 pt-3 sm:flex sm:max-h-none sm:flex-row sm:flex-wrap sm:overflow-visible sm:border-0 sm:pt-0`}>
+      <header ref={headerRef} className="border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex max-w-7xl flex-col items-end gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+          <button ref={menuButtonRef} type="button" aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileMenuOpen} aria-controls="store-navigation" onClick={() => setMobileMenuOpen(open => !open)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-zinc-200 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 sm:hidden">
+            {mobileMenuOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
+          </button>
+          <nav id="store-navigation" aria-label="Main navigation" onClick={event => { if ((event.target as Element).closest('a, button')) setMobileMenuOpen(false); }} className={`${mobileMenuOpen ? 'flex' : 'hidden'} max-h-[calc(100dvh-8rem)] w-full flex-col gap-2 overflow-y-auto border-t border-zinc-200 pt-3 sm:flex sm:w-auto sm:max-h-none sm:flex-row sm:flex-wrap sm:overflow-visible sm:border-0 sm:pt-0`}>
               {sessionUser && (
                 <div className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
                   {sessionUser.organisationName}
@@ -453,7 +431,6 @@ export default function Home() {
                 Logout
               </button>
             </nav>
-          </div>
         </div>
       </header>
 

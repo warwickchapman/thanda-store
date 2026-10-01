@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Kept the Thanda Store logo and product search at the top of every signed-in portal page. Search still filters the catalogue as you type; from other pages, Enter opens the matching catalogue results. The header stacks neatly on narrow screens, while sign-in and recovery keep their own focused layouts.
+
 - Added a dismissible product-details tip above the catalogue for each signed-in user's first visit on a browser, plus a permanent View details action on each card. Opening a product also dismisses the tip; returning visits stay clear of it.
 - Added **Admin menu → Products** to search the saved Thanda Xero products and services, identify items already in the catalogue, and add an unlisted item with a store name, description, category, photograph and selling price. Prices are in rand excluding VAT and are not reduced by company discounts. **Added from Xero** reopens these products for editing or hiding. Store edits and photos survive stock syncs; Xero remains the stock authority and is never changed by this workflow. Search and saves make no Xero API calls, preserve unknown stock, and prevent duplicate item imports.
 
