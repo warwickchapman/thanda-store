@@ -37,8 +37,9 @@ function UserAccessEditor({
     user.role === 'admin' ? 'admin' : 'buyer',
   );
   const [canManageUsers, setCanManageUsers] = useState(user.can_manage_users);
+  const hasChanges = role !== user.role || (role === 'admin' && canManageUsers) !== user.can_manage_users;
   return (
-    <div className="mb-4 grid gap-3 border-b border-zinc-100 pb-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+    <div className="mb-4 grid gap-3 border-b border-zinc-100 pb-4">
       <label className="grid gap-1 text-sm font-semibold">
         Access level
         <select
@@ -54,15 +55,7 @@ function UserAccessEditor({
           <option value="admin">Administrator</option>
         </select>
       </label>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onSave(role, role === 'admin' && canManageUsers)}
-        className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"
-      >
-        Save access
-      </button>
-      <label className="flex items-center gap-2 text-sm font-medium sm:col-span-2">
+      <label className="flex items-center gap-2 text-sm font-medium">
         <input
           type="checkbox"
           checked={canManageUsers}
@@ -71,10 +64,21 @@ function UserAccessEditor({
         />
         Manage users
       </label>
-      <p className="text-xs text-zinc-500 sm:col-span-2">
+      <p className="text-xs text-zinc-500">
         Administrators can access Admin and Inventory. Manage users can invite,
         change access, and manage user setup.
       </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={busy || !hasChanges}
+          onClick={() => onSave(role, role === 'admin' && canManageUsers)}
+          className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Save permissions'}
+        </button>
+        {hasChanges && <span role="status" className="text-sm text-amber-700">Unsaved changes</span>}
+      </div>
     </div>
   );
 }
