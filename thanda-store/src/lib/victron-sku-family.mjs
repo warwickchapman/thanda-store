@@ -1,4 +1,4 @@
-function stockSku(value) {
+export function stockSku(value) {
   const sku = String(value || '').trim().toUpperCase();
   return sku.endsWith('R') ? sku.slice(0, -1) : sku;
 }

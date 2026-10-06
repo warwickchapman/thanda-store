@@ -29,8 +29,12 @@ without automatically publishing them to the storefront.
   do not depend on the account defaults used for new products.
 - Click **Update** on a cost-change row to apply the displayed purchase cost immediately,
   without a second confirmation. The row shows progress and the outcome.
-- Select up to 50 cost changes in one company and confirm the batch. New products
-  are individually confirmed. There is no automatic Xero writing in scheduled jobs.
+- Click **Add to Xero** on a new-product row to create the displayed definition.
+  Its purchase cost and initial selling price are shown before adding.
+- Select up to 50 cost changes or up to 50 new products in one company and confirm
+  the batch. Additions and cost updates are separate selections. New-product
+  confirmation shows the initial cost, list selling price and zero opening balance.
+  There is no automatic Xero writing in scheduled jobs.
 - Changed proposals are rejected before any Xero request, with the number of affected
   selections shown. The page clears rejected selections and reloads the saved comparison
   for a new selection; it never automatically retries a write. Mixed-company selections
@@ -116,13 +120,33 @@ marks requested permissions as granted before Xero actually returns them.
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
 | Click Update for one cost change | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
 | Create one item | 1 filtered `GET /Items` + 1 create-only `PUT /Items` | Only on approval |
+| Confirm 1–50 new products | 1 `GET /Items` + 1 create-only `PUT /Items` batch | Only on approval |
 | Archive / quarterly record | 0 | 0 |
 | Operator reconciliation of one uncertain item | 1 filtered `GET /Items`; no write | Only on explicit investigation |
 
 The official GET Items operation returns the collection without a pagination
 parameter; the batch preflight uses one GET and indexes the reviewed codes locally.
-No per-item requests occur within a cost batch. For 1,000 changed costs this is
-20 batches / 40 Xero calls per company, plus any individual new-item actions.
+No per-item requests occur within a cost or creation batch. For 1,000 additions
+or changed costs this is 20 batches / 40 Xero calls per company. There is no
+automatic backfill or retry loop. One existing SKU stops the whole creation batch
+before writing; create-only PUT cannot update an existing item. Replacement labels
+and retail-packaging exclusions still come from the shared saved comparison. A
+creation batch cannot contain both standard and R retail packaging for one stock
+item; select one packaging version. Successor article codes remain distinct.
+
+Batch creation was checked against the official [Xero OpenAPI specification](https://github.com/XeroAPI/Xero-OpenAPI/blob/master/xero_accounting.yaml)
+on 2026-10-06: `PUT /Items` (`createItems`) accepts an Items array and an
+idempotency key. The existing `GET /Items` operation supports the single-item
+`where` filter; its complete collection is used once for a batch. Normal page
+loads and comparison refreshes continue to use saved Hub data only. Successful
+commands update the saved Items and refresh the comparison; uncertain outcomes
+retain the saved attempt for reconciliation, without resending any member.
+
+Xero's [published limits](https://developer.xero.com/documentation/best-practices/api-call-efficiencies/rate-limits/)
+are 60 calls/minute and five concurrent calls per tenant, with 1,000 daily calls
+on Starter or 5,000 on higher tiers. Actual returned allowances and retry deadlines
+remain authoritative; this feature retains the lower shared item-command ceiling
+and reserve described below for other sync and interactive work.
 
 All item command paths share a maximum of 100 attributed Xero requests per tenant
 per UTC day, at least 15 seconds between actions, and the connector's protected
@@ -165,10 +189,12 @@ and a `reconciled` event was added to the Store audit.
 
 - `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/xero-item-create.test.mjs`
   includes the actual Store route boundary with plain-text errors, lost connections,
-  audit failures, deferrals, stable selections and separate operation identifiers.
+  audit failures, deferrals, stable selections and separate operation identifiers,
+  plus 50-product creation batches for both companies, packaging conflicts,
+  mixed/stale selections and incomplete creation confirmations.
 - `DATABASE_URL=…/victron_review_test node test/victron-catalogue.integration.mjs`
   requires an isolated disposable PostgreSQL database; it resets only its test tables.
 - `npx tsc --noEmit --incremental false` and focused ESLint.
-- Companion Hub: `pytest tests/test_victron_commands.py tests/test_victron_connector.py tests/test_hub.py`
+- Companion Hub: `pytest tests/test_victron_creation.py tests/test_victron_commands.py tests/test_victron_connector.py tests/test_hub.py`
   with its isolated `xero_hub_test` database. Connector regressions use the real
   authenticated route, connector and database, mocking only upstream HTTP.

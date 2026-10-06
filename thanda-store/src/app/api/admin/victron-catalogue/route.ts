@@ -5,6 +5,7 @@ import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
 import { refreshReview } from '@/lib/victron-catalogue-service.mjs';
 import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
 import { ensureReviewSchema } from '@/lib/victron-catalogue-review.mjs';
+import { stockSku } from '@/lib/victron-sku-family.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 async function admin() { const user = await currentUser(); return user?.role === 'admin' && !user.impersonatedBy ? user : null; }
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   const user = await admin();
   if (!user || !validCustomerViewOrigin(request, { portalBaseUrl: process.env.PORTAL_BASE_URL, nodeEnv: process.env.NODE_ENV })) return NextResponse.json({ error: 'Same-origin administrator access required' }, { status: 403 });
   const body = await request.json().catch(() => null);
-  if (!body || !['refresh','acknowledge','apply','apply-batch','quarterly','archive-reviewed'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  if (!body || !['refresh','acknowledge','apply','apply-batch','apply-create-batch','quarterly','archive-reviewed'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   try {
     await ensureReviewSchema(pool);
     if (body.action === 'refresh') {
@@ -49,12 +50,17 @@ export async function POST(request: Request) {
     }
     // Rebuild from current saved evidence before every approval. No upstream Xero GET here.
     const fresh = await refreshReview(pool);
-    if (body.action === 'apply-batch') {
-      if (!Array.isArray(body.fingerprints) || !body.fingerprints.length || body.fingerprints.length > 50 || new Set(body.fingerprints).size !== body.fingerprints.length) return NextResponse.json({ error: 'Select 1–50 distinct cost changes.' }, { status: 400 });
+    if (body.action === 'apply-batch' || body.action === 'apply-create-batch') {
+      const creating = body.action === 'apply-create-batch';
+      const selectionName = creating ? 'new products' : 'cost changes';
+      if (!Array.isArray(body.fingerprints) || !body.fingerprints.length || body.fingerprints.length > 50 || body.fingerprints.some((value: unknown) => typeof value !== 'string') || new Set(body.fingerprints).size !== body.fingerprints.length) return NextResponse.json({ error: `Select 1–50 distinct ${selectionName}.` }, { status: 400 });
       const selected = fresh.rows.filter(r => body.fingerprints.includes(r.fingerprint));
-      if (selected.length !== body.fingerprints.length) return NextResponse.json({ code: 'STALE_SELECTION', error: `${body.fingerprints.length - selected.length} of ${body.fingerprints.length} selected proposals changed or are no longer available. No Xero updates were made. Review the latest comparison and select the costs again.` }, { status: 409 });
-      if (selected.some(r => r.kind !== 'price')) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This selection includes products that are not cost updates. No Xero updates were made. Select cost changes from the latest comparison.' }, { status: 409 });
-      if (selected.some(r => r.company !== selected[0].company)) return NextResponse.json({ code: 'INVALID_SELECTION', error: 'The selection includes both Thanda and Sensible. No Xero updates were made. Select cost changes for one company at a time.' }, { status: 409 });
+      if (selected.length !== body.fingerprints.length) return NextResponse.json({ code: 'STALE_SELECTION', error: `${body.fingerprints.length - selected.length} of ${body.fingerprints.length} selected proposals changed or are no longer available. No Xero changes were made. Review the latest comparison and select the ${creating ? 'products' : 'costs'} again.` }, { status: 409 });
+      if (selected.some(r => r.kind !== (creating ? 'new' : 'price'))) return NextResponse.json({ code: 'STALE_SELECTION', error: `This selection includes products that are not ${selectionName}. No Xero changes were made. Select ${selectionName} from the latest comparison.` }, { status: 409 });
+      if (selected.some(r => r.company !== selected[0].company)) return NextResponse.json({ code: 'INVALID_SELECTION', error: `The selection includes both Thanda and Sensible. No Xero changes were made. Select ${selectionName} for one company at a time.` }, { status: 409 });
+      // Packaging variants share stock, but predecessor/successor article codes
+      // remain separate definitions. Reuse the same packaging key as the review.
+      if (creating && new Set(selected.map(r => stockSku(r.sku))).size !== selected.length) return NextResponse.json({ code: 'INVALID_SELECTION', error: 'The selection contains retail and standard packaging for the same product. No Xero changes were made. Select one packaging version of each product.' }, { status: 409 });
       return await applyCommand(String(user.id), selected, true);
     }
     const row = fresh.rows.find((r: { fingerprint: string }) => r.fingerprint === body.fingerprint);

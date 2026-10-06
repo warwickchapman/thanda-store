@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { submitCatalogueCommand } from '../src/lib/victron-catalogue-command.mjs';
 import { validCustomerViewOrigin } from '../src/lib/auth/impersonation-origin.mjs';
+import { stockSku } from '../src/lib/victron-sku-family.mjs';
 
 // Exercise the actual Next route with real Web Request/Response objects. Only
 // auth, stored evidence and I/O are replaced; command/audit handling is real.
@@ -42,7 +43,7 @@ function harness(options = {}) {
     assert.equal(init.headers['X-Hub-Actor'], '7');
     calls.push({ company, path, payload });
     if (options.respond) return options.respond();
-    return Response.json({ Items: rows.map(row => ({ Code: row.sku, ItemID: row.itemId || 'new-item', PurchaseDetails: { UnitPrice: row.proposed } })) });
+    return Response.json({ Items: rows.map(row => ({ Code: row.sku, ItemID: row.itemId || `new-item-${row.sku}`, PurchaseDetails: { UnitPrice: row.proposed }, SalesDetails: { UnitPrice: row.list } })) });
   };
   const modules = {
     'next/server': { NextResponse: Response },
@@ -56,6 +57,7 @@ function harness(options = {}) {
     } },
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
     '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; } },
+    '@/lib/victron-sku-family.mjs': { stockSku },
   };
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: name => {
@@ -120,6 +122,119 @@ test('audit failure before dispatch prevents the write', async () => {
   const h = harness({ failAttempt: true });
   const result = await h.post();
   assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'NOT_SENT');
+  assert.equal(h.calls.length, 0);
+});
+
+function newProducts(count = 2, company = 'thanda-solar') {
+  return Array.from({ length: count }, (_, i) => ({ ...product, company,
+    fingerprint: `new-${company}-${i}`, sku: `NEW${i}`, kind: 'new', itemId: null, previous: null,
+    proposed: company === 'sensible-solar' ? 165.6 : 144.9 }));
+}
+const createBatch = rows => ({ action: 'apply-create-batch', fingerprints: rows.map(row => row.fingerprint) });
+
+for (const company of ['thanda-solar', 'sensible-solar']) {
+  test(`${company}: create 50 products through one audited Hub command with exact reviewed definitions`, async () => {
+    const rows = newProducts(50, company);
+    const h = harness({ rows });
+    const result = await h.post(createBatch(rows));
+    assert.equal(result.status, 200);
+    assert.equal(result.body.message, 'Xero confirmed 50 new products added.');
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].company, company);
+    assert.equal(h.calls[0].path, 'commands/victron-create');
+    const sent = h.calls[0].payload.proposals;
+    assert.equal(sent.length, 50);
+    assert.equal(new Set(sent.map(row => row.requestId)).size, 50);
+    for (let i = 0; i < sent.length; i++) {
+      assert.equal(sent[i].action, 'new');
+      assert.equal(sent[i].code, rows[i].sku);
+      assert.equal(sent[i].cost, rows[i].cost);
+      assert.equal(sent[i].list, rows[i].list);
+      assert.equal(sent[i].observedAt, rows[i].observedAt);
+      assert.equal(sent[i].expectedItemId, null);
+      assert.equal(sent[i].expectedCost, null);
+    }
+    assert.deepEqual(h.audit.map(event => event.action), ['batch-pending', 'batch-applied']);
+    assert.equal(h.audit[1].details.result.Items.length, 50);
+  });
+}
+
+test('Add to Xero submits one new product through the existing single-item command', async () => {
+  const rows = newProducts(1);
+  const h = harness({ rows });
+  const result = await h.post({ action: 'apply', fingerprint: rows[0].fingerprint });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.message, 'Xero confirmed 1 new product added.');
+  assert.equal(h.calls[0].path, 'commands/victron-items');
+  assert.equal(h.calls[0].payload.action, 'new');
+});
+
+test('creation batch cannot add both retail and standard packaging for one stock item', async () => {
+  const rows = newProducts();
+  rows[0].sku = 'PMP482305012';
+  rows[1].sku = 'PMP482305012R';
+  const h = harness({ rows });
+  const result = await h.post(createBatch(rows));
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'INVALID_SELECTION');
+  assert.match(result.body.error, /one packaging version/);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.audit.length, 0);
+});
+
+for (const [name, mutate, action, status] of [
+  ['changed creation proposal', rows => [...rows, { ...rows[0], fingerprint: 'old-fingerprint' }], 'apply-create-batch', 409],
+  ['empty selection', () => [], 'apply-create-batch', 400],
+  ['more than 50', () => newProducts(51), 'apply-create-batch', 400],
+  ['duplicate selection', rows => [rows[0], rows[0]], 'apply-create-batch', 400],
+  ['cost selection in creation action', () => [product], 'apply-create-batch', 409],
+  ['new selection in cost action', rows => rows, 'apply-batch', 409],
+  ['mixed companies', rows => [rows[0], ...newProducts(1, 'sensible-solar')], 'apply-create-batch', 409],
+  ['mixed new and cost products', rows => [rows[0], product], 'apply-create-batch', 409],
+]) test(`creation ${name}: rejected before audit or Hub call`, async () => {
+  const rows = newProducts();
+  const chosen = mutate(rows);
+  const h = harness({ rows: [...rows, product, ...newProducts(1, 'sensible-solar')] });
+  const result = await h.post({ action, fingerprints: chosen.map(row => row.fingerprint) });
+  assert.equal(result.status, status);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.audit.length, 0);
+});
+
+for (const [name, responseItems] of [
+  ['partial creation', items => items.slice(0, 1)],
+  ['incorrect selling price', items => items.map(item => ({ ...item, SalesDetails: { UnitPrice: 1 } }))],
+  ['repeated item identity', items => items.map(item => ({ ...item, ItemID: 'same-id' }))],
+  ['validation error', items => items.map(item => ({ ...item, ValidationErrors: [{ Message: 'Already exists' }] }))],
+]) test(`creation ${name}: recorded as uncertain with no automatic resend`, async () => {
+  const rows = newProducts();
+  const items = rows.map(row => ({ ItemID: `item-${row.sku}`, Code: row.sku,
+    PurchaseDetails: { UnitPrice: row.proposed }, SalesDetails: { UnitPrice: row.list } }));
+  const h = harness({ rows, respond: () => Response.json({ Items: responseItems(items) }) });
+  const result = await h.post(createBatch(rows));
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'UNKNOWN_OUTCOME');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.audit.at(-1).action, 'batch-unknown');
+});
+
+for (const [name, options] of [
+  ['anonymous', { user: null }], ['customer', { user: { id: 7, role: 'customer' } }],
+  ['impersonated admin', { user: { id: 7, role: 'admin', impersonatedBy: 9 } }],
+  ['cross origin', { origin: 'https://unrelated.invalid' }],
+]) test(`creation ${name}: forbidden before stored evidence or Hub access`, async () => {
+  const rows = newProducts();
+  const h = harness({ ...options, rows });
+  assert.equal((await h.post(createBatch(rows))).status, 403);
+  assert.equal(h.schemaCalls(), 0);
+  assert.equal(h.calls.length, 0);
+});
+
+test('creation audit failure prevents any write', async () => {
+  const rows = newProducts();
+  const h = harness({ rows, failAttempt: true });
+  const result = await h.post(createBatch(rows));
   assert.equal(result.body.code, 'NOT_SENT');
   assert.equal(h.calls.length, 0);
 });

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { prices } from './victron-pricing.mjs';
 export { prices } from './victron-pricing.mjs';
 import { retirementReason } from './xero-item-create.mjs';
-import { skuReplacementContext } from './victron-sku-family.mjs';
+import { skuReplacementContext, stockSku as article } from './victron-sku-family.mjs';
 
 export const companies = ['thanda-solar', 'sensible-solar'];
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -16,7 +16,6 @@ function comparison(row) {
   }
   return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'fingerprint'].includes(key)));
 }
-const article = sku => String(sku).toUpperCase().replace(/R$/, '');
 export function exclusion(product) {
   const sku = String(product.sku || '').toUpperCase();
   const description = `${product.description || ''} ${product.category || ''} ${product.subcategory || ''}`;
