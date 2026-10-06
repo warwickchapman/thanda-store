@@ -100,15 +100,21 @@ export async function refreshAccountDocuments(pool, hubFetch, contactId, options
           ]);
           snapshot = assertHubSnapshot(payload, snapshot);
           const pageObservedAt = timestamp(payload._hub.observed_at);
-          if (!pageObservedAt || (observedAt && observedAt !== pageObservedAt) || !Array.isArray(payload[key])) {
+          if (!pageObservedAt || !Array.isArray(payload[key])) {
             throw new Error('Saved account document evidence is incomplete; previous data is retained.');
           }
-          observedAt = pageObservedAt;
+          // Unchanged Hub scans advance observed_at without creating a new
+          // content revision. The pinned snapshot is the consistency guard;
+          // use the earliest observation conservatively for the whole stream.
+          observedAt = observedAt && observedAt < pageObservedAt ? observedAt : pageObservedAt;
           for (const raw of payload[key]) {
             const document = mappedDocument(type, raw, contactId, observedAt);
             if (document) documents.push(document);
           }
-          if (payload[key].length < PAGE_SIZE) return { documents, observedAt };
+          if (payload[key].length < PAGE_SIZE) {
+            for (const document of documents) document.synced_at = observedAt;
+            return { documents, observedAt };
+          }
         } finally { clearTimeout(timer); }
       }
       throw new Error('Saved account document collection exceeds the import limit; previous data is retained.');

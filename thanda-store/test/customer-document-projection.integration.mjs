@@ -39,7 +39,8 @@ test('real PostgreSQL projection publishes in batches and preserves the newer lo
         Reference: 'Old reference', Contact: { ContactID: 'company-a' } },
       { QuoteID: 'historical-quote', QuoteNumber: 'QU-before-acceptance', Contact: { ContactID: 'company-a' } }] : [];
       return Response.json({ [key]: all.slice((page - 1) * 100, page * 100),
-        _hub: { complete: true, snapshot: key, observed_at: '2026-10-06T11:00:00Z' } });
+        _hub: { complete: true, snapshot: key,
+          observed_at: key === 'Invoices' && page > 1 ? '2026-10-06T12:00:00Z' : '2026-10-06T11:00:00Z' } });
     };
     const result = await refreshAccountDocuments(pool, hub, 'company-a');
     assert.equal(result.count, 1107);
@@ -49,6 +50,9 @@ test('real PostgreSQL projection publishes in batches and preserves the newer lo
     assert.deepEqual(quote.rows[0], { document_number: 'QU-new', reference: 'Current reference' });
     const historicalQuote = await pool.query("SELECT document_number,reference FROM xero_customer_documents WHERE document_id='historical-quote'");
     assert.deepEqual(historicalQuote.rows[0], { document_number: 'QU-accepted', reference: 'Confirmed acceptance' });
+    const invoiceObservations = await pool.query("SELECT min(synced_at) AS oldest,max(synced_at) AS newest FROM xero_customer_documents WHERE contact_id='company-a' AND document_type='invoice'");
+    assert.equal(invoiceObservations.rows[0].oldest.toISOString(), '2026-10-06T11:00:00.000Z');
+    assert.equal(invoiceObservations.rows[0].newest.toISOString(), '2026-10-06T11:00:00.000Z');
     const state = await pool.query('SELECT last_successful_sync_at,source_observed_at,refresh_requested_at FROM xero_customer_document_sync_state');
     assert.ok(state.rows[0].last_successful_sync_at);
     assert.equal(state.rows[0].source_observed_at.toISOString(), '2026-10-06T11:00:00.000Z');

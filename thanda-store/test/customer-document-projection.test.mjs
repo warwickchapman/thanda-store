@@ -102,7 +102,7 @@ test('a multi-thousand document import uses bounded batch writes', async () => {
 for (const [name, secondPage] of [
   ['incomplete evidence', payload('Quotes', [], { complete: false })],
   ['changing snapshot', payload('Quotes', [], { snapshot: 'new-snapshot' })],
-  ['changing source observation', payload('Quotes', [], { observed_at: '2026-10-06T09:00:00.000Z' })],
+  ['invalid source observation', payload('Quotes', [], { observed_at: 'not-a-timestamp' })],
   ['missing collection', { _hub: { complete: true, snapshot: 'Quotes-snapshot', observed_at: OBSERVED } }],
 ]) {
   test(`${name} retains the old documents and leaves the refresh queued`, async () => {
@@ -117,6 +117,26 @@ for (const [name, secondPage] of [
     assert.match(error.text, /updated_at=NOW\(\)/);
     assert.doesNotMatch(error.text, /refresh_requested_at/);
     assert.equal(db.released, true);
+  });
+}
+
+for (const observations of [
+  [OBSERVED, '2026-10-06T09:00:00.000Z'],
+  ['2026-10-06T09:00:00.000Z', OBSERVED],
+]) {
+  test(`unchanged snapshot accepts observations ${observations.join(' then ')} conservatively`, async () => {
+    const db = database();
+    const request = hub({ Quotes: [
+      payload('Quotes', Array.from({ length: 100 }, (_, i) => quote(String(i))), { observed_at: observations[0] }),
+      payload('Quotes', [quote('100')], { observed_at: observations[1] }),
+    ] });
+    const result = await refreshAccountDocuments(db.pool, request.fetch, CONTACT);
+    assert.equal(result.refreshed, true);
+    assert.equal(result.count, 101);
+    const batch = db.queries.find(query => query.text.includes('jsonb_to_recordset'));
+    const documents = JSON.parse(batch.values[1]);
+    assert.ok(documents.every(document => document.synced_at === OBSERVED));
+    assert.equal(result.sourceObservedAt, OBSERVED);
   });
 }
 
