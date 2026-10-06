@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
-import { hubRequest } from '@/lib/xero/hub.mjs';
+import { catalogueHub } from '@/lib/victron-catalogue-service.mjs';
 import { itemCreationPreview } from '@/lib/xero-item-create.mjs';
 
 export const runtime = 'nodejs';
@@ -24,10 +24,10 @@ export async function POST(request: Request) {
     if (!preview.eligible) return NextResponse.json({ error: preview.reason }, { status: 409 });
     if (body.action === 'preview') return NextResponse.json(preview);
     if (body.fingerprint !== preview.fingerprint) return NextResponse.json({ error: 'The price or catalogue evidence changed. Preview again before confirming.' }, { status: 409 });
-    const response = await hubRequest('commands/items', {
+    const response = await catalogueHub('thanda-solar', 'commands/victron-items', {
       method: 'POST', signal: AbortSignal.timeout(75000),
       headers: { 'Content-Type': 'application/json', 'X-Hub-Actor': String(user.id) },
-      body: JSON.stringify(preview.payload),
+      body: JSON.stringify({ ...preview.payload, requestId: preview.fingerprint }),
     });
     const result = await response.json();
     if (!response.ok) return NextResponse.json({ error: typeof result.detail === 'string' ? result.detail : 'Xero Hub could not complete creation. Check Data health before retrying.' }, { status: response.status, headers: response.headers.has('Retry-After') ? { 'Retry-After': response.headers.get('Retry-After')! } : {} });

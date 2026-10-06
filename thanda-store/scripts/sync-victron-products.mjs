@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { saveCatalogueEvidence } from '../src/lib/victron-catalogue-review.mjs';
 import { recordCatalogueLifecycle } from '../src/lib/xero-item-create.mjs';
 import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '../src/lib/victron-http.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
@@ -308,7 +309,7 @@ async function main() {
     }
     if (!stats.failed.length) {
       await client.query('BEGIN');
-      try { await recordCatalogueLifecycle(client, products, observedAt); await client.query('COMMIT'); }
+      try { await recordCatalogueLifecycle(client, products, observedAt); await saveCatalogueEvidence(client, products, observedAt); await client.query('COMMIT'); }
       catch (error) { await client.query('ROLLBACK'); throw error; }
     }
   } finally {

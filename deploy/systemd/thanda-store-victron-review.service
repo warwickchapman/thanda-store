@@ -1,0 +1,11 @@
+[Unit]
+Description=Review saved Victron pricing and availability for both Xero companies
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store-supplier.env
+EnvironmentFile=/etc/thanda-store-xero.env
+ExecStart=/usr/bin/npm run review:victron

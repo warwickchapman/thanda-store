@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added a daily Victron catalogue review for Thanda and Sensible. Thanda uses normal E-Order ZAR cost; Sensible uses E-Order list less 40%. Administrators can approve up to 50 purchase-cost changes together or create a missing item, with price rechecks and an audit trail. Existing selling prices, quantities and stock valuation are preserved. Full supplier evidence discovers products outside the Store assortment, excludes South African solar panels, and flags replacement/packaging relationships. In-app change alerts, a manual Xero archive checklist and quarterly sanity-check records complete the workflow. Companion Hub deployment, a dedicated two-company service identity and timer enablement are required; no live changes are made by installing source files alone.
+
 - Moved **Save permissions** below Access level and Manage users on the user editor. It now highlights pending changes, so checking Manage users clearly requires a deliberate save.
 
 - Made Admin → Companies a compact one-row-per-company list. Click a row to expand its pricing and people controls; links to a specific company open the right row automatically.

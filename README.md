@@ -791,3 +791,7 @@ See [Customer commerce](docs/customer-commerce.md) for the local quote ledger an
 ### Mobile navigation
 
 Below 640 px, the storefront header shows the brand, a labelled hamburger button and product search. The expandable navigation contains the same company, account, API, admin, cart and logout controls as desktop, with the same permission checks. Selecting an action, focusing search, clicking outside or pressing Escape closes it; Escape returns focus to the trigger. Opening the menu performs no additional API requests.
+
+### Daily Victron catalogue and Xero cost review
+
+Admin → Victron catalogue review adds daily comparison for both companies, reviewed cost batches, new-product creation, a manual archive checklist and quarterly sanity-check records. E-Order remains the price authority. See [workflow, API budget and enablement](docs/victron-catalogue-review.md). The Store assortment allowlist remains separate from full-catalogue inventory discovery.

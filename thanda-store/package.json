@@ -29,7 +29,8 @@
     "test:catalogue-filters": "node --test test/catalogue-filters.test.mjs",
     "backfill:catalogue-attributes": "node scripts/backfill-catalogue-attributes.mjs",
     "test:customer-commerce": "node --test test/customer-commerce.test.mjs",
-    "test:customer-commerce:db": "RUN_COMMERCE_DB_TESTS=1 node test/customer-commerce.integration.mjs"
+    "test:customer-commerce:db": "RUN_COMMERCE_DB_TESTS=1 node test/customer-commerce.integration.mjs",
+    "review:victron": "node scripts/review-victron-catalogue.mjs"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Victron catalogue review at 07:00 South African time
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 Africa/Johannesburg
+RandomizedDelaySec=90
+Persistent=true
+Unit=thanda-store-victron-review.service
+
+[Install]
+WantedBy=timers.target

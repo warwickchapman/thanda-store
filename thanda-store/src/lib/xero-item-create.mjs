@@ -21,13 +21,15 @@ export function itemCreationPreview(product, successions, now = Date.now()) {
   else if (d.cataloguePresent !== true) reason = successor ? `Review successor ${successor}; this SKU has no current catalogue evidence.` : 'Wait for a successful E-Order catalogue sync to verify this item.';
   const age = now - Date.parse(d.catalogueObservedAt || '');
   if (!reason && (!Number.isFinite(age) || age < -300000 || age > 86400000)) reason = 'Refresh the E-Order catalogue: price evidence must be less than 24 hours old.';
-  if (!reason && d.currency !== 'ZAR') reason = 'A verified ZAR cost price is required.';
+  if (!reason && d.catalogueCurrency !== 'ZAR') reason = 'A verified ZAR cost price is required.';
   const cost = Number(d.cataloguePrice);
   if (!reason && (d.cataloguePrice == null || !Number.isFinite(cost) || cost <= 0)) reason = 'No valid E-Order cost price. Review the catalogue sync.';
-  // Integer cents: division by 0.525 = multiplication by 40/21.
+  const listed = Number(d.catalogueListPrice);
+  if (!reason && (d.catalogueListPrice == null || !Number.isFinite(listed) || listed <= 0)) reason = 'No verified E-Order list price for the new selling price. Refresh the catalogue.';
+  if (!reason && (/^(SPM|SPP)/.test(product.sku) || /\bsolar panels?\b/i.test(product.name))) reason = 'Victron solar panels are excluded in South Africa.';
   const cents = Math.round(cost * 100);
-  const selling = Math.round(cents * 40 / 21) / 100;
-  const payload = { code: product.sku, name: product.name, cost: (cents / 100).toFixed(2), observedAt: d.catalogueObservedAt };
+  const selling = Math.round(listed * 100) / 100;
+  const payload = { code: product.sku, name: product.name, cost: cents / 100, list: selling, action: 'new', expectedItemId: null, expectedCost: null, observedAt: d.catalogueObservedAt };
   return { eligible: !reason, reason, cost: cents / 100, selling, successor: successor || null,
     observedAt: d.catalogueObservedAt || null, payload,
     fingerprint: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
@@ -47,7 +49,7 @@ export async function recordCatalogueLifecycle(db, catalogue, observedAt) {
     const reason = retirementReason(product, row, successors.get(product.sku));
     await db.query(`UPDATE products SET details=details || $2::jsonb WHERE supplier='victron' AND sku=$1`, [product.sku, JSON.stringify({
       cataloguePresent: Boolean(row), catalogueObservedAt: observedAt,
-      cataloguePrice: row?.price ?? null,
+      catalogueCurrency: row?.currency ?? null, cataloguePrice: row?.price ?? null, catalogueListPrice: row?.enduser_price_zar?.price ?? null,
       purchasingRetiredReason: reason,
       purchasingRetiredAt: reason ? product.details?.purchasingRetiredAt || observedAt : null,
     })]);
