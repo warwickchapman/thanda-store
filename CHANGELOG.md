@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Victron update errors now distinguish changed proposals from mixed-company selections, report how many selected proposals changed, and confirm when no Xero writes occurred. Rejected selections are cleared and the latest saved comparison reloads automatically; updates are never retried automatically.
+
+- Victron cost-change rows now have an **Update** button that applies the displayed cost immediately, with progress and outcome shown on the row. The extra confirmation at the bottom of the page is removed for individual cost updates; batch updates and new products retain their confirmation.
+
 - Missing Victron list prices now fall back to normal E-Order Thanda cost divided by 0.525. The calculated list is labelled in review and creation previews, and supplies Sensible’s list-less-40% cost and new-item selling price. Explicit supplier list prices retain precedence.
 
 - Fixed quote requests that reported “Hub 400” after Xero silently created a draft instead of the configured SENT status. The Admin draft/SENT switch remains; SENT now uses a separate, idempotent status update after draft creation. If either outcome is uncertain, the buyer is told to contact sales with the same reference rather than start another request. Customer copy now describes a quote request accurately for either setting.

@@ -21,9 +21,15 @@ without automatically publishing them to the storefront.
   list selling price. Account mappings: Thanda inventory 631, COGS 311, sales 201;
   Sensible inventory 630, COGS 310, sales 200; INPUT3/OUTPUT3. Hub checks active
   account types and tax mappings before writing.
+- Click **Update** on a cost-change row to apply the displayed purchase cost immediately,
+  without a second confirmation. The row shows progress and the outcome.
 - Select up to 50 cost changes in one company and confirm the batch. New products
   are individually confirmed. There is no automatic Xero writing in scheduled jobs.
-- Confirmation refreshes the comparison from saved evidence. Supplier and Xero
+- Changed proposals are rejected before any Xero request, with the number of affected
+  selections shown. The page clears rejected selections and reloads the saved comparison
+  for a new selection; it never automatically retries a write. Mixed-company selections
+  have a separate error.
+- Applying an update refreshes the comparison from saved evidence. Supplier and Xero
   evidence must be complete and less than 24 hours old. The Hub then checks the
   exact live item IDs and reviewed costs before dispatch. Any mismatch stops the
   whole proposed batch before its write.
@@ -88,7 +94,7 @@ validation; no OAuth grant or capability is changed by this implementation.
 | Full catalogue evidence save | 0 additional; uses existing validated catalogue fetch | 0 additional |
 | Compare saved Items | Up to 50 local Hub pages per company, 1,000 items/page; **0 Xero** | 0 Xero |
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
-| Confirm one cost update | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
+| Click Update for one cost change | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
 | Create one item | 1 filtered `GET /Items` + 1 create-only `PUT /Items` | Only on approval |
 | Archive / quarterly record | 0 | 0 |
 

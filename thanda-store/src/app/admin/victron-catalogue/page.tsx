@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from '@/components/admin/admin-menu';
 type Row = { fingerprint: string; company: string; sku: string; name: string; kind: string; reason?: string; previous?: number; proposed?: number; list?: number; listSource?: string; stock?: number; replaces: string[]; replacedBy: string[]; eligibleForArchiveReview?: boolean };
 type AuditEvent = { created_at: string; actor: string; action: string; company?: string; sku?: string; details: { note?: string; changes?: { sku: string; previous?: number; proposed?: number }[]; result?: { error?: string } } };
@@ -10,6 +10,8 @@ export default function VictronCatalogue() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const actionPending = useRef(false);
+  const [activeUpdate, setActiveUpdate] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('price');
   const [company, setCompany] = useState('thanda-solar');
@@ -34,14 +36,24 @@ export default function VictronCatalogue() {
     return () => controller.abort();
   }, []);
   async function action(body: Record<string, unknown>) {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    setActiveUpdate(body.action === 'apply' && typeof body.fingerprint === 'string' ? body.fingerprint : null);
     setBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch('/api/admin/victron-catalogue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error);
+      if (!response.ok) {
+        if (payload.code === 'STALE_SELECTION' || payload.code === 'INVALID_SELECTION') {
+          setSelected([]); setConfirmBatch(false); setProposal(null);
+          try { await load(); }
+          catch { throw new Error(`${payload.error} The comparison could not be refreshed; click Compare saved records before trying again.`); }
+        }
+        throw new Error(payload.error);
+      }
       setMessage(payload.message); setProposal(null); setSelected([]); setConfirmBatch(false); await load(); window.dispatchEvent(new Event('victron-catalogue-changed'));
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to complete action'); }
-    finally { setBusy(false); }
+    finally { actionPending.current = false; setBusy(false); }
   }
   const stale = data?.overdue ?? true;
   const rows = (data?.rows || []).filter(r => r.company === company && r.kind === kind && `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase()));
@@ -63,7 +75,7 @@ export default function VictronCatalogue() {
     {confirmBatch && <section aria-label="Confirm cost batch" className="rounded border-2 border-sky-700 bg-white p-4"><h2 className="font-bold">Confirm {selected.length} cost updates for {company === 'thanda-solar' ? 'Thanda' : 'Sensible'}</h2><p className="my-3 text-sm">Only the selected purchase costs shown below will change. Prices are checked again before writing. An uncertain result stops retries until reconciled.</p><button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'apply-batch', fingerprints: selected })}>{busy ? 'Working…' : 'Confirm selected cost updates'}</button></section>}
     {kind === 'archive' && <p className="rounded bg-amber-50 p-3 text-sm">Archive in Xero only after checking stock and outstanding orders. This page records your completion; it cannot archive through the Xero API.</p>}
     <div className="overflow-x-auto rounded border bg-white"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">Product</th><th>Current cost</th><th>Proposed cost</th><th>Change</th><th className="p-3">Action / reason</th></tr></thead><tbody>
-      {rows.slice(0,limit).map(r => <tr key={r.fingerprint} className="border-b align-top"><td className="p-3">{r.kind === 'price' && <input type="checkbox" aria-label={`Select ${r.sku}`} className="mr-2" checked={selected.includes(r.fingerprint)} disabled={busy || (!selected.includes(r.fingerprint) && selected.length >= 50)} onChange={e => { setSelected(e.target.checked ? [...selected,r.fingerprint] : selected.filter(f => f !== r.fingerprint)); setConfirmBatch(false); }} />}<b>{r.sku}</b><p>{r.name}</p>{r.listSource === 'calculated' && <p className="text-xs text-zinc-600">List calculated: E-Order cost ÷ 0.525</p>}{r.replaces.length > 0 && <p className="text-xs">Replaces {r.replaces.join(', ')}</p>}{r.replacedBy.length > 0 && <p className="text-xs">Replaced by {r.replacedBy.join(', ')}</p>}</td><td className="py-3 whitespace-nowrap">{money(r.previous)}</td><td className="py-3 whitespace-nowrap">{money(r.proposed)}</td><td className="py-3">{r.previous != null && r.proposed != null ? `${money(r.proposed-r.previous)}${r.previous > 0 ? ` (${((r.proposed/r.previous-1)*100).toFixed(1)}%)` : ''}` : '—'}</td><td className="p-3 max-w-sm">{r.reason || <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => setProposal(r)}>{r.kind === 'new' ? 'Review creation' : 'Review update'}</button>}{r.kind === 'archive' && <><p>Stock: {r.stock ?? 'Unknown'}</p><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></>}</td></tr>)}
+      {rows.slice(0,limit).map(r => <tr key={r.fingerprint} className="border-b align-top"><td className="p-3">{r.kind === 'price' && <input type="checkbox" aria-label={`Select ${r.sku}`} className="mr-2" checked={selected.includes(r.fingerprint)} disabled={busy || (!selected.includes(r.fingerprint) && selected.length >= 50)} onChange={e => { setSelected(e.target.checked ? [...selected,r.fingerprint] : selected.filter(f => f !== r.fingerprint)); setConfirmBatch(false); }} />}<b>{r.sku}</b><p>{r.name}</p>{r.listSource === 'calculated' && <p className="text-xs text-zinc-600">List calculated: E-Order cost ÷ 0.525</p>}{r.replaces.length > 0 && <p className="text-xs">Replaces {r.replaces.join(', ')}</p>}{r.replacedBy.length > 0 && <p className="text-xs">Replaced by {r.replacedBy.join(', ')}</p>}</td><td className="py-3 whitespace-nowrap">{money(r.previous)}</td><td className="py-3 whitespace-nowrap">{money(r.proposed)}</td><td className="py-3">{r.previous != null && r.proposed != null ? `${money(r.proposed-r.previous)}${r.previous > 0 ? ` (${((r.proposed/r.previous-1)*100).toFixed(1)}%)` : ''}` : '—'}</td><td className="p-3 max-w-sm">{r.reason || <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => r.kind === 'price' ? action({ action: 'apply', fingerprint: r.fingerprint, confirmed: true }) : setProposal(r)}>{r.kind === 'new' ? 'Review creation' : busy && activeUpdate === r.fingerprint ? 'Updating…' : 'Update'}</button>}{activeUpdate === r.fingerprint && (error || message) && <p role={error ? 'alert' : 'status'} className={`mt-2 text-sm ${error ? 'text-amber-800' : 'text-green-800'}`}>{error || message}</p>}{r.kind === 'archive' && <><p>Stock: {r.stock ?? 'Unknown'}</p><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></>}</td></tr>)}
     </tbody></table>{!rows.length && <p className="p-4">No matching proposals in the saved comparison.</p>}</div>
     {rows.length > limit && <button className={button} onClick={() => setLimit(limit+50)}>Show more</button>}
     {proposal && <section className="rounded border-2 border-sky-700 bg-white p-4" aria-label="Confirm item change"><h2 className="font-bold">{proposal.company === 'thanda-solar' ? 'Thanda' : 'Sensible'} · {proposal.sku}</h2><p className="my-3">{proposal.kind === 'archive' ? 'Confirm you checked outstanding orders, stock is zero, and you have completed archival in Xero.' : `${proposal.kind === 'new' ? 'Create product' : 'Update purchase cost'}: ${money(proposal.previous)} → ${money(proposal.proposed)}.${proposal.kind === 'new' ? ` Selling price: ${money(proposal.list)}.` : ''}`}</p><div className="flex gap-3"><button className={button} disabled={busy} onClick={() => action({ action: proposal.kind === 'archive' ? 'archive-reviewed' : 'apply', fingerprint: proposal.fingerprint, confirmed: true })}>{busy ? 'Working…' : 'Confirm'}</button><button className={button} disabled={busy} onClick={() => setProposal(null)}>Cancel</button></div></section>}

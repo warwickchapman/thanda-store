@@ -43,7 +43,9 @@ export async function POST(request: Request) {
     if (body.action === 'apply-batch') {
       if (!Array.isArray(body.fingerprints) || !body.fingerprints.length || body.fingerprints.length > 50 || new Set(body.fingerprints).size !== body.fingerprints.length) return NextResponse.json({ error: 'Select 1–50 distinct cost changes.' }, { status: 400 });
       const selected = fresh.rows.filter(r => body.fingerprints.includes(r.fingerprint));
-      if (selected.length !== body.fingerprints.length || selected.some(r => r.kind !== 'price' || r.company !== selected[0].company)) return NextResponse.json({ error: 'Proposals changed or span companies. Reload and review again.' }, { status: 409 });
+      if (selected.length !== body.fingerprints.length) return NextResponse.json({ code: 'STALE_SELECTION', error: `${body.fingerprints.length - selected.length} of ${body.fingerprints.length} selected proposals changed or are no longer available. No Xero updates were made. Review the latest comparison and select the costs again.` }, { status: 409 });
+      if (selected.some(r => r.kind !== 'price')) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This selection includes products that are not cost updates. No Xero updates were made. Select cost changes from the latest comparison.' }, { status: 409 });
+      if (selected.some(r => r.company !== selected[0].company)) return NextResponse.json({ code: 'INVALID_SELECTION', error: 'The selection includes both Thanda and Sensible. No Xero updates were made. Select cost changes for one company at a time.' }, { status: 409 });
       const proposals = selected.map(row => ({ code: row.sku, name: row.name, cost: row.cost, list: row.list,
         observedAt: row.observedAt, action: row.kind, expectedItemId: row.itemId,
         expectedCost: row.previous, requestId: row.fingerprint }));
@@ -58,7 +60,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: `Xero confirmed ${selected.length} cost updates.` });
     }
     const row = fresh.rows.find((r: { fingerprint: string }) => r.fingerprint === body.fingerprint);
-    if (!row) return NextResponse.json({ error: 'Evidence changed. Reload and review the new proposal.' }, { status: 409 });
+    if (!row) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This proposal changed or is no longer available. No Xero updates were made. Review the latest comparison before trying again.' }, { status: 409 });
     if (body.action === 'archive-reviewed') {
       if (row.kind !== 'archive' || !row.eligibleForArchiveReview || row.stock !== 0 || body.confirmed !== true) return NextResponse.json({ error: 'Archive checklist requires confirmed supplier retirement evidence, known zero stock, and your confirmation that open orders were checked and archival completed in Xero.' }, { status: 409 });
       await pool.query("INSERT INTO victron_catalogue_events(actor,action,company,sku,details) VALUES($1,'archive-reviewed',$2,$3,$4)", [String(user.id), row.company, row.sku, JSON.stringify(row)]);
