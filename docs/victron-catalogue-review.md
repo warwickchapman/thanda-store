@@ -82,6 +82,11 @@ or instructions to archive. PDF price extraction/comparison remains a manual che
    `read,victron:write`; set its secret as `XERO_CATALOGUE_HUB_TOKEN` in the Store
    server environment and `/etc/thanda-store-xero.env`. Do not broaden the ordinary
    Thanda caller or expose this token to the browser. `XERO_HUB_URL` is also required.
+   Both Xero organisations must separately consent to explicit item management
+   (`accounting.settings`). Reconnect using Sensible Cloud's existing Thanda and
+   Sensible connection links; the Hub requests this scope alongside existing
+   permissions and only records it as granted after a successful Xero callback.
+   Missing consent blocks item commands locally, before any Xero request.
 3. The next complete supplier sync saves the full catalogue evidence. It adds no
    supplier calls. Tables initialise idempotently on sync/review.
 4. Run `npm run review:victron` with both supplier database and Xero Hub environments.
@@ -96,8 +101,12 @@ or instructions to archive. PDF price extraction/comparison remains a manual che
 ## API budget and failure behaviour
 
 Official contract checked against Xero OpenAPI `xero_accounting.yaml` and the
-OAuth scopes reference on 2026-10-06. Reuse the Hub's existing item-write scope
-validation; no OAuth grant or capability is changed by this implementation.
+OAuth scopes reference on 2026-10-06. Xero's guide lists Items under both invoices
+and settings, but the production grant with invoice access and read-only settings
+received HTTP 401 on item writes. The catalogue now requires explicit
+`accounting.settings` consent; it does not infer item-write readiness from invoice
+access. Existing Hub caller capabilities remain unchanged, and reconnecting never
+marks requested permissions as granted before Xero actually returns them.
 
 | Path | Upstream calls per run | Scheduled daily cost |
 | --- | --- | --- |
