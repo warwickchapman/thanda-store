@@ -3,6 +3,7 @@
 // Projects completed Hub webhook evidence into portal sales and access state.
 // It makes no Xero calls and leaves unfinished Hub events queued for retry.
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
+import { refreshAccountDocuments } from '../src/lib/xero/customer-document-projection.mjs';
 import pg from 'pg';
 
 const INITIAL_WINDOW_DAYS = 365;
@@ -103,6 +104,12 @@ async function markFailure(client, ids, error) {
 }
 
 async function ensureSchema(client) {
+  await client.query(`CREATE TABLE IF NOT EXISTS xero_customer_document_sync_state (
+    contact_id TEXT PRIMARY KEY,last_successful_sync_at TIMESTAMPTZ,last_error TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+  await client.query(`ALTER TABLE xero_customer_document_sync_state
+    ADD COLUMN IF NOT EXISTS source_observed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS refresh_requested_at TIMESTAMPTZ`);
   await client.query(`CREATE TABLE IF NOT EXISTS xero_invoice_sync_state (id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_successful_sync_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await client.query(`CREATE TABLE IF NOT EXISTS xero_sales_invoice_lines (invoice_id TEXT NOT NULL, contact_id TEXT NOT NULL, invoice_date DATE NOT NULL, updated_at TIMESTAMPTZ NOT NULL, sku TEXT NOT NULL, quantity NUMERIC(14,3) NOT NULL CHECK (quantity <> 0), PRIMARY KEY (invoice_id, sku))`);
   await client.query('ALTER TABLE xero_sales_invoice_lines DROP CONSTRAINT IF EXISTS xero_sales_invoice_lines_quantity_check');
@@ -188,6 +195,28 @@ async function main() {
         } catch (error) {
           if (error?.code === 'XERO_DAILY_LIMIT') throw error;
           await markFailure(client, eventIds, error);
+        }
+      }
+      // Publish at most one company's complete stored Hub history per run.
+      // Accounts never waits for this potentially large import; failures retain
+      // the prior snapshot and the durable refresh request for the next timer.
+      const pendingAccount = await client.query(`
+        SELECT contacts.contact_id FROM (
+          SELECT DISTINCT o.xero_contact_id AS contact_id FROM organisations o
+          JOIN portal_users u ON u.organisation_id=o.id AND u.is_active
+          WHERE o.xero_contact_id IS NOT NULL
+        ) contacts LEFT JOIN xero_customer_document_sync_state s USING(contact_id)
+        WHERE (s.refresh_requested_at IS NOT NULL OR s.last_successful_sync_at IS NULL
+          OR s.last_successful_sync_at < now()-interval '6 hours')
+          AND (s.last_error IS NULL OR s.updated_at < now()-interval '5 minutes')
+        ORDER BY (s.last_error IS NOT NULL),(s.refresh_requested_at IS NULL),
+          s.updated_at NULLS FIRST,contacts.contact_id
+        LIMIT 1`);
+      if (pendingAccount.rows[0]) {
+        try {
+          stats.accountHistory = await refreshAccountDocuments(pool, hubFetch, pendingAccount.rows[0].contact_id);
+        } catch {
+          stats.accountHistory = { refreshed: false, error: 'Stored account history import failed; previous snapshot retained.' };
         }
       }
       console.log(JSON.stringify(stats, null, 2));

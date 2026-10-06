@@ -5,9 +5,9 @@ import { auditAccountAction, customerDocumentsPage, type CustomerDocumentView } 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   try {
+    const user = await currentUser();
+    if (!user) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
     const refresh = request.nextUrl.searchParams.get('refresh') === '1';
     const page = Number(request.nextUrl.searchParams.get('page') || '1');
     const query = request.nextUrl.searchParams.get('query') || '';
@@ -16,8 +16,11 @@ export async function GET(request: NextRequest) {
       ? requestedView as CustomerDocumentView : 'current';
     const result = await customerDocumentsPage(user, { refresh, page, query, view, quoteId: request.nextUrl.searchParams.get('quote') || undefined });
     await auditAccountAction(user, 'account_documents_viewed', 'account', user.xeroContactId || undefined, { refresh, page: result.page, view, query: query || null });
-    return NextResponse.json({ ...result, refreshed: refresh });
+    return NextResponse.json({ ...result, refreshed: refresh && result.sync.pending }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to load account documents.' }, { status: 502 });
+    console.error('Account documents read failed:', error instanceof Error ? error.message : 'Unknown error');
+    const message = error instanceof Error && error.message === 'Your account is not linked to a Xero customer.'
+      ? error.message : 'Unable to load account documents. Please try Refresh again.';
+    return NextResponse.json({ error: message }, { status: 502, headers: { 'Cache-Control': 'private, no-store' } });
   }
 }

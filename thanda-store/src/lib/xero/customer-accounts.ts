@@ -1,17 +1,12 @@
 import crypto from 'node:crypto';
-import { assertHubSnapshot } from '@/lib/xero/hub.mjs';
+import { cacheCreatedQuote } from '@/lib/commerce/quote-requests.mjs';
 import pool from '@/lib/db';
 import { ensureAuthSchema } from '@/lib/auth/schema';
 import type { PortalUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 
-// Customer documents are a local snapshot. Invoice and credit-note changes
-// arrive through webhooks; a six-hour collection refresh is only the safety
-// net for quote changes and missed deliveries, not a browser-page side effect.
-const CACHE_TTL_MS = 6 * 60 * 60_000;
-const FORCED_REFRESH_COOLDOWN_MS = 30 * 60_000;
-const PAGE_SIZE = 100;
-const MAX_PAGES = 1000;
+// Accounts reads only its local snapshot. The existing webhook worker imports
+// complete stored Hub history in the background, with zero Xero calls here.
 export type CustomerDocument = {
   type: 'quote' | 'invoice' | 'credit_note';
   id: string;
@@ -35,35 +30,17 @@ export type CustomerDocumentsPage = {
   pageSize: number;
   openInvoices: number;
   creditAvailable: number;
+  sync: { pending: boolean; observedAt: string | null; lastError: string | null; hasSnapshot: boolean };
 };
 
 function dateValue(value: unknown) {
-  const text = String(value || '');
+  const text = value instanceof Date ? value.toISOString() : String(value || '');
   return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : null;
 }
 
 function numberValue(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function documentFromXero(type: CustomerDocument['type'], raw: Record<string, unknown>): CustomerDocument | null {
-  const id = String(raw.QuoteID || raw.InvoiceID || raw.CreditNoteID || '');
-  const contactId = String((raw.Contact as { ContactID?: unknown } | undefined)?.ContactID || '');
-  if (!id || !contactId) return null;
-  return {
-    type,
-    id,
-    number: String(raw.QuoteNumber || raw.InvoiceNumber || raw.CreditNoteNumber || ''),
-    status: String(raw.Status || ''),
-    date: dateValue(raw.DateString || raw.Date),
-    dueDate: dateValue(raw.DueDateString || raw.DueDate),
-    reference: String(raw.Reference || ''),
-    currency: String(raw.CurrencyCode || 'ZAR'),
-    total: numberValue(raw.Total),
-    paid: numberValue(raw.AmountPaid),
-    due: numberValue(raw.AmountDue),
-  };
 }
 
 async function xeroJson(pathname: string, source: string, ifModifiedSince: string | null = null) {
@@ -76,65 +53,6 @@ async function xeroJson(pathname: string, source: string, ifModifiedSince: strin
   return payload as Record<string, unknown>;
 }
 
-async function fetchPages(pathname: string, key: string, source: string, ifModifiedSince: string | null = null) {
-  const records: Record<string, unknown>[] = [];
-  let snapshot: string | undefined;
-  let observedAt: string | undefined;
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const separator = pathname.includes('?') ? '&' : '?';
-    const payload = await xeroJson(`${pathname}${separator}page=${page}&pageSize=${PAGE_SIZE}`, source, ifModifiedSince);
-    snapshot = assertHubSnapshot(payload, snapshot);
-    observedAt ||= (payload._hub as { observed_at: string }).observed_at;
-    const pageRecords = Array.isArray(payload[key]) ? payload[key] as Record<string, unknown>[] : [];
-    records.push(...pageRecords);
-    if (pageRecords.length < PAGE_SIZE) return { records, observedAt };
-  }
-  throw new Error('The complete document collection could not be read; previous data is retained.');
-}
-
-async function writeDocuments(contactId: string, documents: Array<{ document: CustomerDocument; raw: Record<string, unknown> }>, replaceSnapshot: boolean, observedAt: string) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    if (replaceSnapshot) await client.query(`DELETE FROM xero_customer_documents d WHERE contact_id=$1
-      AND NOT EXISTS (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=d.contact_id AND r.quote_id=d.document_id AND d.document_type='quote')`, [contactId]);
-    for (const { document, raw } of documents) {
-      await client.query(`
-        INSERT INTO xero_customer_documents (
-          contact_id, document_type, document_id, document_number, status, document_date, due_date,
-          reference, currency_code, total, amount_paid, amount_due, payload, xero_updated_at, synced_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15)
-        ON CONFLICT (contact_id, document_type, document_id) DO UPDATE SET
-          document_number = EXCLUDED.document_number,
-          status = EXCLUDED.status,
-          document_date = EXCLUDED.document_date,
-          due_date = EXCLUDED.due_date,
-          reference = EXCLUDED.reference,
-          currency_code = EXCLUDED.currency_code,
-          total = EXCLUDED.total,
-          amount_paid = EXCLUDED.amount_paid,
-          amount_due = EXCLUDED.amount_due,
-          payload = EXCLUDED.payload,
-          xero_updated_at = EXCLUDED.xero_updated_at,
-          synced_at = EXCLUDED.synced_at
-      `, [contactId, document.type, document.id, document.number, document.status, document.date, document.dueDate,
-        document.reference, document.currency, document.total, document.paid, document.due,
-        JSON.stringify(raw), null, observedAt]);
-    }
-    await client.query(`
-      INSERT INTO xero_customer_document_sync_state (contact_id, last_successful_sync_at, last_error)
-      VALUES ($1, NOW(), NULL)
-      ON CONFLICT (contact_id) DO UPDATE SET last_successful_sync_at = NOW(), last_error = NULL, updated_at = NOW()
-    `, [contactId]);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 export async function auditAccountAction(user: PortalUser, action: string, resourceType?: string, resourceId?: string, metadata: Record<string, unknown> = {}) {
   await ensureAuthSchema();
   await pool.query(`
@@ -143,48 +61,35 @@ export async function auditAccountAction(user: PortalUser, action: string, resou
   `, [user.id, user.organisationId, action, resourceType || null, resourceId || null, JSON.stringify(metadata)]);
 }
 
-export async function refreshCustomerDocuments(user: PortalUser) {
-  if (!user.xeroContactId) throw new Error('Your account is not linked to a Xero customer.');
-  const contactId = user.xeroContactId;
-  const state = await pool.query('SELECT last_successful_sync_at FROM xero_customer_document_sync_state WHERE contact_id = $1', [contactId]);
-  const lastSync = state.rows[0]?.last_successful_sync_at ? new Date(state.rows[0].last_successful_sync_at) : null;
-  const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id = $1 LIMIT 1', [contactId]);
-  const replaceSnapshot = !lastSync || !cached.rowCount;
-  const ifModifiedSince = replaceSnapshot ? null : lastSync!.toUTCString();
-  // Read complete Hub collections; retain their actual observation time.
-  const quotes = await fetchPages(`/Quotes?ContactID=${encodeURIComponent(contactId)}`, 'Quotes', 'customer-documents:quotes', ifModifiedSince);
-  const invoices = await fetchPages(`/Invoices?ContactIDs=${encodeURIComponent(contactId)}`, 'Invoices', 'customer-documents:invoices', ifModifiedSince);
-  const creditNotes = await fetchPages(`/CreditNotes?ContactIDs=${encodeURIComponent(contactId)}`, 'CreditNotes', 'customer-documents:credit-notes', ifModifiedSince);
-  const documents = [
-    ...quotes.records.map((raw) => ({ raw, document: documentFromXero('quote', raw) })),
-    ...invoices.records.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCREC').map((raw) => ({ raw, document: documentFromXero('invoice', raw) })),
-    ...creditNotes.records.filter((raw) => String(raw.Type || '').toUpperCase() === 'ACCRECCREDIT').map((raw) => ({ raw, document: documentFromXero('credit_note', raw) })),
-  ].filter((entry) => {
-    const entryContactId = String((entry.raw.Contact as { ContactID?: unknown } | undefined)?.ContactID || '');
-    return entryContactId === contactId;
-  }).filter((entry): entry is { raw: Record<string, unknown>; document: CustomerDocument } => Boolean(entry.document));
-  const observedAt = [quotes.observedAt, invoices.observedAt, creditNotes.observedAt].sort()[0]!;
-  await writeDocuments(contactId, documents, true, observedAt);
-  return documents.length;
+async function accountSyncState(contactId: string, refresh = false) {
+  // Coalesce locally; a browser never waits for the full history import. A
+  // deliberate refresh can queue at most once per 30 minutes after success.
+  await pool.query(`INSERT INTO xero_customer_document_sync_state(contact_id,refresh_requested_at)
+    VALUES($1,now()) ON CONFLICT(contact_id) DO UPDATE SET
+      refresh_requested_at=COALESCE(xero_customer_document_sync_state.refresh_requested_at,now())
+    WHERE xero_customer_document_sync_state.last_successful_sync_at IS NULL
+      OR xero_customer_document_sync_state.last_successful_sync_at < now()-interval '6 hours'
+      OR ($2 AND xero_customer_document_sync_state.last_successful_sync_at < now()-interval '30 minutes')`,
+  [contactId, refresh]);
+  const {rows} = await pool.query(`SELECT last_successful_sync_at,source_observed_at,refresh_requested_at,last_error
+    FROM xero_customer_document_sync_state WHERE contact_id=$1`, [contactId]);
+  const state = rows[0];
+  return {
+    pending: Boolean(state?.refresh_requested_at),
+    observedAt: state?.source_observed_at ? new Date(state.source_observed_at).toISOString() : null,
+    lastError: state?.last_error ? 'Account history could not be refreshed.' : null,
+    hasSnapshot: Boolean(state?.last_successful_sync_at),
+  };
 }
 
 export async function customerDocuments(user: PortalUser, refresh = false) {
   await ensureAuthSchema();
   if (!user.xeroContactId) throw new Error('Your account is not linked to a Xero customer.');
-  const state = await pool.query('SELECT last_successful_sync_at FROM xero_customer_document_sync_state WHERE contact_id = $1', [user.xeroContactId]);
-  const lastSync = state.rows[0]?.last_successful_sync_at ? Date.parse(state.rows[0].last_successful_sync_at) : 0;
-  const shouldRefresh = !lastSync || Date.now() - lastSync > CACHE_TTL_MS;
-  const forcedRefreshAllowed = refresh && (!lastSync || Date.now() - lastSync > FORCED_REFRESH_COOLDOWN_MS);
-  if (shouldRefresh || forcedRefreshAllowed) {
-    try { await refreshCustomerDocuments(user); }
-    catch (error) {
-      const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 LIMIT 1', [user.xeroContactId]);
-      if (!cached.rowCount) throw error;
-      console.error('Retaining cached customer documents after Hub refresh failure');
-    }
-  }
+  const sync = await accountSyncState(user.xeroContactId, refresh);
+  if (!sync.hasSnapshot) throw new Error('Account history is being prepared. Open Accounts and check again shortly.');
   const result = await pool.query(`
-    SELECT document_type, document_id, document_number, status, document_date, due_date, reference,
+    SELECT document_type, document_id, document_number, status,
+           document_date::text AS document_date, due_date::text AS due_date, reference,
            currency_code, total, amount_paid, amount_due
     FROM xero_customer_documents
     WHERE contact_id = $1 AND (document_type <> 'quote' OR status <> 'DRAFT' OR EXISTS
@@ -193,8 +98,8 @@ export async function customerDocuments(user: PortalUser, refresh = false) {
   `, [user.xeroContactId]);
   return result.rows.map((row) => ({
     type: row.document_type, id: row.document_id, number: row.document_number, status: row.status,
-    date: row.document_date ? String(row.document_date).slice(0, 10) : null,
-    dueDate: row.due_date ? String(row.due_date).slice(0, 10) : null,
+    date: dateValue(row.document_date),
+    dueDate: dateValue(row.due_date),
     reference: row.reference, currency: row.currency_code, total: numberValue(row.total),
     paid: numberValue(row.amount_paid), due: numberValue(row.amount_due),
   })) as CustomerDocument[];
@@ -211,19 +116,7 @@ export async function customerDocumentsPage(
   const pageSize = Math.min(50, Math.max(10, Math.floor(options.pageSize || 25)));
   const query = String(options.query || '').trim().slice(0, 100);
   const view = options.view || 'current';
-  const state = await pool.query('SELECT last_successful_sync_at FROM xero_customer_document_sync_state WHERE contact_id = $1', [user.xeroContactId]);
-  const lastSync = state.rows[0]?.last_successful_sync_at ? Date.parse(state.rows[0].last_successful_sync_at) : 0;
-  const shouldRefresh = !lastSync || Date.now() - lastSync > CACHE_TTL_MS;
-  const forcedRefreshAllowed = options.refresh && (!lastSync || Date.now() - lastSync > FORCED_REFRESH_COOLDOWN_MS);
-  const focusedQuote = options.quoteId && await pool.query("SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 AND document_type='quote' AND document_id=$2", [user.xeroContactId, options.quoteId]);
-  if ((!focusedQuote || !focusedQuote.rowCount || options.refresh) && (shouldRefresh || forcedRefreshAllowed)) {
-    try { await refreshCustomerDocuments(user); }
-    catch (error) {
-      const cached = await pool.query('SELECT 1 FROM xero_customer_documents WHERE contact_id=$1 LIMIT 1', [user.xeroContactId]);
-      if (!cached.rowCount) throw error;
-      console.error('Retaining cached customer documents after Hub refresh failure');
-    }
-  }
+  const sync = await accountSyncState(user.xeroContactId, options.refresh);
 
   const conditions = ['contact_id = $1', `(document_type <> 'quote' OR status <> 'DRAFT' OR EXISTS
     (SELECT 1 FROM portal_quote_requests r WHERE r.contact_id=xero_customer_documents.contact_id AND r.quote_id=document_id))`];
@@ -244,7 +137,8 @@ export async function customerDocumentsPage(
   const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM xero_customer_documents WHERE ${where}`, values);
   values.push(pageSize, (page - 1) * pageSize);
   const result = await pool.query(`
-    SELECT document_type, document_id, document_number, status, document_date, due_date, reference,
+    SELECT document_type, document_id, document_number, status,
+           document_date::text AS document_date, due_date::text AS due_date, reference,
            currency_code, total, amount_paid, amount_due
     FROM xero_customer_documents
     WHERE ${where}
@@ -260,14 +154,15 @@ export async function customerDocumentsPage(
   return {
     documents: result.rows.map((row) => ({
       type: row.document_type, id: row.document_id, number: row.document_number, status: row.status,
-      date: row.document_date ? String(row.document_date).slice(0, 10) : null,
-      dueDate: row.due_date ? String(row.due_date).slice(0, 10) : null,
+      date: dateValue(row.document_date),
+      dueDate: dateValue(row.due_date),
       reference: row.reference, currency: row.currency_code, total: numberValue(row.total),
       paid: numberValue(row.amount_paid), due: numberValue(row.amount_due),
     })) as CustomerDocument[],
     total: numberValue(countResult.rows[0]?.total), page, pageSize,
     openInvoices: numberValue(summary.rows[0]?.open_invoices),
     creditAvailable: numberValue(summary.rows[0]?.credit_available),
+    sync,
   };
 }
 
@@ -299,7 +194,13 @@ export async function updateQuoteAcceptance(user: PortalUser, quoteId: string, a
     }),
   });
   if (!response.ok) throw new Error('Xero could not update this quote.');
-  await refreshCustomerDocuments(user);
+  const updated = (await response.json()).Quotes?.[0];
+  if (!updated?.QuoteID || updated.QuoteID !== quoteId || updated.Contact?.ContactID !== user.xeroContactId
+    || updated.Status !== (accept ? 'ACCEPTED' : 'SENT')) {
+    throw new Error('The quote update could not be confirmed. Refresh Accounts before retrying.');
+  }
+  await cacheCreatedQuote(pool, user.xeroContactId, updated);
+  await accountSyncState(user.xeroContactId, true);
   await auditAccountAction(user, accept ? 'quote_accepted' : 'quote_unaccepted', 'quote', quoteId, { quoteNumber: quote.QuoteNumber || null });
 }
 

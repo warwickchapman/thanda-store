@@ -505,6 +505,9 @@ async function ensureAuthSchemaOnce() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE xero_customer_document_sync_state
+    ADD COLUMN IF NOT EXISTS source_observed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS refresh_requested_at TIMESTAMPTZ`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS portal_activity_log (
       id BIGSERIAL PRIMARY KEY,

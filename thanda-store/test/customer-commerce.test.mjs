@@ -46,7 +46,7 @@ test('product details use supplier specifications and only verified public manuf
 test('quote receipts preserve the request reference; provider acceptance is not delivery',()=>{
  const quote={QuoteID:'q',QuoteNumber:'Q-1',Reference:'Job 1',Status:'DRAFT',LineItems:[{Quantity:2,Description:'Panel',ItemCode:'SKU'}]};
  const notices=quoteNotificationPayloads(quote,{companyName:'Example',buyerEmail:'buyer@example.test',salesEmail:'sales@example.test',baseUrl:'https://store.example.test',source:'cart'});
- assert.match(notices.buyer.text,/2 x Panel \(SKU\)/);assert.match(notices.buyer.text,/accounts\?quote=q/);assert.match(notices.sales.text,/Job 1/);
+ assert.match(notices.buyer.text,/2 x Panel \(SKU\)/);assert.match(notices.buyer.text,/Visit Thanda Store: https:\/\/store.example.test/);assert.doesNotMatch(notices.buyer.text,/accounts\?quote=/);assert.match(notices.sales.text,/Job 1/);
  assert.equal(deliveryState('sent'),'accepted');assert.equal(deliveryState('delivered'),'delivered');assert.equal(deliveryState('bounced'),'failed');assert.equal(deliveryState(undefined),'accepted');
  assert.equal(validRequestId(newApiKey().id),true);assert.equal(validRequestId('invalid'),false);
 });
