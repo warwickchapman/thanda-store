@@ -382,7 +382,9 @@ When a successor has no own supplier image or generated thumbnail, its card temp
 
 Invoice history supplies only ranking. Cards always show the buyer's current price, stock and availability. Product codes no longer in the live catalogue simply do not appear. The cart stores SKU identity and quantity only; server-side APIs recalculate prices and supplier discounts when the cart is read, and apply Victron fulfilment SKU selection when an item is added and again immediately before Xero quote creation.
 
-**Quote me!** creates an exclusive-VAT Xero draft quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The cart clears only after Xero accepts the quote. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
+**Quote me!** creates an exclusive-VAT Xero quote against the linked contact. It sends the current list price with the appropriate line discount, including zero discount for LoRa. The Admin setting chooses whether the confirmed quote remains a draft or is marked SENT; Xero requires a second API call for SENT. The cart clears only after the requested status is confirmed. It is not an order: acceptance, invoicing, credits and fulfilment are deliberately separate future workflow work.
+
+Quote API budget: one Xero write for DRAFT or two for SENT, only when a buyer submits a quote; there are no page-load, background or scheduled calls from this flow. New requests are limited to 200 across the Store and 50 per Xero contact in any rolling 24 hours (at most 400 quote writes with SENT); retries with the same request ID remain available. The Hub logs each response and its allowance headers, serialises outbound requests and honours provider cooldowns. It never blindly recreates a quote after an uncertain write; an operator reconciles the saved request and QuoteID. Check the shared daily allowance before changing this flow or increasing quote volume.
 
 ## Customer accounts
 

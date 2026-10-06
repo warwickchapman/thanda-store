@@ -4,7 +4,7 @@ import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
-import { recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
+import { QuoteRequestLimitError, recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
 
 function currentQuoteDate() {
@@ -65,6 +65,6 @@ export async function POST(request: Request) {
     return NextResponse.json(await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch));
   } catch (error) {
     console.error('Quote creation error:', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create draft quote' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to confirm quote request' }, { status: error instanceof QuoteRequestLimitError ? 429 : 500 });
   }
 }

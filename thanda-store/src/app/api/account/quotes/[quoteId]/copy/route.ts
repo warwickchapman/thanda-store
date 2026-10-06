@@ -5,7 +5,7 @@ import pool from '@/lib/db';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
-import { recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
+import { QuoteRequestLimitError, recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
@@ -118,6 +118,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     return NextResponse.json(await resumeQuoteRequest(pool,user,requestId,xeroAccountingFetch));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create copied draft quote.' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to confirm copied quote request.' }, { status: error instanceof QuoteRequestLimitError ? 429 : 500 });
   }
 }

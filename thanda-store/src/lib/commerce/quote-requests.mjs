@@ -1,5 +1,6 @@
 // Durable quote submission and local cache/outbox transaction. Hub owns Xero.
 export function validRequestId(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
+export class QuoteRequestLimitError extends Error {}
 export function quoteNotificationPayloads(quote, context) {
   const quoteNumber = String(quote.QuoteNumber || quote.QuoteID);
   const reference = String(quote.Reference || '');
@@ -15,9 +16,31 @@ export function quoteNotificationPayloads(quote, context) {
 }
 export async function recordQuoteRequest(pool, user, id, payload, context) {
   if (!validRequestId(id)) throw new Error('A valid quote request ID is required.');
-  await pool.query(`INSERT INTO portal_quote_requests(id,user_id,contact_id,source,request_payload,context)
-    VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb) ON CONFLICT(id) DO NOTHING`,
-  [id,user.id,user.xeroContactId,context.source,JSON.stringify(payload),JSON.stringify(context)]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Serialise only the local allowance check, never a Xero request. Existing
+    // idempotency keys can still resume without consuming a new slot.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['portal-quote-allowance']);
+    const existing = await client.query('SELECT 1 FROM portal_quote_requests WHERE id=$1', [id]);
+    if (!existing.rowCount) {
+      const usage = await client.query(`SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE contact_id=$1)::int AS customer
+        FROM portal_quote_requests WHERE created_at > now() - interval '24 hours'`, [user.xeroContactId]);
+      if (usage.rows[0].total >= 200 || usage.rows[0].customer >= 50) {
+        throw new QuoteRequestLimitError('The daily quote request limit has been reached. Contact sales with your cart details.');
+      }
+      await client.query(`INSERT INTO portal_quote_requests(id,user_id,contact_id,source,request_payload,context)
+        VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
+      [id,user.id,user.xeroContactId,context.source,JSON.stringify(payload),JSON.stringify(context)]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 export async function resumeQuoteRequest(pool, user, id, hubFetch) {
   if (!validRequestId(id)) throw new Error('A valid quote request ID is required.');
@@ -40,7 +63,12 @@ export async function resumeQuoteRequest(pool, user, id, hubFetch) {
         method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':`portal-quote:${id}`,'X-Hub-Actor':`portal-user:${user.id}`,'X-Hub-Contact':user.xeroContactId},
         body:JSON.stringify(row.request_payload),
       });
-      if (!response.ok) throw new Error(`Quote request awaits confirmation (Hub ${response.status}). Retry this same request; contact sales if it remains unresolved.`);
+      if (!response.ok) {
+        const hubError = await response.json().catch(() => null);
+        const detail = typeof hubError?.detail === 'string' ? hubError.detail : '';
+        const reason = detail ? ` ${detail}` : '';
+        throw new Error(`Quote request ${id} needs review (Hub ${response.status}).${reason} Do not start a new request; contact sales with this request ID.`);
+      }
       const payload = await response.json();
       quote = payload.Quotes?.[0];
       if (!quote?.QuoteID || quote.Contact?.ContactID !== user.xeroContactId || quote.HasErrors || !Array.isArray(quote.LineItems)) throw new Error('The Hub has not confirmed a valid quote. Contact sales with the request reference.');

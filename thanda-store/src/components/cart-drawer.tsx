@@ -49,13 +49,13 @@ export function CartDrawer({ cart, open, onClose, onChange, userId }: {
         body: JSON.stringify({ quoteReference: reference, requestId }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to create draft quote');
+      if (!response.ok) throw new Error(data.error || 'Unable to confirm quote request');
       onChange(data.cart);
       sessionStorage.removeItem(storageKey);
       const params = new URLSearchParams({ requestId: data.requestId });
       window.location.assign(`/quotes/confirmation?${params.toString()}`);
     } catch (error) {
-      setQuoteMessage(error instanceof Error ? error.message : 'Unable to create draft quote');
+      setQuoteMessage(error instanceof Error ? error.message : 'Unable to confirm quote request');
     } finally { setCreatingQuote(false); }
   }
 
@@ -101,9 +101,9 @@ export function CartDrawer({ cart, open, onClose, onChange, userId }: {
           </label>
           {quoteMessage && <p className="mt-3 text-xs font-medium text-zinc-700">{quoteMessage}</p>}
           <button disabled={cart.lines.length === 0 || creatingQuote} onClick={createQuote} className="mt-4 h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">
-            {creatingQuote ? 'Creating draft quote...' : 'Quote me!'}
+            {creatingQuote ? 'Submitting quote request...' : 'Quote me!'}
           </button>
-          <p className="mt-2 text-xs text-zinc-500">This creates a draft quote in Xero using your reference. Your cart is kept if Xero rejects the request.</p>
+          <p className="mt-2 text-xs text-zinc-500">This creates a quote request in Xero using your reference. Your cart is kept until Xero confirms it.</p>
         </div>
       </aside>
     </div>
