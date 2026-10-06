@@ -7,6 +7,8 @@ type State = { overdue: boolean; attention: boolean; rows: Row[]; error?: string
 const money = (n?: number) => n == null ? 'Unknown' : `R ${Number(n).toFixed(2)}`;
 const hasZaStock = (row: Row) => row.zaStock != null && row.zaStock > 0;
 const needsReview = (row: Row) => hasZaStock(row) && !row.ignoredUntil;
+const archiveStatus = (row: Row) => !row.eligibleForArchiveReview ? 'waiting' : row.stock === 0 ? 'ready' : 'stock';
+const archiveLabels = { ready: 'Ready for final checks', waiting: 'Waiting for supplier evidence', stock: 'Stock needs checking' };
 const reviewDate = (value: string) => new Date(value).toLocaleDateString('en-ZA', { timeZone: 'Africa/Johannesburg' });
 const unknownOutcome = 'The result could not be confirmed. Do not repeat this action until the saved attempt has been reconciled with Xero.';
 async function readResponse(response: Response, fallback: string) {
@@ -23,6 +25,7 @@ export default function VictronCatalogue() {
   const [activeUpdate, setActiveUpdate] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('price');
+  const [archiveFilter, setArchiveFilter] = useState('all');
   const [company, setCompany] = useState('thanda-solar');
   const [note, setNote] = useState('');
   const [limit, setLimit] = useState(50);
@@ -81,9 +84,11 @@ export default function VictronCatalogue() {
     finally { actionPending.current = false; setBusy(false); }
   }
   const stale = data?.overdue ?? true;
-  const rows = (data?.rows || []).filter(r => r.company === company && r.kind === kind && `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase()));
+  const companyRows = (data?.rows || []).filter(r => r.company === company);
+  const rows = companyRows.filter(r => r.kind === kind && (kind !== 'archive' || archiveFilter === 'all' || archiveStatus(r) === archiveFilter) && `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase()));
   const isNew = kind === 'new';
   const isReview = kind === 'review';
+  const isArchive = kind === 'archive';
   const supportsBatch = kind === 'price' || isNew;
   const selectableRows = rows.filter(r => !r.reason);
   const button = 'rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
@@ -96,22 +101,33 @@ export default function VictronCatalogue() {
     {(error || data?.error || stale) && <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-3">{error || data?.error || 'Daily check is overdue or has not run. Apply actions require fresh evidence.'}</p>}
     {message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
     <div className="flex flex-wrap gap-3">
-      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); resetSelection(); }}><option value="thanda-solar">Thanda</option><option value="sensible-solar">Sensible</option></select>
-      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); resetSelection(); }}>{[['price','Cost changes'],['new','New products'],['archive','Archive checklist'],['review','Needs review']].map(([key,label]) => <option key={key} value={key}>{label} ({data?.rows.filter(r => r.company === company && r.kind === key && (key !== 'review' || needsReview(r))).length || 0})</option>)}</select>
+      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); setArchiveFilter('all'); resetSelection(); }}><option value="thanda-solar">Thanda</option><option value="sensible-solar">Sensible</option></select>
+      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); setArchiveFilter('all'); resetSelection(); }}>{[['price','Cost changes'],['new','New products'],['archive','Archive checklist'],['review','Needs review']].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === key && (key !== 'review' || needsReview(r))).length})</option>)}</select>
+      {isArchive && <select aria-label="Archive status" className={button} disabled={busy} value={archiveFilter} onChange={e => { setArchiveFilter(e.target.value); resetSelection(); }}>{[['all','All pending checks'],...Object.entries(archiveLabels)].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === 'archive' && (key === 'all' || archiveStatus(r) === key)).length})</option>)}</select>}
       <input aria-label="Find product" disabled={busy} className="rounded border px-3 py-2" placeholder="Find SKU or description" value={query} onChange={e => { setQuery(e.target.value); resetSelection(); }} />
     </div>
     {supportsBatch && <div className="flex flex-wrap gap-3"><button className={button} disabled={busy || stale || Boolean(data?.error) || !selectableRows.length} onClick={() => { setSelected(selectableRows.slice(0,50).map(r => r.fingerprint)); setConfirmBatch(false); }}>Select first {Math.min(50,selectableRows.length)} matching {isNew ? 'products' : 'changes'}</button><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => { setConfirmBatch(true); setProposal(null); }}>Review {selected.length} selected {isNew ? 'additions' : 'updates'}</button><button className={button} disabled={busy} onClick={() => { setSelected([]); setConfirmBatch(false); }}>Clear selection</button></div>}
     {confirmBatch && <section aria-label={isNew ? 'Confirm product additions' : 'Confirm cost batch'} className="rounded border-2 border-sky-700 bg-white p-4"><h2 className="font-bold">Confirm {selected.length} {isNew ? 'product additions' : 'cost updates'} for {company === 'thanda-solar' ? 'Thanda' : 'Sensible'}</h2><p className="my-3 text-sm">{isNew ? 'Add the selected products shown below at their displayed purchase costs and initial list selling prices, with no opening stock balance. Existing product codes are checked again before creating.' : 'Only the selected purchase costs shown below will change. Prices are checked again before writing.'} An uncertain result stops retries until reconciled.</p><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => action({ action: isNew ? 'apply-create-batch' : 'apply-batch', fingerprints: selected })}>{busy ? (isNew ? 'Adding…' : 'Working…') : (isNew ? 'Add selected products to Xero' : 'Confirm selected cost updates')}</button></section>}
     {isNew && <p className="text-sm text-zinc-600">Add to Xero creates the product at the purchase cost and initial list selling price shown below, with no opening stock balance.</p>}
     {isReview && <p className="text-sm text-zinc-600">Only products with confirmed ZA stock and no active ignore are counted and shown first. Others stay visible. Each daily or manual comparison checks saved stock and returns stocked products to review when their 90-day ignore expires. You can undo an ignore sooner.</p>}
-    {kind === 'archive' && <p className="rounded bg-amber-50 p-3 text-sm">Archive in Xero only after checking stock and outstanding orders. This page records your completion; it cannot archive through the Xero API.</p>}
+    {isArchive && <>
+      <p className="rounded bg-amber-50 p-3 text-sm">Ready for final checks means supplier evidence is sufficient and saved company stock is zero. Check current stock and open orders before archiving in Xero. Archive there first, then record completion here. This page does not archive items or check orders.</p>
+      <p className="text-sm text-zinc-600">Counts cover all archive checks for {company === 'thanda-solar' ? 'Thanda' : 'Sensible'}, before your search. Waiting items need complete supplier observations on two different dates; comparing the same saved observation again does not advance them.</p>
+      <details className="rounded border bg-white p-4"><summary className="cursor-pointer font-semibold">What to check before archiving</summary><ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
+        <li>Use the same company in Xero. Confirm physical stock and Xero stock agree. Unknown stock is not zero; resolve quantity or value differences first.</li>
+        <li>Check open purchase orders, supplier backorders, deliveries still coming, accepted quotes and unfinished bills or invoices. Check repeating transactions that still use this item.</li>
+        <li>Where a replacement is shown, confirm the correct replacement is in Xero for future orders. Keep the original SKU on historical transactions.</li>
+        <li>Complete the archive in Xero, then use Record completed archive. This button saves your confirmation; it does not verify the archive in Xero.</li>
+      </ul></details>
+    </>}
     <div className="overflow-x-auto rounded border bg-white"><table className="w-full text-left text-sm">
       <thead><tr className="border-b">
         <th className="p-3">Product</th>
         {isReview ? <><th className="p-3 whitespace-nowrap">ZA stock</th><th className="p-3">Review status</th></>
+          : isArchive ? <><th className="p-3 whitespace-nowrap">Company stock</th><th className="p-3">Archive status</th></>
           : isNew ? <><th className="p-3">Purchase cost</th><th className="p-3">Initial selling price</th></>
             : <><th className="p-3">Current cost</th><th className="p-3">Proposed cost</th><th className="p-3">Change</th></>}
-        <th className="p-3">{isReview ? 'Reason and action' : 'Action / reason'}</th>
+        <th className="p-3">{isReview || isArchive ? 'Reason and action' : 'Action / reason'}</th>
       </tr></thead>
       <tbody>{rows.slice(0,limit).map(r => <tr key={r.fingerprint} className="border-b align-top">
         <td className="p-3">
@@ -127,6 +143,9 @@ export default function VictronCatalogue() {
             <span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${needsReview(r) ? 'bg-amber-50 text-amber-900' : 'bg-zinc-100 text-zinc-600'}`}>{r.ignoredUntil ? `Ignored until ${reviewDate(r.ignoredUntil)}` : needsReview(r) ? 'Review candidate' : 'Silenced'}</span>
             <p className="mt-1 text-xs text-zinc-600">{r.ignoredUntil ? 'Not counted' : needsReview(r) ? 'ZA stock available · Counted' : r.zaStock == null ? 'ZA stock unknown · Not counted' : 'No ZA stock · Not counted'}</p>
           </td>
+        </> : isArchive ? <>
+          <td className="p-3 whitespace-nowrap">{r.stock ?? 'Unknown'}</td>
+          <td className="p-3"><span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${archiveStatus(r) === 'ready' ? 'bg-amber-50 text-amber-900' : 'bg-zinc-100 text-zinc-600'}`}>{archiveLabels[archiveStatus(r)]}</span></td>
         </> : isNew ? <>
           <td className="p-3 whitespace-nowrap">{money(r.proposed)}</td><td className="p-3 whitespace-nowrap">{money(r.list)}</td>
         </> : <>
@@ -150,7 +169,7 @@ export default function VictronCatalogue() {
             </div>
           </div> : r.reason || (supportsBatch && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'apply', fingerprint: r.fingerprint, confirmed: true })}>{busy && activeUpdate === r.fingerprint ? (isNew ? 'Adding…' : 'Updating…') : (isNew ? 'Add to Xero' : 'Update')}</button>)}
           {activeUpdate === r.fingerprint && (error || message) && <p role={error ? 'alert' : 'status'} className={`mt-2 text-sm ${error ? 'text-amber-800' : 'text-green-800'}`}>{error || message}</p>}
-          {r.kind === 'archive' && <><p>Stock: {r.stock ?? 'Unknown'}</p><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></>}
+          {r.kind === 'archive' && <div className="mt-2"><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></div>}
         </td>
       </tr>)}</tbody>
     </table>{!rows.length && <p className="p-4">No matching proposals in the saved comparison.</p>}</div>

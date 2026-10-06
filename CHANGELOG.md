@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- The Victron archive checklist now has separate filters for **Ready for final checks**, **Waiting for supplier evidence**, and **Stock needs checking**, with counts for the selected company. Rows show company stock and archive status instead of irrelevant price columns. A short staff checklist explains current stock, open orders, replacements and recording completion after archiving in Xero. Unknown stock remains blocked, and filtering does not make supplier or Xero calls.
+
+- Product-action pause messages now tell staff exactly when to try again, using short sentences and South African time. A short wait shows the remaining seconds; reaching the daily limit shows the next 02:00 reset date. The message confirms that the paused action changed no products. Daily limits and the wait between actions are reported separately, with matching retry deadlines; the safety limits and provider request counts are unchanged.
+
 - Victron review candidates can now be resolved directly: **Add to Xero** for missing products, **Update** for changed costs, and **Keep in Xero** when an existing item already has the correct cost. Prices are shown before the action, and accepting eligibility advice still enforces price, panel, packaging and purchasing checks. **Ignore for 90 days** keeps an item visible with its expiry while removing it from that company's review count and alerts; **Undo ignore** restores it. Decisions survive comparisons, and expiry returns stocked candidates automatically at the next comparison. Existing price changes and archive checks remain actionable.
 
 - Accounts background imports now accept a newer Hub observation time when the saved content revision is unchanged. Pagination still requires the same complete revision throughout and retains the earliest observation for the collection. This fixes false import failures during ordinary Hub scans without adding provider calls or weakening protection against changed data.

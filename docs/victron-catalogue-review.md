@@ -119,6 +119,27 @@ check outstanding orders and complete archival in Xero. Recording completion
 requires known zero stock and is audited. The record hides that absence episode
 from the checklist; renewed availability resets the episode.
 
+The archive checklist has an **Archive status** filter, defaulting to **All pending
+checks**. Its counts cover the selected company's archive rows before the SKU/name
+search. The three groups are mutually exclusive:
+
+- **Ready for final checks:** supplier retirement/absence evidence is sufficient
+  and saved stock in this Xero company is exactly zero.
+- **Waiting for supplier evidence:** retirement/absence evidence is not yet
+  sufficient, regardless of the saved company stock.
+- **Stock needs checking:** supplier evidence is sufficient but company stock is
+  non-zero or unknown. Unknown stock never counts as zero.
+
+Changing the company, change type, archive status or search resets the visible
+page size and any open completion confirmation. Rows show company stock, status
+and the reason. The staff checklist requires checking current physical/Xero stock,
+stock value discrepancies, open orders, inbound deliveries, unfinished/repeating
+transactions and the correct replacement SKU. Complete archival in the same Xero
+company before recording completion here; the page does not verify orders or
+actual Xero archival. Repeated comparisons of the same saved supplier observation
+cannot satisfy the two-date absence rule. Filters and counts use saved rows only,
+with no provider calls or changes to archive eligibility.
+
 The official announcement and PDFs are quarterly sanity-check evidence, never a
 replacement price authority. Record the quarter, document reference, checks and
 discrepancies in the page. Q4 2026 announcement (1 October) highlights immediate
@@ -199,8 +220,15 @@ remain authoritative; this feature retains the lower shared item-command ceiling
 and reserve described below for other sync and interactive work.
 
 All item command paths share a maximum of 100 attributed Xero requests per tenant
-per UTC day, at least 15 seconds between actions, and the connector's protected
-150-call reserve. OAuth traffic is separately recorded by the existing connector.
+per UTC day (reset at **02:00 South African time**), at least 15 seconds between
+actions, and the connector's protected 150-call reserve. These are request limits,
+not product counts: a batch of up to 50 products still uses two Xero requests.
+The pause message gives staff only the relevant instruction: wait the displayed
+number of seconds and try again, or continue after 02:00 on the displayed South
+African date when the daily limit has been reached. It confirms that no products
+were changed by that paused action. The `Retry-After` header matches the remaining
+wait; there is no automatic resubmission. Daily-limit and short-wait reasons are
+reported separately. OAuth traffic is separately recorded by the existing connector.
 Provider quota and Retry-After headers remain authoritative and are retained in the
 Hub ledger. Timeouts are bounded; there are no automatic write retries. Failed
 reads preserve the previous review and add an error, never an empty success.
