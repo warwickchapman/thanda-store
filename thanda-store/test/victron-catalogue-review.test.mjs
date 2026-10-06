@@ -87,6 +87,81 @@ test('ZA quantity changes do not invalidate existing price or creation approvals
     assert.equal(changeSignature(before),changeSignature(after));
   }
 });
+
+const advisoryProduct = {...p,description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:3}};
+const xeroAdvisory = cost => ({...items,'thanda-solar':[{Code:p.sku,ItemID:'item',IsPurchased:true,PurchaseDetails:{UnitPrice:cost}}]});
+test('review actions distinguish missing items, cost changes and existing current costs', () => {
+  assert.equal(run({catalogue:[advisoryProduct]})[0].reviewAction,'new');
+  const changed=run({catalogue:[advisoryProduct],items:xeroAdvisory(400)}).find(row=>row.company==='thanda-solar');
+  const current=run({catalogue:[advisoryProduct],items:xeroAdvisory(525)}).find(row=>row.company==='thanda-solar');
+  assert.equal(changed.reviewAction,'price'); assert.equal(current.reviewAction,'keep');
+  assert.match(changed.approvalReason,/120V/); assert.equal(changed.reviewBlocker,null);
+});
+
+test('accepting voltage advice cannot waive pricing, panel, alias, phase-out or purchasing gates', () => {
+  const approval={company:'thanda-solar',sku:p.sku,approvedReason:exclusion(advisoryProduct)};
+  for (const price of [0,-1,null,'invalid']) {
+    const row=run({catalogue:[{...advisoryProduct,price}],decisions:[approval]}).find(row=>row.company==='thanda-solar');
+    assert.equal(row.kind,'review'); assert.equal(row.reviewAction,null); assert.ok(row.reviewBlocker);
+  }
+  const disabled={...xeroAdvisory(400),'thanda-solar':[{...xeroAdvisory(400)['thanda-solar'][0],IsPurchased:false}]};
+  assert.equal(run({catalogue:[advisoryProduct],items:disabled,decisions:[approval]}).find(row=>row.company==='thanda-solar').reviewAction,null);
+  for (const changes of [{IsPurchased:null},{IsPurchased:undefined},{ItemID:null}]) {
+    const uncertain={...xeroAdvisory(525),'thanda-solar':[{...xeroAdvisory(525)['thanda-solar'][0],...changes}]};
+    const row=run({catalogue:[advisoryProduct],items:uncertain}).find(row=>row.company==='thanda-solar');
+    assert.equal(row.reviewAction,null); assert.ok(row.reviewBlocker);
+  }
+  const aliases={...items,'thanda-solar':[{Code:p.sku+'R'}]};
+  assert.equal(run({catalogue:[advisoryProduct],items:aliases,decisions:[approval]}).find(row=>row.company==='thanda-solar').reviewAction,null);
+  const old={...advisoryProduct,description:'120V inverter Available until stock 0'};
+  assert.equal(run({catalogue:[old],decisions:[approval]}).find(row=>row.company==='thanda-solar').reviewAction,null);
+  const panel={...advisoryProduct,sku:'SPM123'};
+  assert.equal(run({catalogue:[panel],decisions:[{...approval,sku:panel.sku,approvedReason:exclusion(panel)}]}).find(row=>row.company==='thanda-solar').reviewAction,null);
+});
+
+test('approval accepts only the same advisory, company and literal SKU, never successors or retail siblings', () => {
+  const approval={company:'thanda-solar',sku:p.sku,approvedReason:exclusion(advisoryProduct)};
+  const rows=run({catalogue:[advisoryProduct],decisions:[approval]});
+  assert.equal(rows.find(row=>row.company==='thanda-solar').kind,'new');
+  assert.equal(rows.find(row=>row.company==='sensible-solar').kind,'review');
+  assert.equal(run({catalogue:[advisoryProduct],items:xeroAdvisory(525),decisions:[approval]}).filter(row=>row.company==='thanda-solar').length,0);
+  for (const sku of ['PMP482305010',p.sku+'R']) {
+    const row=run({catalogue:[{...advisoryProduct,sku}],decisions:[approval],successions:[{predecessor_sku:'PMP482305010',successor_sku:p.sku}]}).find(row=>row.company==='thanda-solar');
+    assert.equal(row.kind,'review');
+  }
+  const changed=run({catalogue:[{...advisoryProduct,description:'Solar home system'}],decisions:[approval]}).find(row=>row.company==='thanda-solar');
+  assert.equal(changed.kind,'review'); assert.match(changed.approvalReason,/home system/i);
+  const additional=run({catalogue:[{...advisoryProduct,category:'Solar home system'}],items:xeroAdvisory(525),decisions:[approval]}).find(row=>row.company==='thanda-solar');
+  assert.equal(additional.kind,'review'); assert.match(additional.approvalReason,/120V.*home system/i);
+});
+
+test('ignore is company/SKU scoped, expires at its deadline and suppresses stock arrivals while active', () => {
+  const ignoredUntil=new Date(now+90*86400000).toISOString();
+  const decision={company:'thanda-solar',sku:p.sku,ignoredUntil};
+  const before=run({catalogue:[advisoryProduct]});
+  const rows=run({catalogue:[advisoryProduct],decisions:[decision]});
+  const ignored=rows.find(row=>row.company==='thanda-solar');
+  assert.equal(ignored.ignoredUntil,ignoredUntil); assert.equal(needsAttention(ignored),false);
+  assert.equal(rows.find(row=>row.company==='sensible-solar').ignoredUntil,null);
+  assert.equal(before.find(row=>row.company==='thanda-solar').fingerprint,ignored.fingerprint);
+  const zero=run({catalogue:[{...advisoryProduct,all_stock_by_warehouse:{af_sa_inzuzo:0}}],decisions:[decision]});
+  assert.equal(needsAttention(zero.find(row=>row.company==='thanda-solar')),false);
+  for (const expiry of [new Date(now).toISOString(),new Date(now-1).toISOString()]) {
+    const expired=run({catalogue:[advisoryProduct],decisions:[{...decision,ignoredUntil:expiry}]}).find(row=>row.company==='thanda-solar');
+    assert.equal(expired.ignoredUntil,null); assert.equal(needsAttention(expired),true);
+    assert.notEqual(changeSignature([ignored]),changeSignature([expired]));
+  }
+  const alias=run({catalogue:[{...advisoryProduct,sku:p.sku+'R'}],decisions:[decision]}).find(row=>row.company==='thanda-solar');
+  assert.equal(needsAttention(alias),true);
+});
+
+test('ignore cannot hide ordinary price or archive changes', () => {
+  const decision={company:'thanda-solar',sku:p.sku,ignoredUntil:new Date(now+90*86400000).toISOString()};
+  const price=run({items:xeroAdvisory(400),decisions:[decision]}).find(row=>row.company==='thanda-solar');
+  assert.equal(price.kind,'price'); assert.equal(needsAttention(price),true);
+  const archive=run({items:xeroAdvisory(400),catalogue:[{...p,description:'Available until stock 0',stock_quantity:0}],decisions:[decision]}).find(row=>row.company==='thanda-solar');
+  assert.equal(archive.kind,'archive'); assert.equal(needsAttention(archive),true);
+});
 test('successors are separate definitions; retail alias is manual review', () => {
   const successions=[{predecessor_sku:'PMP482305010',successor_sku:p.sku}];
   const existing={...items,'thanda-solar':[{Code:'PMP482305010',ItemID:'old',Name:'Victron predecessor',PurchaseDetails:{UnitPrice:123},QuantityOnHand:2}]};

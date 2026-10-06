@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from '@/components/admin/admin-menu';
-type Row = { fingerprint: string; company: string; sku: string; name: string; kind: string; reason?: string; previous?: number; proposed?: number; list?: number; listSource?: string; stock?: number; zaStock?: number | null; replaces: string[]; replacedBy: string[]; eligibleForArchiveReview?: boolean };
+type Row = { fingerprint: string; company: string; sku: string; name: string; kind: string; reason?: string; previous?: number; proposed?: number; list?: number; listSource?: string; stock?: number; zaStock?: number | null; reviewAction?: 'new' | 'price' | 'keep' | null; approvalReason?: string | null; reviewBlocker?: string | null; ignoredUntil?: string | null; replaces: string[]; replacedBy: string[]; eligibleForArchiveReview?: boolean };
 type AuditEvent = { created_at: string; actor: string; action: string; company?: string; sku?: string; details: { note?: string; changes?: { sku: string; previous?: number; proposed?: number }[]; result?: { error?: string } } };
 type State = { overdue: boolean; attention: boolean; rows: Row[]; error?: string; checked_at?: string; observed_at?: string; signature: string; acknowledged_signature?: string; events: AuditEvent[] };
 const money = (n?: number) => n == null ? 'Unknown' : `R ${Number(n).toFixed(2)}`;
 const hasZaStock = (row: Row) => row.zaStock != null && row.zaStock > 0;
+const needsReview = (row: Row) => hasZaStock(row) && !row.ignoredUntil;
+const reviewDate = (value: string) => new Date(value).toLocaleDateString('en-ZA', { timeZone: 'Africa/Johannesburg' });
 const unknownOutcome = 'The result could not be confirmed. Do not repeat this action until the saved attempt has been reconciled with Xero.';
 async function readResponse(response: Response, fallback: string) {
   const payload = await response.json().catch(() => null);
@@ -49,9 +51,10 @@ export default function VictronCatalogue() {
   async function action(body: Record<string, unknown>) {
     if (actionPending.current) return;
     actionPending.current = true;
-    setActiveUpdate(body.action === 'apply' && typeof body.fingerprint === 'string' ? body.fingerprint : null);
+    setActiveUpdate((body.action === 'apply' || body.action === 'resolve-review') && typeof body.fingerprint === 'string' ? body.fingerprint : null);
     setBusy(true); setError(''); setMessage('');
-    const writesXero = body.action === 'apply' || body.action === 'apply-batch' || body.action === 'apply-create-batch';
+    const writesXero = body.action === 'apply' || body.action === 'apply-batch' || body.action === 'apply-create-batch'
+      || (body.action === 'resolve-review' && data?.rows.find(row => row.fingerprint === body.fingerprint)?.reviewAction !== 'keep');
     try {
       const response = await fetch('/api/admin/victron-catalogue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .catch(() => { throw new Error(writesXero ? unknownOutcome : 'The action could not be completed. Please try again.'); });
@@ -94,17 +97,63 @@ export default function VictronCatalogue() {
     {message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
     <div className="flex flex-wrap gap-3">
       <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); resetSelection(); }}><option value="thanda-solar">Thanda</option><option value="sensible-solar">Sensible</option></select>
-      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); resetSelection(); }}>{[['price','Cost changes'],['new','New products'],['archive','Archive checklist'],['review','Needs review']].map(([key,label]) => <option key={key} value={key}>{label} ({data?.rows.filter(r => r.company === company && r.kind === key && (key !== 'review' || hasZaStock(r))).length || 0})</option>)}</select>
+      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); resetSelection(); }}>{[['price','Cost changes'],['new','New products'],['archive','Archive checklist'],['review','Needs review']].map(([key,label]) => <option key={key} value={key}>{label} ({data?.rows.filter(r => r.company === company && r.kind === key && (key !== 'review' || needsReview(r))).length || 0})</option>)}</select>
       <input aria-label="Find product" disabled={busy} className="rounded border px-3 py-2" placeholder="Find SKU or description" value={query} onChange={e => { setQuery(e.target.value); resetSelection(); }} />
     </div>
     {supportsBatch && <div className="flex flex-wrap gap-3"><button className={button} disabled={busy || stale || Boolean(data?.error) || !selectableRows.length} onClick={() => { setSelected(selectableRows.slice(0,50).map(r => r.fingerprint)); setConfirmBatch(false); }}>Select first {Math.min(50,selectableRows.length)} matching {isNew ? 'products' : 'changes'}</button><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => { setConfirmBatch(true); setProposal(null); }}>Review {selected.length} selected {isNew ? 'additions' : 'updates'}</button><button className={button} disabled={busy} onClick={() => { setSelected([]); setConfirmBatch(false); }}>Clear selection</button></div>}
     {confirmBatch && <section aria-label={isNew ? 'Confirm product additions' : 'Confirm cost batch'} className="rounded border-2 border-sky-700 bg-white p-4"><h2 className="font-bold">Confirm {selected.length} {isNew ? 'product additions' : 'cost updates'} for {company === 'thanda-solar' ? 'Thanda' : 'Sensible'}</h2><p className="my-3 text-sm">{isNew ? 'Add the selected products shown below at their displayed purchase costs and initial list selling prices, with no opening stock balance. Existing product codes are checked again before creating.' : 'Only the selected purchase costs shown below will change. Prices are checked again before writing.'} An uncertain result stops retries until reconciled.</p><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => action({ action: isNew ? 'apply-create-batch' : 'apply-batch', fingerprints: selected })}>{busy ? (isNew ? 'Adding…' : 'Working…') : (isNew ? 'Add selected products to Xero' : 'Confirm selected cost updates')}</button></section>}
     {isNew && <p className="text-sm text-zinc-600">Add to Xero creates the product at the purchase cost and initial list selling price shown below, with no opening stock balance.</p>}
-    {isReview && <p className="text-sm text-zinc-600">The Needs review count includes only products with confirmed stock in Victron’s ZA warehouse. They appear first. Products with no stock or unknown stock stay visible as silenced and are not counted. When saved ZA stock becomes positive, the next daily or manual comparison promotes them automatically.</p>}
+    {isReview && <p className="text-sm text-zinc-600">Only products with confirmed ZA stock and no active ignore are counted and shown first. Others stay visible. Each daily or manual comparison checks saved stock and returns stocked products to review when their 90-day ignore expires. You can undo an ignore sooner.</p>}
     {kind === 'archive' && <p className="rounded bg-amber-50 p-3 text-sm">Archive in Xero only after checking stock and outstanding orders. This page records your completion; it cannot archive through the Xero API.</p>}
-    <div className="overflow-x-auto rounded border bg-white"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-3">Product</th>{isReview ? <><th>ZA stock</th><th>Review status</th></> : isNew ? <><th>Purchase cost</th><th>Initial selling price</th></> : <><th>Current cost</th><th>Proposed cost</th><th>Change</th></>}<th className="p-3">{isReview ? 'Reason' : 'Action / reason'}</th></tr></thead><tbody>
-      {rows.slice(0,limit).map(r => <tr key={r.fingerprint} className="border-b align-top"><td className="p-3">{supportsBatch && !r.reason && <input type="checkbox" aria-label={`Select ${r.sku}`} className="mr-2" checked={selected.includes(r.fingerprint)} disabled={busy || stale || Boolean(data?.error) || (!selected.includes(r.fingerprint) && selected.length >= 50)} onChange={e => { setSelected(e.target.checked ? [...selected,r.fingerprint] : selected.filter(f => f !== r.fingerprint)); setConfirmBatch(false); }} />}<b>{r.sku}</b><p>{r.name}</p>{r.listSource === 'calculated' && <p className="text-xs text-zinc-600">List calculated: E-Order cost ÷ 0.525</p>}{r.replaces.length > 0 && <p className="text-xs">Replaces {r.replaces.join(', ')}</p>}{r.replacedBy.length > 0 && <p className="text-xs">Replaced by {r.replacedBy.join(', ')}</p>}</td>{isReview ? <><td className="py-3 whitespace-nowrap">{r.zaStock ?? 'Unknown'}</td><td className="py-3"><span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${hasZaStock(r) ? 'bg-amber-50 text-amber-900' : 'bg-zinc-100 text-zinc-600'}`}>{hasZaStock(r) ? 'Review candidate' : 'Silenced'}</span><p className="mt-1 text-xs text-zinc-600">{hasZaStock(r) ? 'ZA stock available · Counted' : r.zaStock == null ? 'ZA stock unknown · Not counted' : 'No ZA stock · Not counted'}</p></td></> : isNew ? <><td className="py-3 whitespace-nowrap">{money(r.proposed)}</td><td className="py-3 whitespace-nowrap">{money(r.list)}</td></> : <><td className="py-3 whitespace-nowrap">{money(r.previous)}</td><td className="py-3 whitespace-nowrap">{money(r.proposed)}</td><td className="py-3">{r.previous != null && r.proposed != null ? `${money(r.proposed-r.previous)}${r.previous > 0 ? ` (${((r.proposed/r.previous-1)*100).toFixed(1)}%)` : ''}` : '—'}</td></>}<td className="p-3 max-w-sm">{r.reason || (supportsBatch && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'apply', fingerprint: r.fingerprint, confirmed: true })}>{busy && activeUpdate === r.fingerprint ? (isNew ? 'Adding…' : 'Updating…') : (isNew ? 'Add to Xero' : 'Update')}</button>)}{activeUpdate === r.fingerprint && (error || message) && <p role={error ? 'alert' : 'status'} className={`mt-2 text-sm ${error ? 'text-amber-800' : 'text-green-800'}`}>{error || message}</p>}{r.kind === 'archive' && <><p>Stock: {r.stock ?? 'Unknown'}</p><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></>}</td></tr>)}
-    </tbody></table>{!rows.length && <p className="p-4">No matching proposals in the saved comparison.</p>}</div>
+    <div className="overflow-x-auto rounded border bg-white"><table className="w-full text-left text-sm">
+      <thead><tr className="border-b">
+        <th className="p-3">Product</th>
+        {isReview ? <><th className="p-3 whitespace-nowrap">ZA stock</th><th className="p-3">Review status</th></>
+          : isNew ? <><th className="p-3">Purchase cost</th><th className="p-3">Initial selling price</th></>
+            : <><th className="p-3">Current cost</th><th className="p-3">Proposed cost</th><th className="p-3">Change</th></>}
+        <th className="p-3">{isReview ? 'Reason and action' : 'Action / reason'}</th>
+      </tr></thead>
+      <tbody>{rows.slice(0,limit).map(r => <tr key={r.fingerprint} className="border-b align-top">
+        <td className="p-3">
+          {supportsBatch && !r.reason && <input type="checkbox" aria-label={`Select ${r.sku}`} className="mr-2" checked={selected.includes(r.fingerprint)} disabled={busy || stale || Boolean(data?.error) || (!selected.includes(r.fingerprint) && selected.length >= 50)} onChange={e => { setSelected(e.target.checked ? [...selected,r.fingerprint] : selected.filter(f => f !== r.fingerprint)); setConfirmBatch(false); }} />}
+          <b>{r.sku}</b><p>{r.name}</p>
+          {r.listSource === 'calculated' && <p className="text-xs text-zinc-600">List calculated: E-Order cost ÷ 0.525</p>}
+          {r.replaces.length > 0 && <p className="text-xs">Replaces {r.replaces.join(', ')}</p>}
+          {r.replacedBy.length > 0 && <p className="text-xs">Replaced by {r.replacedBy.join(', ')}</p>}
+        </td>
+        {isReview ? <>
+          <td className="p-3 whitespace-nowrap">{r.zaStock ?? 'Unknown'}</td>
+          <td className="p-3">
+            <span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${needsReview(r) ? 'bg-amber-50 text-amber-900' : 'bg-zinc-100 text-zinc-600'}`}>{r.ignoredUntil ? `Ignored until ${reviewDate(r.ignoredUntil)}` : needsReview(r) ? 'Review candidate' : 'Silenced'}</span>
+            <p className="mt-1 text-xs text-zinc-600">{r.ignoredUntil ? 'Not counted' : needsReview(r) ? 'ZA stock available · Counted' : r.zaStock == null ? 'ZA stock unknown · Not counted' : 'No ZA stock · Not counted'}</p>
+          </td>
+        </> : isNew ? <>
+          <td className="p-3 whitespace-nowrap">{money(r.proposed)}</td><td className="p-3 whitespace-nowrap">{money(r.list)}</td>
+        </> : <>
+          <td className="p-3 whitespace-nowrap">{money(r.previous)}</td><td className="p-3 whitespace-nowrap">{money(r.proposed)}</td>
+          <td className="p-3">{r.previous != null && r.proposed != null ? `${money(r.proposed-r.previous)}${r.previous > 0 ? ` (${((r.proposed/r.previous-1)*100).toFixed(1)}%)` : ''}` : '—'}</td>
+        </>}
+        <td className="p-3 max-w-sm">
+          {isReview ? <div className="space-y-2">
+            <p>{r.reason}</p>
+            {r.reviewBlocker && r.reviewBlocker !== r.reason && <p className="text-sm text-amber-800">{r.reviewBlocker}</p>}
+            {r.approvalReason && r.approvalReason !== r.reason && r.approvalReason !== r.reviewBlocker && <p className="text-xs text-zinc-600">{r.approvalReason}</p>}
+            {needsReview(r) && r.reviewAction && <>
+              {r.reviewAction === 'new' ? <p className="text-sm">Purchase cost: {money(r.proposed)}<br />Initial selling price: {money(r.list)}<br />No opening stock balance.</p>
+                : r.reviewAction === 'price' ? <p className="text-sm">Purchase cost: {money(r.previous)} → {money(r.proposed)}</p>
+                  : <p className="text-sm">Already in Xero. Purchase cost: {money(r.previous)}.</p>}
+            </>}
+            <div className="flex flex-wrap gap-2">
+              {needsReview(r) && r.reviewAction && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'resolve-review', fingerprint: r.fingerprint })}>{busy && activeUpdate === r.fingerprint ? (r.reviewAction === 'new' ? 'Adding…' : r.reviewAction === 'price' ? 'Updating…' : 'Saving…') : r.reviewAction === 'new' ? 'Add to Xero' : r.reviewAction === 'price' ? 'Update' : 'Keep in Xero'}</button>}
+              {needsReview(r) && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'ignore-review', fingerprint: r.fingerprint })}>Ignore for 90 days</button>}
+              {r.ignoredUntil && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'unignore-review', fingerprint: r.fingerprint })}>Undo ignore</button>}
+            </div>
+          </div> : r.reason || (supportsBatch && <button className={button} disabled={busy || stale || Boolean(data?.error)} onClick={() => action({ action: 'apply', fingerprint: r.fingerprint, confirmed: true })}>{busy && activeUpdate === r.fingerprint ? (isNew ? 'Adding…' : 'Updating…') : (isNew ? 'Add to Xero' : 'Update')}</button>)}
+          {activeUpdate === r.fingerprint && (error || message) && <p role={error ? 'alert' : 'status'} className={`mt-2 text-sm ${error ? 'text-amber-800' : 'text-green-800'}`}>{error || message}</p>}
+          {r.kind === 'archive' && <><p>Stock: {r.stock ?? 'Unknown'}</p><button className={button} disabled={busy || !r.eligibleForArchiveReview || r.stock !== 0} onClick={() => setProposal(r)}>Record completed archive</button></>}
+        </td>
+      </tr>)}</tbody>
+    </table>{!rows.length && <p className="p-4">No matching proposals in the saved comparison.</p>}</div>
     {rows.length > limit && <button className={button} onClick={() => setLimit(limit+50)}>Show more</button>}
     {proposal && <section className="rounded border-2 border-sky-700 bg-white p-4" aria-label="Confirm completed archive"><h2 className="font-bold">{proposal.company === 'thanda-solar' ? 'Thanda' : 'Sensible'} · {proposal.sku}</h2><p className="my-3">Confirm you checked outstanding orders, stock is zero, and you have completed archival in Xero.</p><div className="flex gap-3"><button className={button} disabled={busy} onClick={() => action({ action: 'archive-reviewed', fingerprint: proposal.fingerprint, confirmed: true })}>{busy ? 'Working…' : 'Confirm'}</button><button className={button} disabled={busy} onClick={() => setProposal(null)}>Cancel</button></div></section>}
     <details className="rounded border bg-white p-4"><summary className="cursor-pointer font-semibold">Quarterly sanity check</summary><p className="my-3 text-sm">Check the official quarterly price list against E-Order, announced new products, phase-outs and article-number changes. Record discrepancies here; the quarterly list never overwrites E-Order prices. Q4 2026 highlights: Venus GX end of life; gradual Lithium Smart phase-out; new article numbers; November EV charger launches.</p><textarea aria-label="Quarterly check findings" className="w-full rounded border p-3" rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder="Quarter, source/reference, checks performed and discrepancies…" /><button className={button} disabled={busy || note.trim().length < 10} onClick={() => action({ action: 'quarterly', note })}>Save check record</button></details>

@@ -4,14 +4,18 @@ import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
 import { refreshReview } from '@/lib/victron-catalogue-service.mjs';
 import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
-import { ensureReviewSchema, needsAttention } from '@/lib/victron-catalogue-review.mjs';
+import { ensureReviewSchema, needsAttention, recordReviewDecision } from '@/lib/victron-catalogue-review.mjs';
 import { stockSku } from '@/lib/victron-sku-family.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 async function admin() { const user = await currentUser(); return user?.role === 'admin' && !user.impersonatedBy ? user : null; }
-async function applyCommand(actor: string, rows: unknown[], batch = false) {
+async function applyCommand(actor: string, rows: unknown[], batch = false, approvedReview?: Parameters<typeof recordReviewDecision>[2]) {
   const outcome = await submitCatalogueCommand(pool, { actor, rows, batch });
   if (outcome.status === 200) {
+    if (approvedReview) {
+      try { await recordReviewDecision(pool, actor, approvedReview, 'review-approved'); }
+      catch { outcome.body.message += ' The eligibility decision could not be saved. Do not repeat the Xero action; compare saved records before resolving the remaining review.'; }
+    }
     try { await refreshReview(pool); }
     catch { outcome.body.message += ' The comparison could not be refreshed. Compare saved records before making further changes.'; }
   }
@@ -33,7 +37,7 @@ export async function POST(request: Request) {
   const user = await admin();
   if (!user || !validCustomerViewOrigin(request, { portalBaseUrl: process.env.PORTAL_BASE_URL, nodeEnv: process.env.NODE_ENV })) return NextResponse.json({ error: 'Same-origin administrator access required' }, { status: 403 });
   const body = await request.json().catch(() => null);
-  if (!body || !['refresh','acknowledge','apply','apply-batch','apply-create-batch','quarterly','archive-reviewed'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  if (!body || !['refresh','acknowledge','apply','apply-batch','apply-create-batch','quarterly','archive-reviewed','resolve-review','ignore-review','unignore-review'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   try {
     await ensureReviewSchema(pool);
     if (body.action === 'refresh') {
@@ -66,6 +70,25 @@ export async function POST(request: Request) {
     }
     const row = fresh.rows.find((r: { fingerprint: string }) => r.fingerprint === body.fingerprint);
     if (!row) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This proposal changed or is no longer available. No Xero updates were made. Review the latest comparison before trying again.' }, { status: 409 });
+    if (body.action === 'ignore-review' || body.action === 'unignore-review') {
+      if (row.kind !== 'review') return NextResponse.json({ error: 'Only review candidates can be ignored.' }, { status: 409 });
+      await recordReviewDecision(pool, String(user.id), row, body.action === 'ignore-review' ? 'review-ignored' : 'review-resumed');
+      try { await refreshReview(pool); }
+      catch { return NextResponse.json({ message: 'The review decision was saved. Compare saved records to refresh the review list.' }); }
+      return NextResponse.json({ message: body.action === 'ignore-review' ? 'Ignored for 90 days in this company. The product remains visible and returns at the next comparison after expiry.' : 'Ignore removed. The product is available for review again.' });
+    }
+    if (body.action === 'resolve-review') {
+      if (row.kind !== 'review' || !needsAttention(row) || !row.reviewAction || !['new','price','keep'].includes(row.reviewAction) || !row.approvalReason || row.reviewBlocker) return NextResponse.json({ error: row.reviewBlocker || 'This item cannot be accepted. Review the latest comparison and its eligibility reason.' }, { status: 409 });
+      if (row.reviewAction === 'keep') {
+        await recordReviewDecision(pool, String(user.id), row, 'review-approved');
+        try { await refreshReview(pool); }
+        catch { return NextResponse.json({ message: 'Eligibility accepted for the existing Xero item. Compare saved records to refresh the review list.' }); }
+        return NextResponse.json({ message: 'Eligibility accepted. The item is already in Xero at the displayed cost.' });
+      }
+      // Only the fresh server-derived action can waive eligibility advice. The
+      // existing Hub command still checks live IDs, prices, duplicates and consent.
+      return await applyCommand(String(user.id), [{ ...row, kind: row.reviewAction, reason: null }], false, row);
+    }
     if (body.action === 'archive-reviewed') {
       if (row.kind !== 'archive' || !row.eligibleForArchiveReview || row.stock !== 0 || body.confirmed !== true) return NextResponse.json({ error: 'Archive checklist requires confirmed supplier retirement evidence, known zero stock, and your confirmation that open orders were checked and archival completed in Xero.' }, { status: 409 });
       await pool.query("INSERT INTO victron_catalogue_events(actor,action,company,sku,details) VALUES($1,'archive-reviewed',$2,$3,$4)", [String(user.id), row.company, row.sku, JSON.stringify(row)]);

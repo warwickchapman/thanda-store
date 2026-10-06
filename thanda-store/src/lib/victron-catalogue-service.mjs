@@ -1,5 +1,5 @@
 import { assertHubSnapshot } from './xero/hub.mjs';
-import { companies, ensureReviewSchema, reviewCatalogue, advanceHistory, changeSignature } from './victron-catalogue-review.mjs';
+import { companies, ensureReviewSchema, reviewCatalogue, advanceHistory, changeSignature, readReviewDecisions } from './victron-catalogue-review.mjs';
 
 export async function catalogueHub(company, path, init = {}) {
   if (!companies.includes(company)) throw new Error('Unknown Xero company');
@@ -37,6 +37,7 @@ export async function refreshReview(pool, request = catalogueHub) {
     if (!evidence) throw new Error('Wait for a complete supplier catalogue sync.');
     const state = (await db.query('SELECT * FROM victron_catalogue_review WHERE id=true')).rows[0];
     const successions = (await db.query('SELECT predecessor_sku,successor_sku FROM victron_sku_successions')).rows;
+    const decisions = await readReviewDecisions(db);
     const items = {};
     for (const company of companies) items[company] = await readItems(company, request);
     const observedAt = new Date(evidence.observed_at).toISOString();
@@ -47,7 +48,7 @@ export async function refreshReview(pool, request = catalogueHub) {
       if (/\bVictron\b/i.test(`${item.Name} ${item.Description} ${item.PurchaseDescription}`) && !prior[item.Code]) prior[item.Code] = { day: null, absentDays: 0 };
     }
     const history = advanceHistory(prior, evidence.products, day, successions, observedAt);
-    let rows = reviewCatalogue({ catalogue: evidence.products, items, successions, history, observedAt });
+    let rows = reviewCatalogue({ catalogue: evidence.products, items, successions, history, decisions, observedAt });
     const completed = (await db.query("SELECT company,sku,max(created_at) AS completed_at FROM victron_catalogue_events WHERE action='archive-reviewed' GROUP BY company,sku")).rows;
     rows = rows.filter(row => row.kind !== 'archive' || !completed.some(event => event.company === row.company && event.sku === row.sku && (history[row.sku]?.absentSince || history[row.sku]?.retiredSince) && new Date(event.completed_at).getTime() >= Date.parse(history[row.sku].absentSince || history[row.sku].retiredSince)));
     const signature = changeSignature(rows);

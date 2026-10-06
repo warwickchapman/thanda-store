@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { submitCatalogueCommand } from '../src/lib/victron-catalogue-command.mjs';
 import { validCustomerViewOrigin } from '../src/lib/auth/impersonation-origin.mjs';
 import { stockSku } from '../src/lib/victron-sku-family.mjs';
-import { needsAttention } from '../src/lib/victron-catalogue-review.mjs';
+import { needsAttention, recordReviewDecision } from '../src/lib/victron-catalogue-review.mjs';
 
 // Exercise the actual Next route with real Web Request/Response objects. Only
 // auth, stored evidence and I/O are replaced; command/audit handling is real.
@@ -30,6 +30,7 @@ function harness(options = {}) {
     if (sql.startsWith('SELECT created_at,actor,action,company,sku,details')) return { rows: [] };
     if (sql.startsWith('INSERT INTO victron_catalogue_events')) {
       if (options.failAttempt) throw new Error('database internal failure');
+      if (options.failDecision && String(args[1]).startsWith('review-')) throw new Error('database internal failure');
       audit.push({ action: args[1], company: args[2], sku: args[3], details: JSON.parse(args[4]) });
       return { rows: [{ id: 42 }] };
     }
@@ -61,7 +62,7 @@ function harness(options = {}) {
       return { rows };
     } },
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
-    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention },
+    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention, recordReviewDecision },
     '@/lib/victron-sku-family.mjs': { stockSku },
   };
   const exports = {};
@@ -92,6 +93,77 @@ test('review summary and full page silence zero/unknown stock without hiding row
   assert.equal((await stocked.get()).body.attention,true);
   const acknowledged=harness({rows:[{...product,kind:'review',zaStock:1}],state:{acknowledged_signature:'current'}});
   assert.equal((await acknowledged.get(true)).body.attention,false);
+});
+
+const reviewProduct = { ...product, kind:'review', reason:'120V-only model: South African eligibility requires review.',
+  approvalReason:'120V-only model: South African eligibility requires review.',reviewBlocker:null,reviewAction:'price',zaStock:3,ignoredUntil:null };
+test('review accepts server-derived new/price actions through the existing audited command and persists only confirmed approvals', async () => {
+  for (const reviewAction of ['new','price']) {
+    const row={...reviewProduct,reviewAction,itemId:reviewAction==='new'?null:product.itemId};
+    const h=harness({rows:[row]});
+    const result=await h.post({action:'resolve-review',fingerprint:row.fingerprint,reviewAction:'forged'});
+    assert.equal(result.status,200); assert.equal(h.calls.length,1);
+    assert.equal(h.calls[0].payload.action,reviewAction);
+    assert.deepEqual(h.audit.map(event=>event.action),['pending','applied','review-approved']);
+    assert.equal(h.audit.at(-1).company,row.company); assert.equal(h.audit.at(-1).sku,row.sku);
+    assert.equal(h.audit.at(-1).details.approvedReason,row.approvalReason);
+  }
+  const rejected=harness({rows:[reviewProduct],respond:()=>Response.json({detail:'Rejected'},{status:409})});
+  assert.equal((await rejected.post({action:'resolve-review',fingerprint:reviewProduct.fingerprint})).status,409);
+  assert.ok(!rejected.audit.some(event=>event.action==='review-approved'));
+  const unknown=harness({rows:[reviewProduct],respond:()=>new Response('Internal Server Error',{status:500})});
+  assert.equal((await unknown.post({action:'resolve-review',fingerprint:reviewProduct.fingerprint})).body.code,'UNKNOWN_OUTCOME');
+  assert.ok(!unknown.audit.some(event=>event.action==='review-approved'));
+});
+
+test('Keep in Xero records eligibility locally; decision failures prevent success without dispatch', async () => {
+  const row={...reviewProduct,reviewAction:'keep',previous:reviewProduct.proposed};
+  const h=harness({rows:[row]});
+  const result=await h.post({action:'resolve-review',fingerprint:row.fingerprint});
+  assert.equal(result.status,200); assert.equal(h.calls.length,0);
+  assert.deepEqual(h.audit.map(event=>event.action),['review-approved']);
+  const failed=harness({rows:[row],failDecision:true});
+  assert.equal((await failed.post({action:'resolve-review',fingerprint:row.fingerprint})).status,503);
+  assert.equal(failed.calls.length,0);
+});
+
+test('confirmed Xero result remains successful if the subsequent local review approval cannot be saved', async () => {
+  const h=harness({rows:[reviewProduct],failDecision:true});
+  const result=await h.post({action:'resolve-review',fingerprint:reviewProduct.fingerprint});
+  assert.equal(result.status,200); assert.match(result.body.message,/Do not repeat/);
+  assert.equal(h.calls.length,1); assert.deepEqual(h.audit.map(event=>event.action),['pending','applied']);
+});
+
+test('review resolution rejects ignored, unstocked, hard-blocked and ordinary rows before Hub dispatch', async () => {
+  for (const row of [product,{...reviewProduct,ignoredUntil:'2099-01-01'},{...reviewProduct,zaStock:0},
+    {...reviewProduct,zaStock:null},{...reviewProduct,reviewBlocker:'No valid price'},
+    {...reviewProduct,reviewAction:null},{...reviewProduct,approvalReason:null}]) {
+    const h=harness({rows:[row]});
+    assert.equal((await h.post({action:'resolve-review',fingerprint:row.fingerprint})).status,409);
+    assert.equal(h.calls.length,0); assert.equal(h.audit.length,0);
+  }
+});
+
+test('ignore and undo are audited for the actual row company/SKU and make no Hub calls', async () => {
+  for (const [action,saved] of [['ignore-review','review-ignored'],['unignore-review','review-resumed']]) {
+    const h=harness({rows:[{...reviewProduct,company:'sensible-solar'}]});
+    const result=await h.post({action,fingerprint:reviewProduct.fingerprint,company:'thanda-solar',sku:'forged',days:1000});
+    assert.equal(result.status,200); assert.equal(h.calls.length,0);
+    assert.equal(h.audit[0].action,saved); assert.equal(h.audit[0].company,'sensible-solar');
+    assert.equal(h.audit[0].sku,reviewProduct.sku);
+    assert.equal((await harness().post({action,fingerprint:product.fingerprint})).status,409);
+  }
+});
+
+test('stale review selection and unauthorised/cross-origin decisions are rejected without local decisions or writes', async () => {
+  assert.equal((await harness({rows:[reviewProduct]}).post({action:'resolve-review',fingerprint:'old'})).body.code,'STALE_SELECTION');
+  for (const action of ['resolve-review','ignore-review','unignore-review']) {
+    for (const options of [{user:null},{user:{id:7,role:'customer'}},{origin:'https://elsewhere.example'}]) {
+      const h=harness({rows:[reviewProduct],...options});
+      assert.equal((await h.post({action,fingerprint:reviewProduct.fingerprint})).status,403);
+      assert.equal(h.audit.length,0); assert.equal(h.calls.length,0);
+    }
+  }
 });
 
 test('silenced review rows do not silence errors, overdue comparisons or other change kinds', async () => {

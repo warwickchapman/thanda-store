@@ -71,7 +71,30 @@ warehouse. These review candidates appear first, sorted by SKU. Products with
 zero or unknown ZA stock remain listed below as **Silenced**, with the reason
 for their hold; they do not contribute to the dropdown count or change alerts.
 Unknown remains labelled **Unknown**, never zero. This only prioritises the
-review queue: it neither archives Xero items nor approves held products.
+review queue; an administrator resolves candidates using the row actions.
+
+- **Add to Xero** accepts the displayed eligibility advice and creates a missing
+  item at its displayed purchase cost and initial list selling price.
+- **Update** accepts the advice and changes an existing item's purchase cost to
+  the displayed proposal. **Keep in Xero** accepts advice for an existing item
+  whose saved cost already matches; it makes no Xero request. The page identifies
+  existing items so they are never presented as missing products.
+- **Ignore for 90 days** removes the review candidate from the count and change
+  alerts for that company and literal SKU. It stays visible with its expiry date.
+  **Undo ignore** brings it back immediately. The next daily/manual comparison
+  after expiry returns a ZA-stocked item to the active review queue. Stock arriving
+  during the ignore period does not end it early.
+- Acceptance applies only to the displayed complete set of regional/voltage
+  advice. An additional advisory reopens review. Pricing errors, solar-panel
+  prefixes, duplicate packaging, phase-out creation and disabled or unknown
+  purchasing status remain independent blockers. Hard-blocked rows show their
+  reason and still offer ignore; they cannot be added or updated through review.
+- Decisions are audited in `victron_catalogue_events` with actor, company and SKU.
+  Acceptance is saved only after a confirmed Xero result, or locally for **Keep
+  in Xero**. Unknown/rejected writes never accept eligibility. The latest approval
+  and ignore/undo events supply durable state without a second decision table.
+  Ignore expiry uses the database's event time plus 90 days. An ignore applies
+  only to review rows; it cannot suppress later normal price or archive changes.
 
 ZA stock comes exclusively from each literal article's
 `all_stock_by_warehouse.af_sa_inzuzo`. Xero/company stock, other warehouses,
@@ -84,7 +107,7 @@ after a silenced comparison alerts again even if its earlier alert was acknowled
 Failed or overdue comparisons continue to alert independently of this queue.
 
 After deploying this change, run one saved comparison to populate ZA quantities
-and replace the old category-based exclusions in the existing saved rows.
+and review actions, and replace old category-based exclusions in saved rows.
 
 A missing product becomes an archive candidate after two distinct complete daily
 supplier observations. A failed/empty/incomplete fetch cannot establish absence.
@@ -140,6 +163,8 @@ marks requested permissions as granted before Xero actually returns them.
 | --- | --- | --- |
 | Store render, menu alert, audit | 0 | 0 |
 | ZA review ordering, counting and silencing | 0; uses saved catalogue during existing comparisons | 0 additional |
+| Ignore / undo / Keep in Xero | Saved Hub pages only; **0 Xero**, **0 supplier** | 0 additional |
+| Review candidate Add / Update | Existing single-item audited create/update command: 1 filtered Items check + 1 write | Only on the row action |
 | Full catalogue evidence save | 0 additional; uses existing validated catalogue fetch | 0 additional |
 | Compare saved Items | Up to 50 local Hub pages per company, 1,000 items/page; **0 Xero** | 0 Xero |
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
