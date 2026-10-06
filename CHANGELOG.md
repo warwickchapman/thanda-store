@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Repaired Victron cost updates after the Hub could fail while reading optional rate-limit headers. Individual and batch submissions now share one audited command path, save the exact attempt before dispatch, and report uncertain outcomes without exposing parser errors. Confirmed updates remain successful if the later audit or comparison refresh fails. Unchanged prices survive supplier timestamp and stock refreshes, while fresh command IDs allow genuine later price cycles. Strict decimal validation rejects malformed or out-of-range supplier prices. The companion Hub repair includes real connector/database regression tests and separates new-product accounting checks from existing cost updates.
+
 - Victron update errors now distinguish changed proposals from mixed-company selections, report how many selected proposals changed, and confirm when no Xero writes occurred. Rejected selections are cleared and the latest saved comparison reloads automatically; updates are never retried automatically.
 
 - Victron cost-change rows now have an **Update** button that applies the displayed cost immediately, with progress and outcome shown on the row. The extra confirmation at the bottom of the page is removed for individual cost updates; batch updates and new products retain their confirmation.

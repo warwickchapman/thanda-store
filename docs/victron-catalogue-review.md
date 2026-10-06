@@ -15,12 +15,18 @@ without automatically publishing them to the storefront.
 - The same explicit-or-calculated list price initialises new-item selling prices.
 - Do not use quantity-break prices. Missing/zero/non-ZAR account costs and invalid
   supplied list prices still require review; the fallback applies to missing list prices.
+  Prices must be finite numbers or ordinary decimal strings, positive, below
+  R10,000,000 and expressible in cents. Booleans, arrays, hexadecimal/exponent
+  strings and excess decimal precision are rejected. The same bounds apply to
+  calculated list prices and to the Hub's independent validation.
 - Existing products: change only `PurchaseDetails.UnitPrice`, preserving the live
   purchase accounting/tax fields and all selling/stock fields.
 - New products: reviewed tracked definitions with zero opening-balance writes and
   list selling price. Account mappings: Thanda inventory 631, COGS 311, sales 201;
   Sensible inventory 630, COGS 310, sales 200; INPUT3/OUTPUT3. Hub checks active
-  account types and tax mappings before writing.
+  account types and tax mappings before creating. Existing cost updates require
+  write permission and preserve the item's current account and tax fields; they
+  do not depend on the account defaults used for new products.
 - Click **Update** on a cost-change row to apply the displayed purchase cost immediately,
   without a second confirmation. The row shows progress and the outcome.
 - Select up to 50 cost changes in one company and confirm the batch. New products
@@ -33,6 +39,11 @@ without automatically publishing them to the storefront.
   evidence must be complete and less than 24 hours old. The Hub then checks the
   exact live item IDs and reviewed costs before dispatch. Any mismatch stops the
   whole proposed batch before its write.
+- A price selection compares company, literal SKU, item ID and before/after costs.
+  Stock movement, description changes and refreshed observation timestamps do not
+  invalidate an unchanged cost or repeat its alert. Creation and archive reviews
+  retain their relevant descriptive, pricing and stock checks. Freshness is always
+  checked separately and is never waived by a matching selection.
 - `SPM`/`SPP` and classified solar panels are excluded for South Africa; 120V-only
   and solar-home-system products require review. These exclusions do not exclude
   solar chargers. The original supplier observation is retained.
@@ -85,7 +96,7 @@ or instructions to archive. PDF price extraction/comparison remains a manual che
 ## API budget and failure behaviour
 
 Official contract checked against Xero OpenAPI `xero_accounting.yaml` and the
-OAuth scopes reference on 2026-10-05. Reuse the Hub's existing item-write scope
+OAuth scopes reference on 2026-10-06. Reuse the Hub's existing item-write scope
 validation; no OAuth grant or capability is changed by this implementation.
 
 | Path | Upstream calls per run | Scheduled daily cost |
@@ -97,6 +108,7 @@ validation; no OAuth grant or capability is changed by this implementation.
 | Click Update for one cost change | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
 | Create one item | 1 filtered `GET /Items` + 1 create-only `PUT /Items` | Only on approval |
 | Archive / quarterly record | 0 | 0 |
+| Operator reconciliation of one uncertain item | 1 filtered `GET /Items`; no write | Only on explicit investigation |
 
 The official GET Items operation returns the collection without a pagination
 parameter; the batch preflight uses one GET and indexes the reviewed codes locally.
@@ -111,12 +123,34 @@ Hub ledger. Timeouts are bounded; there are no automatic write retries. Failed
 reads preserve the previous review and add an error, never an empty success.
 
 Commands are persisted before dispatch and serialised with other item creation.
-Replays return the recorded successful result. A timeout, malformed response, or
+The Store saves the exact submitted proposals in an attempt audit before contacting
+the Hub. Every accepted submission gets new random command identifiers, separate
+from the stable comparison fingerprints, so a later genuine price cycle is a new
+operation. Replays of a Hub command return its recorded successful result; there
+are no automatic Store retries. A timeout, malformed response, or
 partial batch outcome blocks every member SKU, even under a new review ID. An
 operator must reconcile the saved request against Xero before retrying; do not
 blindly mark an uncertain command retryable. The Hub updates its stored item
 projection only after every expected result is confirmed. A subsequent scheduled
 Items sync reconciles any partial outcome. Existing jobs share the same reserve.
+
+Non-JSON responses and lost connections are recorded as uncertain, with a clear
+reconciliation message instead of raw server/parser errors. A successful write
+remains reported as successful even if the subsequent audit finalisation or saved
+comparison refresh fails; the operator sees a separate warning. Optional quota
+headers must never break response processing: missing/malformed day allowance is
+unknown, and an invalid Retry-After falls back to 60 seconds for a 429 response.
+
+Reconciliation preserves history. Check the exact tenant, item ID, SKU and current
+purchase cost against the saved command. Record the verified evidence and outcome
+before closing an uncertain command as `reconciled`; this is not a successful-write
+claim and does not replay it. Any later update requires a fresh operator action.
+A scheduled Items sync alone does not close an uncertain command.
+
+On 6 October 2026, the uncertain Thanda attempt for `ASS030720118` was reconciled
+with one filtered Hub GET at 09:39:34 UTC. The verified cost remained R165.38;
+R144.90 was not retried. The original command and fresh evidence were retained,
+and a `reconciled` event was added to the Store audit.
 
 ## Verification
 

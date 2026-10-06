@@ -2,11 +2,20 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
-import { catalogueHub, refreshReview } from '@/lib/victron-catalogue-service.mjs';
+import { refreshReview } from '@/lib/victron-catalogue-service.mjs';
+import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
 import { ensureReviewSchema } from '@/lib/victron-catalogue-review.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 async function admin() { const user = await currentUser(); return user?.role === 'admin' && !user.impersonatedBy ? user : null; }
+async function applyCommand(actor: string, rows: unknown[], batch = false) {
+  const outcome = await submitCatalogueCommand(pool, { actor, rows, batch });
+  if (outcome.status === 200) {
+    try { await refreshReview(pool); }
+    catch { outcome.body.message += ' The comparison could not be refreshed. Compare saved records before making further changes.'; }
+  }
+  return NextResponse.json(outcome.body, { status: outcome.status, headers: outcome.headers });
+}
 export async function GET(request: Request) {
   if (!await admin()) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   try {
@@ -46,18 +55,7 @@ export async function POST(request: Request) {
       if (selected.length !== body.fingerprints.length) return NextResponse.json({ code: 'STALE_SELECTION', error: `${body.fingerprints.length - selected.length} of ${body.fingerprints.length} selected proposals changed or are no longer available. No Xero updates were made. Review the latest comparison and select the costs again.` }, { status: 409 });
       if (selected.some(r => r.kind !== 'price')) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This selection includes products that are not cost updates. No Xero updates were made. Select cost changes from the latest comparison.' }, { status: 409 });
       if (selected.some(r => r.company !== selected[0].company)) return NextResponse.json({ code: 'INVALID_SELECTION', error: 'The selection includes both Thanda and Sensible. No Xero updates were made. Select cost changes for one company at a time.' }, { status: 409 });
-      const proposals = selected.map(row => ({ code: row.sku, name: row.name, cost: row.cost, list: row.list,
-        observedAt: row.observedAt, action: row.kind, expectedItemId: row.itemId,
-        expectedCost: row.previous, requestId: row.fingerprint }));
-      const response = await catalogueHub(selected[0].company, 'commands/victron-costs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Actor': String(user.id) }, body: JSON.stringify({ proposals }),
-      });
-      const result = await response.json();
-      await pool.query('INSERT INTO victron_catalogue_events(actor,action,company,details) VALUES($1,$2,$3,$4)',
-        [String(user.id), response.ok ? 'batch-applied' : 'batch-failed', selected[0].company, JSON.stringify({ changes: selected.map(r => ({ sku: r.sku, previous: r.previous, proposed: r.proposed })), result: response.ok ? result : { error: typeof result.detail === 'string' ? result.detail : 'Unconfirmed batch' } })]);
-      if (!response.ok) return NextResponse.json({ error: typeof result.detail === 'string' ? result.detail : 'Batch could not be confirmed. Reconcile before retrying.' }, { status: response.status });
-      await refreshReview(pool).catch(() => {});
-      return NextResponse.json({ message: `Xero confirmed ${selected.length} cost updates.` });
+      return await applyCommand(String(user.id), selected, true);
     }
     const row = fresh.rows.find((r: { fingerprint: string }) => r.fingerprint === body.fingerprint);
     if (!row) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This proposal changed or is no longer available. No Xero updates were made. Review the latest comparison before trying again.' }, { status: 409 });
@@ -68,19 +66,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: 'Manual Xero archive completion recorded.' });
     }
     if (!['price','new'].includes(row.kind)) return NextResponse.json({ error: 'This item needs manual review.' }, { status: 409 });
-    const response = await catalogueHub(row.company, 'commands/victron-items', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Actor': String(user.id) },
-      body: JSON.stringify({ code: row.sku, name: row.name, cost: row.cost, list: row.list,
-        observedAt: row.observedAt, action: row.kind, expectedItemId: row.itemId,
-        expectedCost: row.previous, requestId: row.fingerprint }),
-    });
-    const result = await response.json();
-    await pool.query('INSERT INTO victron_catalogue_events(actor,action,company,sku,details) VALUES($1,$2,$3,$4,$5)',
-      [String(user.id), response.ok ? 'applied' : 'failed', row.company, row.sku, JSON.stringify({ changes: [{ sku: row.sku, previous: row.previous, proposed: row.proposed }], result: response.ok ? result : { error: typeof result.detail === 'string' ? result.detail : 'Hub could not confirm this action.' } })]);
-    if (!response.ok) return NextResponse.json({ error: typeof result.detail === 'string' ? result.detail : 'Hub could not confirm this action. Check the audit before retrying.' }, { status: response.status });
-    await refreshReview(pool).catch(() => {});
-    return NextResponse.json({ message: 'Xero confirmed the item change.' });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Action could not be confirmed. Review the saved audit before retrying.' }, { status: 503 });
+    return await applyCommand(String(user.id), [row]);
+  } catch {
+    return NextResponse.json({ error: 'The action could not be completed. Check the saved comparison and audit before trying again.' }, { status: 503 });
   }
 }

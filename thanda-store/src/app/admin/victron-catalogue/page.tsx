@@ -5,6 +5,12 @@ type Row = { fingerprint: string; company: string; sku: string; name: string; ki
 type AuditEvent = { created_at: string; actor: string; action: string; company?: string; sku?: string; details: { note?: string; changes?: { sku: string; previous?: number; proposed?: number }[]; result?: { error?: string } } };
 type State = { overdue: boolean; rows: Row[]; error?: string; checked_at?: string; observed_at?: string; signature: string; acknowledged_signature?: string; events: AuditEvent[] };
 const money = (n?: number) => n == null ? 'Unknown' : `R ${Number(n).toFixed(2)}`;
+const unknownOutcome = 'The result could not be confirmed. Do not repeat this update until the saved attempt has been reconciled with Xero.';
+async function readResponse(response: Response, fallback: string) {
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(fallback);
+  return payload;
+}
 export default function VictronCatalogue() {
   const [data, setData] = useState<State | null>(null);
   const [error, setError] = useState('');
@@ -22,15 +28,15 @@ export default function VictronCatalogue() {
   const [proposal, setProposal] = useState<Row | null>(null);
   async function load() {
     const response = await fetch('/api/admin/victron-catalogue', { cache: 'no-store' });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error);
+    const payload = await readResponse(response, 'The comparison could not be loaded. Please try again.');
+    if (!response.ok) throw new Error(payload.error || 'The comparison could not be loaded.');
     setData(payload);
   }
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/admin/victron-catalogue', { cache: 'no-store', signal: controller.signal }).then(async response => {
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error);
+      const payload = await readResponse(response, 'The comparison could not be loaded. Please try again.');
+      if (!response.ok) throw new Error(payload.error || 'The comparison could not be loaded.');
       setData(payload);
     }).catch(e => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
@@ -40,19 +46,30 @@ export default function VictronCatalogue() {
     actionPending.current = true;
     setActiveUpdate(body.action === 'apply' && typeof body.fingerprint === 'string' ? body.fingerprint : null);
     setBusy(true); setError(''); setMessage('');
+    const writesXero = body.action === 'apply' || body.action === 'apply-batch';
     try {
-      const response = await fetch('/api/admin/victron-catalogue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const payload = await response.json();
+      const response = await fetch('/api/admin/victron-catalogue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .catch(() => { throw new Error(writesXero ? unknownOutcome : 'The action could not be completed. Please try again.'); });
+      const payload = await readResponse(response, writesXero ? unknownOutcome : 'The action could not be completed. Please try again.');
       if (!response.ok) {
+        if (payload.code === 'UNKNOWN_OUTCOME') {
+          setSelected([]); setConfirmBatch(false); setProposal(null);
+          await load().catch(() => {});
+        }
         if (payload.code === 'STALE_SELECTION' || payload.code === 'INVALID_SELECTION') {
           setSelected([]); setConfirmBatch(false); setProposal(null);
           try { await load(); }
           catch { throw new Error(`${payload.error} The comparison could not be refreshed; click Compare saved records before trying again.`); }
         }
-        throw new Error(payload.error);
+        throw new Error(payload.error || (writesXero ? unknownOutcome : 'The action could not be completed.'));
       }
-      setMessage(payload.message); setProposal(null); setSelected([]); setConfirmBatch(false); await load(); window.dispatchEvent(new Event('victron-catalogue-changed'));
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to complete action'); }
+      setMessage(payload.message); setProposal(null); setSelected([]); setConfirmBatch(false);
+      await load().catch(() => { setError('The action completed, but the comparison could not be loaded. Compare saved records before making further changes.'); });
+      window.dispatchEvent(new Event('victron-catalogue-changed'));
+    } catch (e) {
+      if (writesXero) { setSelected([]); setConfirmBatch(false); setProposal(null); }
+      setError(e instanceof Error ? e.message : 'Unable to complete action');
+    }
     finally { actionPending.current = false; setBusy(false); }
   }
   const stale = data?.overdue ?? true;

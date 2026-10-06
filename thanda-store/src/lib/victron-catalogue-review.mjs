@@ -6,6 +6,16 @@ import { skuReplacementContext } from './victron-sku-family.mjs';
 
 export const companies = ['thanda-solar', 'sensible-solar'];
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// A cost approval concerns this exact item and before/after cost. Stock,
+// descriptions and observation timestamps can refresh without changing it.
+// Command IDs are generated separately when an operator submits an action.
+function comparison(row) {
+  if (row.kind === 'price') {
+    const { company, sku, kind, itemId, previous, proposed } = row;
+    return { company, sku, kind, itemId, previous, proposed };
+  }
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'fingerprint'].includes(key)));
+}
 const article = sku => String(sku).toUpperCase().replace(/R$/, '');
 export function exclusion(product) {
   const sku = String(product.sku || '').toUpperCase();
@@ -46,7 +56,8 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const retired = item && retirementReason({ name: product.description }, product, relationships.replacedBy[0]);
       if (retired) { kind = 'archive'; reason = retired + ' Check remaining stock and open orders before archiving in Xero.'; base.eligibleForArchiveReview = true; }
       if (!reason && item && Math.round(Number(base.previous) * 100) === Math.round(target * 100) && base.previous != null) continue;
-      rows.push({ ...base, kind, reason, fingerprint: fingerprint({ ...base, kind, reason }) });
+      const row = { ...base, kind, reason };
+      rows.push({ ...row, fingerprint: fingerprint(comparison(row)) });
     }
     // Literal SKU prices must not migrate to a successor. Relationships are context,
     // while retail aliases suppress accidental duplicate creation above.
@@ -58,7 +69,7 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const base = { company, sku, name: item.Name || sku, kind: 'archive', reason, observedAt,
         ...skuReplacementContext(successions, sku), stock: item.QuantityOnHand ?? null,
         cost: null, list: null, proposed: null, eligibleForArchiveReview: Boolean(h?.absentDays >= 2), itemId: item.ItemID, previous: item.PurchaseDetails?.UnitPrice ?? null };
-      rows.push({ ...base, fingerprint: fingerprint(base) });
+      rows.push({ ...base, fingerprint: fingerprint(comparison(base)) });
     }
   }
   return rows.sort((a,b) => a.company.localeCompare(b.company) || a.sku.localeCompare(b.sku));
@@ -99,5 +110,5 @@ export function advanceHistory(history, catalogue, day, successions = [], observ
 }
 // Observation timestamps must not make the same unresolved changes notify daily.
 export function changeSignature(rows, error = null) {
-  return fingerprint({ error, rows: rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt','fingerprint'].includes(key)))) });
+  return fingerprint({ error, rows: rows.map(comparison) });
 }

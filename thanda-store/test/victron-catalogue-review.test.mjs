@@ -67,3 +67,46 @@ test('missing list uses normal cost / 0.525 for both companies and new products'
   }
   for (const value of [0,-1,'invalid',Infinity]) assert.ok(prices({...p,enduser_price_zar:{price:value}}).error);
 });
+
+test('cost approvals and alerts survive unchanged observations, stock and description changes', () => {
+  const existing = Object.fromEntries(Object.keys(items).map(company => [company, [{
+    Code: p.sku, ItemID: `${company}-item`, IsPurchased: true,
+    PurchaseDetails: { UnitPrice: 400 }, QuantityOnHand: 1,
+  }]]));
+  const before = run({ items: existing });
+  const refreshed = run({
+    items: Object.fromEntries(Object.entries(existing).map(([company, entries]) => [company,
+      entries.map(item => ({ ...item, QuantityOnHand: 2 }))])),
+    observedAt: new Date(now + 1000).toISOString(),
+    catalogue: [{ ...p, description: 'Updated supplier description' }],
+    successions: [{ predecessor_sku: 'PMP482305010', successor_sku: p.sku }],
+  });
+  assert.deepEqual(before.map(r => r.fingerprint), refreshed.map(r => r.fingerprint));
+  assert.equal(changeSignature(before), changeSignature(refreshed));
+  assert.ok(refreshed.every(r => r.replaces.includes('PMP482305010')));
+  assert.ok(refreshed.every(r => r.stock === 2));
+  for (const changes of [
+    { PurchaseDetails: { UnitPrice: 401 } }, { ItemID: 'different-item' }, { IsPurchased: false },
+  ]) {
+    const changed = run({ items: { ...existing, 'thanda-solar': [{ ...existing['thanda-solar'][0], ...changes }] } });
+    assert.notEqual(before.find(r => r.company === 'thanda-solar').fingerprint,
+      changed.find(r => r.company === 'thanda-solar').fingerprint);
+  }
+  const changedCost = run({ items: existing, catalogue: [{ ...p, price: 526 }] });
+  assert.notEqual(before.find(r => r.company === 'thanda-solar').fingerprint,
+    changedCost.find(r => r.company === 'thanda-solar').fingerprint);
+  const changedList = run({ items: existing, catalogue: [{ ...p, enduser_price_zar: { price: 1010 } }] });
+  assert.notEqual(before.find(r => r.company === 'sensible-solar').fingerprint,
+    changedList.find(r => r.company === 'sensible-solar').fingerprint);
+});
+
+test('archive approvals still depend on stock and new-item approvals on selling price', () => {
+  const existing = { ...items, 'thanda-solar': [{ Code: p.sku, ItemID: 'item', IsPurchased: true,
+    PurchaseDetails: { UnitPrice: 400 }, QuantityOnHand: 0 }] };
+  const options = { items: existing, catalogue: [{ ...p, description: 'Available until stock 0', stock_quantity: 0 }] };
+  const before = run(options).find(r => r.company === 'thanda-solar');
+  assert.equal(before.kind, 'archive');
+  const after = run({ ...options, items: { ...existing, 'thanda-solar': [{ ...existing['thanda-solar'][0], QuantityOnHand: 1 }] } }).find(r => r.company === 'thanda-solar');
+  assert.notEqual(before.fingerprint, after.fingerprint);
+  assert.notEqual(run()[0].fingerprint, run({ catalogue: [{ ...p, enduser_price_zar: { price: 1010 } }] })[0].fingerprint);
+});
