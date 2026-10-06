@@ -22,5 +22,26 @@ try {
   assert.equal(state.rows.length,2); assert.ok(state.error); assert.notEqual(state.signature,state.acknowledged_signature);
   await assert.rejects(()=>saveCatalogueEvidence(pool,[],observedAt),/Incomplete/);
   await refreshReview(pool,request); state=(await pool.query('SELECT * FROM victron_catalogue_review')).rows[0]; assert.equal(state.error,null);
-  console.log('Store integration passed: complete snapshots, deduplication, failure retention and recovery.');
+  const candidate={...product,description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:2}};
+  await saveCatalogueEvidence(pool,[candidate],observedAt);
+  await refreshReview(pool,request);
+  await pool.query('UPDATE victron_catalogue_review SET acknowledged_signature=signature');
+  const acknowledged=(await pool.query('SELECT * FROM victron_catalogue_review')).rows[0];
+  await saveCatalogueEvidence(pool,[{...candidate,all_stock_by_warehouse:{af_sa_inzuzo:3}}],observedAt);
+  await refreshReview(pool,request);
+  state=(await pool.query('SELECT * FROM victron_catalogue_review')).rows[0];
+  assert.equal(state.signature,acknowledged.signature);
+  assert.equal(state.signature,state.acknowledged_signature,'positive quantity churn retains acknowledgement');
+  await saveCatalogueEvidence(pool,[{...candidate,all_stock_by_warehouse:{af_sa_inzuzo:0}}],observedAt);
+  await refreshReview(pool,request);
+  state=(await pool.query('SELECT * FROM victron_catalogue_review')).rows[0];
+  assert.equal(state.rows.length,2,'silenced rows remain visible');
+  assert.ok(state.rows.every(row=>row.zaStock===0));
+  assert.equal(state.acknowledged_signature,null,'a changed queue ends the old acknowledgement');
+  await saveCatalogueEvidence(pool,[candidate],observedAt);
+  await refreshReview(pool,request);
+  state=(await pool.query('SELECT * FROM victron_catalogue_review')).rows[0];
+  assert.equal(state.signature,acknowledged.signature,'the same SKU has returned');
+  assert.notEqual(state.signature,state.acknowledged_signature,'a returning candidate alerts again');
+  console.log('Store integration passed: snapshots, failure recovery, silencing and acknowledged-stock return alerts.');
 } finally { await pool.end(); }

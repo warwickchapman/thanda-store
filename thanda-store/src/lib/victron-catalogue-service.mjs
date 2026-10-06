@@ -51,8 +51,12 @@ export async function refreshReview(pool, request = catalogueHub) {
     const completed = (await db.query("SELECT company,sku,max(created_at) AS completed_at FROM victron_catalogue_events WHERE action='archive-reviewed' GROUP BY company,sku")).rows;
     rows = rows.filter(row => row.kind !== 'archive' || !completed.some(event => event.company === row.company && event.sku === row.sku && (history[row.sku]?.absentSince || history[row.sku]?.retiredSince) && new Date(event.completed_at).getTime() >= Date.parse(history[row.sku].absentSince || history[row.sku].retiredSince)));
     const signature = changeSignature(rows);
+    // Acknowledgement belongs to an uninterrupted change set. In particular, a
+    // review SKU returning to stock must alert again after its silenced period.
     await db.query(`UPDATE victron_catalogue_review SET checked_at=now(),observed_at=$1,rows=$2,history=$3,
-      history_day=$4,error=NULL,signature=$5 WHERE id=true`, [observedAt, JSON.stringify(rows), JSON.stringify(history), day, signature]);
+      history_day=$4,error=NULL,signature=$5,
+      acknowledged_signature=CASE WHEN signature IS DISTINCT FROM $5 THEN NULL ELSE acknowledged_signature END
+      WHERE id=true`, [observedAt, JSON.stringify(rows), JSON.stringify(history), day, signature]);
     return { rows, observedAt, signature };
   } catch (error) {
     if (locked) await db.query('UPDATE victron_catalogue_review SET checked_at=now(),error=$1,signature=$2 WHERE id=true', [error.message, changeSignature([], error.message)]);

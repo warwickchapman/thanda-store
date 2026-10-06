@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature } from '../src/lib/victron-catalogue-review.mjs';
+import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature, zaWarehouseStock, needsAttention } from '../src/lib/victron-catalogue-review.mjs';
 import { readItems } from '../src/lib/victron-catalogue-service.mjs';
 const now = Date.now(), observedAt = new Date(now).toISOString();
 const p = { sku:'PMP482305012', description:'MultiPlus II', currency:'ZAR', price:525, enduser_price_zar:{price:1000}, price_break_price:400 };
@@ -13,9 +13,79 @@ test('company cost policies use supplier prices, not quantity breaks; explicit l
   assert.ok(prices({...p,currency:null}).error);
   assert.deepEqual(run().map(r=>r.proposed).sort((a,b)=>a-b),[525,600]);
 });
-test('panels excluded without excluding chargers', () => {
-  assert.ok(exclusion({...p,sku:'SPM123'})); assert.ok(exclusion({...p,description:'Solar panel 300W'}));
+test('panel prefixes exclude panels without excluding category accessories or SolarSense', () => {
+  for (const sku of ['SPM123','SPP123','spm123']) assert.ok(exclusion({...p,sku}));
+  for (const [sku,description] of [['SCA520500000','Solar panel MC4-Y connector'],['SLS300175100','SolarSense 750']]) {
+    const product = {...p,sku,description,category:'Solar panels and cables',subcategory:'Cables, connectors and accessories for solar panels'};
+    assert.equal(exclusion(product),null);
+    assert.ok(run({catalogue:[product]}).every(row => row.kind === 'new'));
+  }
   assert.equal(exclusion({...p,description:'SmartSolar MPPT charge controller'}),null);
+});
+
+test('ZA warehouse evidence preserves unknown and never borrows generic or overseas stock', () => {
+  for (const value of [undefined,null,'','   ',true,[],{},-1,Infinity,'-1','1e3','0x10','invalid']) {
+    assert.equal(zaWarehouseStock({stock_quantity:99,all_stock_by_warehouse:{af_sa_inzuzo:value,eu_nl_arvato:123}}),null);
+  }
+  for (const value of [0,3,'0','35',' 4 ']) {
+    assert.equal(zaWarehouseStock({all_stock_by_warehouse:{af_sa_inzuzo:value}}),Number(value));
+  }
+});
+
+test('ZA-stocked review candidates sort first; zero and unknown remain visible, uncounted', () => {
+  const catalogue = [
+    {...p,sku:'PIN1',description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:0}},
+    {...p,sku:'PIN2',description:'120V inverter',stock_quantity:99},
+    {...p,sku:'PIN3',description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:3}},
+    {...p,sku:'PIN4',description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:20}},
+  ];
+  const rows = run({catalogue});
+  for (const company of Object.keys(items)) {
+    const selected = rows.filter(row => row.company === company);
+    assert.deepEqual(selected.map(row => row.sku),['PIN3','PIN4','PIN1','PIN2']);
+    assert.ok(selected.every(row => row.kind === 'review'));
+    assert.deepEqual(selected.map(row => row.zaStock),[3,20,0,null]);
+    assert.equal(selected.filter(needsAttention).length,2);
+  }
+  const promoted = run({catalogue:catalogue.map(row => row.sku === 'PIN1' ? {...row,all_stock_by_warehouse:{af_sa_inzuzo:1}} : row)});
+  assert.equal(promoted.filter(row => row.company === 'thanda-solar')[0].sku,'PIN1');
+  assert.equal(promoted.filter(row => row.company === 'thanda-solar').filter(needsAttention).length,3);
+});
+
+test('review priority does not borrow successor, retail sibling or Xero stock', () => {
+  const catalogue = [
+    {...p,sku:'PMP482305010',description:'120V inverter'},
+    {...p,description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:2}},
+    {...p,sku:p.sku+'R',description:'120V inverter retail'},
+  ];
+  const existing = {...items,'thanda-solar':[{Code:'PMP482305010',ItemID:'old',QuantityOnHand:20,PurchaseDetails:{UnitPrice:525}}]};
+  const rows=run({catalogue,items:existing,successions:[{predecessor_sku:'PMP482305010',successor_sku:p.sku}]});
+  const old = rows.find(row => row.company === 'thanda-solar' && row.sku === 'PMP482305010');
+  assert.equal(old.stock,20); assert.equal(old.zaStock,null); assert.equal(needsAttention(old),false);
+  assert.deepEqual(old.replacedBy,[p.sku]);
+  assert.equal(rows.find(row => row.sku === p.sku+'R').zaStock,null);
+  assert.ok(rows.filter(needsAttention).every(row => row.sku === p.sku));
+});
+
+test('silenced review rows do not alert; return to ZA stock alerts without quantity churn', () => {
+  const candidate={...p,description:'120V inverter',all_stock_by_warehouse:{af_sa_inzuzo:0}};
+  const quiet=run({catalogue:[candidate]});
+  assert.equal(changeSignature(quiet),changeSignature([]));
+  assert.equal(changeSignature(run({catalogue:[{...candidate,price:526}]})),changeSignature(quiet));
+  const stocked=run({catalogue:[{...candidate,all_stock_by_warehouse:{af_sa_inzuzo:1}}]});
+  const more=run({catalogue:[{...candidate,all_stock_by_warehouse:{af_sa_inzuzo:5}}]});
+  assert.notEqual(changeSignature(quiet),changeSignature(stocked));
+  assert.equal(changeSignature(stocked),changeSignature(more));
+  assert.equal(changeSignature(quiet),changeSignature(run({catalogue:[candidate]})));
+});
+
+test('ZA quantity changes do not invalidate existing price or creation approvals', () => {
+  for (const existing of [items,{...items,'thanda-solar':[{Code:p.sku,ItemID:'x',PurchaseDetails:{UnitPrice:400}}]}]) {
+    const before=run({items:existing,catalogue:[{...p,all_stock_by_warehouse:{af_sa_inzuzo:0}}]});
+    const after=run({items:existing,catalogue:[{...p,all_stock_by_warehouse:{af_sa_inzuzo:10}}]});
+    assert.deepEqual(before.map(row => row.fingerprint),after.map(row => row.fingerprint));
+    assert.equal(changeSignature(before),changeSignature(after));
+  }
 });
 test('successors are separate definitions; retail alias is manual review', () => {
   const successions=[{predecessor_sku:'PMP482305010',successor_sku:p.sku}];

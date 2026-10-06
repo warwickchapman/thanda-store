@@ -48,9 +48,13 @@ without automatically publishing them to the storefront.
   invalidate an unchanged cost or repeat its alert. Creation and archive reviews
   retain their relevant descriptive, pricing and stock checks. Freshness is always
   checked separately and is never waived by a matching selection.
-- `SPM`/`SPP` and classified solar panels are excluded for South Africa; 120V-only
-  and solar-home-system products require review. These exclusions do not exclude
-  solar chargers. The original supplier observation is retained.
+- Solar panels are excluded for South Africa by article prefix: `SPM`
+  (monocrystalline) and `SPP` (polycrystalline). The broad E-Order category
+  **Solar panels and cables** also includes `SCA` cables/connectors and `SLS`
+  SolarSense products; those prefixes are not panels and are not excluded by
+  this rule. Store catalogue review, Data health creation and the Hub write
+  guard use the same prefix rule. 120V-only and solar-home-system products still
+  require review. The original supplier observation is retained.
 - Pricing applies to literal article codes, never across a successor family.
   `victron_sku_successions` provides predecessor/successor labels; the shared
   resolver recognises R packaging aliases and prevents automatic duplicate creation.
@@ -61,6 +65,26 @@ The daily timer runs at 07:00 Africa/Johannesburg. It adds an in-app Admin menu
 alert for new changes, a failed comparison or an overdue run. Acknowledgement
 persists for the exact change set; refreshing observation timestamps alone does
 not repeat an alert. No email delivery or recipient configuration is included.
+
+**Needs review** counts only held products with positive stock in Victron's ZA
+warehouse. These review candidates appear first, sorted by SKU. Products with
+zero or unknown ZA stock remain listed below as **Silenced**, with the reason
+for their hold; they do not contribute to the dropdown count or change alerts.
+Unknown remains labelled **Unknown**, never zero. This only prioritises the
+review queue: it neither archives Xero items nor approves held products.
+
+ZA stock comes exclusively from each literal article's
+`all_stock_by_warehouse.af_sa_inzuzo`. Xero/company stock, other warehouses,
+generic supplier stock, successors and retail siblings do not contribute.
+The next daily comparison, or **Compare saved records**, promotes a silenced
+item automatically when the saved ZA quantity becomes positive. Supplier data
+continues to refresh on its existing four-hour schedule. Changes between positive
+quantities do not repeat an alert or invalidate an approval; a candidate returning
+after a silenced comparison alerts again even if its earlier alert was acknowledged.
+Failed or overdue comparisons continue to alert independently of this queue.
+
+After deploying this change, run one saved comparison to populate ZA quantities
+and replace the old category-based exclusions in the existing saved rows.
 
 A missing product becomes an archive candidate after two distinct complete daily
 supplier observations. A failed/empty/incomplete fetch cannot establish absence.
@@ -115,6 +139,7 @@ marks requested permissions as granted before Xero actually returns them.
 | Path | Upstream calls per run | Scheduled daily cost |
 | --- | --- | --- |
 | Store render, menu alert, audit | 0 | 0 |
+| ZA review ordering, counting and silencing | 0; uses saved catalogue during existing comparisons | 0 additional |
 | Full catalogue evidence save | 0 additional; uses existing validated catalogue fetch | 0 additional |
 | Compare saved Items | Up to 50 local Hub pages per company, 1,000 items/page; **0 Xero** | 0 Xero |
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |

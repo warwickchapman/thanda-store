@@ -14,15 +14,28 @@ function comparison(row) {
     const { company, sku, kind, itemId, previous, proposed } = row;
     return { company, sku, kind, itemId, previous, proposed };
   }
-  return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'fingerprint'].includes(key)));
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'fingerprint', 'zaStock'].includes(key)));
 }
 export function exclusion(product) {
   const sku = String(product.sku || '').toUpperCase();
   const description = `${product.description || ''} ${product.category || ''} ${product.subcategory || ''}`;
-  if (/^(SPM|SPP)/.test(sku) || /\bsolar panels?\b/i.test(description)) return 'Victron solar panels are excluded in South Africa.';
+  // The supplier's "Solar panels and cables" category also contains SCA
+  // accessories and SLS SolarSense. Only these article prefixes are panels.
+  if (/^(SPM|SPP)/.test(sku)) return 'Victron solar panels are excluded in South Africa.';
   if (/\b120V\b/i.test(description) && !/\b230V\b/i.test(description)) return '120V-only model: South African eligibility requires review.';
   if (/solar home system/i.test(description)) return 'Solar home system: South African eligibility requires review.';
   return null;
+}
+// Review priority is literal-SKU warehouse evidence, not company stock or a
+// replacement/retail family's total. Other warehouses cannot establish ZA stock.
+export function zaWarehouseStock(product) {
+  const value = product?.all_stock_by_warehouse?.af_sa_inzuzo;
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/.test(value.trim()))) return null;
+  const quantity = Number(value);
+  return Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+}
+export function needsAttention(row) {
+  return row.kind !== 'review' || (Number.isFinite(row.zaStock) && row.zaStock > 0);
 }
 export function reviewCatalogue({ catalogue, items, successions = [], history = {}, observedAt, now = Date.now() }) {
   const age = now - Date.parse(observedAt);
@@ -45,7 +58,7 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const base = { company, sku, name: product.description || sku, ...relationships, observedAt,
         listSource: pricing.listSource ?? null, cost: pricing.cost ?? null, list: pricing.list ?? null, proposed: target ?? null,
         itemId: item?.ItemID ?? null, previous: item?.PurchaseDetails?.UnitPrice ?? null,
-        stock: item?.QuantityOnHand ?? null, eligibleForArchiveReview: false };
+        stock: item?.QuantityOnHand ?? null, zaStock: zaWarehouseStock(product), eligibleForArchiveReview: false };
       let kind = !item ? 'new' : 'price';
       let reason = excluded || pricing.error || (!target ? 'No verified E-Order ZAR list price; Sensible cost cannot be calculated.' : null);
       if (!item && (alias || relationships.replacedBy.length || ending)) reason ||= alias ? `Retail-packaging alias of ${alias.Code}; review existing item.` : 'Phase-out/replacement item: review before creating.';
@@ -71,7 +84,9 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       rows.push({ ...base, fingerprint: fingerprint(comparison(base)) });
     }
   }
-  return rows.sort((a,b) => a.company.localeCompare(b.company) || a.sku.localeCompare(b.sku));
+  return rows.sort((a,b) => a.company.localeCompare(b.company)
+    || Number(b.kind === 'review' && needsAttention(b)) - Number(a.kind === 'review' && needsAttention(a))
+    || a.sku.localeCompare(b.sku));
 }
 
 export async function ensureReviewSchema(db) {
@@ -107,7 +122,9 @@ export function advanceHistory(history, catalogue, day, successions = [], observ
   }
   return next;
 }
-// Observation timestamps must not make the same unresolved changes notify daily.
+// Silence unstocked review rows, but keep them in the saved comparison. A newly
+// stocked SKU re-enters this signature on the next daily/manual comparison.
+// Neither observation timestamps nor positive warehouse quantity churn repeats alerts.
 export function changeSignature(rows, error = null) {
-  return fingerprint({ error, rows: rows.map(comparison) });
+  return fingerprint({ error, rows: rows.filter(needsAttention).map(comparison) });
 }

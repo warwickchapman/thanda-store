@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { submitCatalogueCommand } from '../src/lib/victron-catalogue-command.mjs';
 import { validCustomerViewOrigin } from '../src/lib/auth/impersonation-origin.mjs';
 import { stockSku } from '../src/lib/victron-sku-family.mjs';
+import { needsAttention } from '../src/lib/victron-catalogue-review.mjs';
 
 // Exercise the actual Next route with real Web Request/Response objects. Only
 // auth, stored evidence and I/O are replaced; command/audit handling is real.
@@ -23,6 +24,10 @@ function harness(options = {}) {
   const audit = [], calls = [];
   let refreshes = 0, schemaCalls = 0;
   const pool = { query: async (sql, args) => {
+    if (sql.startsWith('SELECT * FROM victron_catalogue_review')) return { rows: [{
+      rows, checked_at: new Date().toISOString(), signature: 'current', acknowledged_signature: 'previous', ...options.state,
+    }] };
+    if (sql.startsWith('SELECT created_at,actor,action,company,sku,details')) return { rows: [] };
     if (sql.startsWith('INSERT INTO victron_catalogue_events')) {
       if (options.failAttempt) throw new Error('database internal failure');
       audit.push({ action: args[1], company: args[2], sku: args[3], details: JSON.parse(args[4]) });
@@ -56,7 +61,7 @@ function harness(options = {}) {
       return { rows };
     } },
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
-    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; } },
+    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention },
     '@/lib/victron-sku-family.mjs': { stockSku },
   };
   const exports = {};
@@ -64,13 +69,39 @@ function harness(options = {}) {
     assert.ok(name in modules, `Unexpected import ${name}`);
     return modules[name];
   }, process: { env: { NODE_ENV: 'production' } }, Request, Response, Date, Set, JSON, Error, URL });
-  return { audit, calls, schemaCalls: () => schemaCalls, post: async (body = single) => {
+  return { audit, calls, schemaCalls: () => schemaCalls, get: async (summary = false) => {
+    const response = await exports.GET(new Request(`https://store.thanda.solar/api/admin/victron-catalogue${summary ? '?summary=1' : ''}`));
+    return { status: response.status, body: await response.json() };
+  }, post: async (body = single) => {
     const response = await exports.POST(new Request('https://store.thanda.solar/api/admin/victron-catalogue', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Origin: options.origin || 'https://store.thanda.solar' }, body: JSON.stringify(body),
     }));
     return { status: response.status, headers: response.headers, body: await response.json() };
   } };
 }
+
+test('review summary and full page silence zero/unknown stock without hiding rows or making Hub calls', async () => {
+  const rows = [0,null,undefined].map((zaStock,index) => ({...product,sku:`PIN${index}`,kind:'review',zaStock}));
+  const h=harness({rows});
+  assert.equal((await h.get(true)).body.attention,false);
+  const full=await h.get();
+  assert.equal(full.status,200); assert.equal(full.body.attention,false); assert.equal(full.body.rows.length,3);
+  assert.equal(h.calls.length,0);
+  const stocked=harness({rows:[...rows,{...product,kind:'review',zaStock:1}]});
+  assert.equal((await stocked.get(true)).body.attention,true);
+  assert.equal((await stocked.get()).body.attention,true);
+  const acknowledged=harness({rows:[{...product,kind:'review',zaStock:1}],state:{acknowledged_signature:'current'}});
+  assert.equal((await acknowledged.get(true)).body.attention,false);
+});
+
+test('silenced review rows do not silence errors, overdue comparisons or other change kinds', async () => {
+  for (const state of [{error:'Comparison failed'},{checked_at:null}]) {
+    assert.equal((await harness({rows:[{...product,kind:'review',zaStock:0}],state}).get(true)).body.attention,true);
+  }
+  for (const kind of ['price','new','archive']) {
+    assert.equal((await harness({rows:[{...product,kind,zaStock:0}]}).get(true)).body.attention,true);
+  }
+});
 
 for (const [name, body] of [['single', single], ['batch', batch]]) {
   test(`${name}: plain-text Hub500 is audited as uncertain without exposing parser/internal errors`, async () => {

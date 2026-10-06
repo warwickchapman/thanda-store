@@ -32,3 +32,12 @@ test('new-item preview calculates missing list from normal cost', () => {
   const p=itemCreationPreview({...product,details:{...product.details,catalogueListPrice:null,cataloguePrice:5245.28}},[]);
   assert.equal(p.eligible,true); assert.equal(p.selling,9991.01); assert.equal(p.listSource,'calculated');
 });
+
+test('panel exclusions use article prefixes without rejecting accessories or SolarSense', () => {
+  for (const sku of ['SPM123','SPP123','spm123']) {
+    assert.equal(itemCreationPreview({...product,sku,name:'Victron product'},[]).eligible,false);
+  }
+  for (const [sku,name] of [['SCA520500000','Solar panel MC4-Y connector'],['SLS300175100','SolarSense 750']]) {
+    assert.equal(itemCreationPreview({...product,sku,name},[]).eligible,true);
+  }
+});

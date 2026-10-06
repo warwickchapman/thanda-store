@@ -27,7 +27,7 @@ export function itemCreationPreview(product, successions, now = Date.now()) {
   if (!reason && (d.cataloguePrice == null || !Number.isFinite(cost) || cost <= 0)) reason = 'No valid E-Order cost price. Review the catalogue sync.';
   const pricing = prices({ price: d.cataloguePrice, currency: d.catalogueCurrency, enduser_price_zar: { price: d.catalogueListPrice } });
   if (!reason && pricing.error) reason = pricing.error;
-  if (!reason && (/^(SPM|SPP)/.test(product.sku) || /\bsolar panels?\b/i.test(product.name))) reason = 'Victron solar panels are excluded in South Africa.';
+  if (!reason && /^(SPM|SPP)/i.test(product.sku)) reason = 'Victron solar panels are excluded in South Africa.';
   const cents = Math.round(cost * 100);
   const selling = pricing.list ?? null;
   const payload = { code: product.sku, name: product.name, cost: cents / 100, list: selling, action: 'new', expectedItemId: null, expectedCost: null, observedAt: d.catalogueObservedAt };
