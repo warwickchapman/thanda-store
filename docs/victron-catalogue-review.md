@@ -154,9 +154,12 @@ and a `reconciled` event was added to the Store audit.
 
 ## Verification
 
-- `node --test test/victron-catalogue-review.test.mjs test/victron-sku-family.test.mjs test/xero-item-create.test.mjs`
+- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/xero-item-create.test.mjs`
+  includes the actual Store route boundary with plain-text errors, lost connections,
+  audit failures, deferrals, stable selections and separate operation identifiers.
 - `DATABASE_URL=…/victron_review_test node test/victron-catalogue.integration.mjs`
   requires an isolated disposable PostgreSQL database; it resets only its test tables.
 - `npx tsc --noEmit --incremental false` and focused ESLint.
-- Companion Hub: `pytest tests/test_victron_commands.py tests/test_hub.py` with its
-  isolated `xero_hub_test` database; upstream Xero calls are mocked.
+- Companion Hub: `pytest tests/test_victron_commands.py tests/test_victron_connector.py tests/test_hub.py`
+  with its isolated `xero_hub_test` database. Connector regressions use the real
+  authenticated route, connector and database, mocking only upstream HTTP.
