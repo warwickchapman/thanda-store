@@ -6,7 +6,7 @@ import { stockReviewView } from '@/lib/stock-review-view.mjs';
 
 type View = 'needs' | 'awaiting' | 'reviewed';
 type Mode = 'create' | 'actions' | 'do_not_stock' | 'retired';
-type Preview = { cost: number; selling: number; fingerprint: string };
+type Preview = { cost: number; selling: number; listSource?: string; fingerprint: string };
 const button = 'rounded-md border border-zinc-300 px-3 py-2 font-semibold disabled:opacity-50';
 const money = (value: number) => value.toLocaleString('en-ZA', { style: 'currency', currency: 'ZAR' });
 
@@ -95,10 +95,10 @@ export function StockItemReview({ items, onChanged }: { items: StockReviewItem[]
         {(!!selected.replaces?.length || !!selected.replacedBy?.length) && <p className="mt-1 text-xs text-zinc-500">Sales and stock across these replacement codes are included in replenishment planning.</p>}
         {mode === 'create' ? <>
           {busy && !preview && <p role="status" className="mt-4">Loading saved prices…</p>}
-          {preview && <dl className="mt-4 grid grid-cols-2 gap-4 rounded-md bg-sky-50 p-4"><div><dt className="text-zinc-600">Cost price</dt><dd className="mt-1 text-lg font-bold">{money(preview.cost)}</dd></div><div><dt className="text-zinc-600">Selling price</dt><dd className="mt-1 text-lg font-bold">{money(preview.selling)}</dd></div></dl>}
+          {preview && <dl className="mt-4 grid grid-cols-2 gap-4 rounded-md bg-sky-50 p-4"><div><dt className="text-zinc-600">Cost price</dt><dd className="mt-1 text-lg font-bold">{money(preview.cost)}</dd></div><div><dt className="text-zinc-600">Selling price</dt><dd className="mt-1 text-lg font-bold">{money(preview.selling)}</dd>{preview.listSource === 'calculated' && <p className="mt-1 text-xs">List calculated: E-Order cost ÷ 0.525</p>}</div></dl>}
           <p className="mt-2 text-xs text-zinc-500">Prices exclude VAT.</p>
           <p className="mt-4 font-semibold">No stock quantities will be changed.</p>
-          <details className="mt-3 text-zinc-600"><summary className="cursor-pointer">Accounting details</summary><p className="mt-2">Creates a tracked product definition. Cost is the normal E-Order price; selling price is the verified E-Order ZAR list price. Victron accounts: inventory 631, cost of sales 311, sales 201. No opening balance, adjustment or receipt is sent.</p></details>
+          <details className="mt-3 text-zinc-600"><summary className="cursor-pointer">Accounting details</summary><p className="mt-2">Creates a tracked product definition. Cost is the normal E-Order price; selling price is the E-Order ZAR list price, or normal E-Order cost ÷ 0.525 when list price is missing. Victron accounts: inventory 631, cost of sales 311, sales 201. No opening balance, adjustment or receipt is sent.</p></details>
           <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => dialog.current?.close()} className={button}>Cancel</button><button type="button" disabled={busy || !preview} onClick={() => void create(selected, 'create')} className={`${button} bg-zinc-900 text-white`}>{busy && preview ? 'Creating…' : 'Create product'}</button></div>
           {error && !busy && <button type="button" onClick={() => void create(selected, 'preview')} className="mt-3 font-semibold text-sky-800 underline">Reload price preview</button>}
         </> : mode === 'actions' ? <div className="mt-4 space-y-3">

@@ -8,10 +8,13 @@ without automatically publishing them to the storefront.
 ## Pricing and approval
 
 - Thanda purchase cost: normal E-Order `price`, explicitly in ZAR, excluding VAT.
-- Sensible purchase cost: E-Order `enduser_price_zar.price` × 0.60, rounded to cents.
-- Do not use quantity-break prices or reconstruct list price from Thanda's discount.
-- Missing/zero/non-ZAR prices require review. Missing list price blocks Sensible and
-  new definitions; a Thanda cost-only update can proceed without a list price.
+- List price: use E-Order `enduser_price_zar.price` when present. If missing,
+  calculate it as normal E-Order Thanda cost ÷ **0.525**, rounded to cents.
+  Calculated list prices are labelled in the review and creation preview.
+- Sensible purchase cost: list price × **0.60**, rounded to cents.
+- The same explicit-or-calculated list price initialises new-item selling prices.
+- Do not use quantity-break prices. Missing/zero/non-ZAR account costs and invalid
+  supplied list prices still require review; the fallback applies to missing list prices.
 - Existing products: change only `PurchaseDetails.UnitPrice`, preserving the live
   purchase accounting/tax fields and all selling/stock fields.
 - New products: reviewed tracked definitions with zero opening-balance writes and

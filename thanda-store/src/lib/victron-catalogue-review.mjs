@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
+import { prices } from './victron-pricing.mjs';
+export { prices } from './victron-pricing.mjs';
 import { retirementReason } from './xero-item-create.mjs';
 import { skuReplacementContext } from './victron-sku-family.mjs';
 
 export const companies = ['thanda-solar', 'sensible-solar'];
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const cents = value => value != null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0 ? Math.round(Number(value) * 100) : null;
 const article = sku => String(sku).toUpperCase().replace(/R$/, '');
 export function exclusion(product) {
   const sku = String(product.sku || '').toUpperCase();
@@ -13,13 +14,6 @@ export function exclusion(product) {
   if (/\b120V\b/i.test(description) && !/\b230V\b/i.test(description)) return '120V-only model: South African eligibility requires review.';
   if (/solar home system/i.test(description)) return 'Solar home system: South African eligibility requires review.';
   return null;
-}
-export function prices(product) {
-  const cost = cents(product.price);
-  const list = cents(product.enduser_price_zar?.price);
-  if (product.currency !== 'ZAR' || !cost) return { error: 'A positive, explicitly ZAR E-Order account price is required.' };
-  // Never reconstruct list from the distributor discount, or use quantity breaks.
-  return { cost: cost / 100, list: list ? list / 100 : null, sensible: list ? Math.round(list * 0.6) / 100 : null };
 }
 export function reviewCatalogue({ catalogue, items, successions = [], history = {}, observedAt, now = Date.now() }) {
   const age = now - Date.parse(observedAt);
@@ -40,7 +34,7 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const alias = !item && items[company].find(p => article(p.Code) === article(sku));
       const ending = /available\s+until\s+stock\s+0/i.test(product.description || '');
       const base = { company, sku, name: product.description || sku, ...relationships, observedAt,
-        cost: pricing.cost ?? null, list: pricing.list ?? null, proposed: target ?? null,
+        listSource: pricing.listSource ?? null, cost: pricing.cost ?? null, list: pricing.list ?? null, proposed: target ?? null,
         itemId: item?.ItemID ?? null, previous: item?.PurchaseDetails?.UnitPrice ?? null,
         stock: item?.QuantityOnHand ?? null, eligibleForArchiveReview: false };
       let kind = !item ? 'new' : 'price';

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { prices } from './victron-pricing.mjs';
 import { observeVictronSupplierStock } from './data-freshness.mjs';
 
 export function retirementReason(product, source, successor) {
@@ -24,13 +25,13 @@ export function itemCreationPreview(product, successions, now = Date.now()) {
   if (!reason && d.catalogueCurrency !== 'ZAR') reason = 'A verified ZAR cost price is required.';
   const cost = Number(d.cataloguePrice);
   if (!reason && (d.cataloguePrice == null || !Number.isFinite(cost) || cost <= 0)) reason = 'No valid E-Order cost price. Review the catalogue sync.';
-  const listed = Number(d.catalogueListPrice);
-  if (!reason && (d.catalogueListPrice == null || !Number.isFinite(listed) || listed <= 0)) reason = 'No verified E-Order list price for the new selling price. Refresh the catalogue.';
+  const pricing = prices({ price: d.cataloguePrice, currency: d.catalogueCurrency, enduser_price_zar: { price: d.catalogueListPrice } });
+  if (!reason && pricing.error) reason = pricing.error;
   if (!reason && (/^(SPM|SPP)/.test(product.sku) || /\bsolar panels?\b/i.test(product.name))) reason = 'Victron solar panels are excluded in South Africa.';
   const cents = Math.round(cost * 100);
-  const selling = Math.round(listed * 100) / 100;
+  const selling = pricing.list ?? null;
   const payload = { code: product.sku, name: product.name, cost: cents / 100, list: selling, action: 'new', expectedItemId: null, expectedCost: null, observedAt: d.catalogueObservedAt };
-  return { eligible: !reason, reason, cost: cents / 100, selling, successor: successor || null,
+  return { eligible: !reason, reason, cost: cents / 100, selling, listSource: pricing.listSource ?? null, successor: successor || null,
     observedAt: d.catalogueObservedAt || null, payload,
     fingerprint: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
 }

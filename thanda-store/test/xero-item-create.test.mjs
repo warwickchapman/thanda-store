@@ -9,7 +9,7 @@ test('approved pricing and no stock fields in payload', () => {
   assert.equal(itemCreationPreview({...product,details:{...product.details,cataloguePrice:'5245.28'}},[]).selling,4028);
 });
 test('missing/stale evidence and saved decisions fail closed', () => {
-  for (const delta of [{catalogueListPrice:null},{cataloguePresent:false},{cataloguePrice:null},{catalogueObservedAt:null},{catalogueObservedAt:'2020-01-01'},{catalogueCurrency:'EUR'},{purchasingRetiredReason:'discontinued'}]) assert.equal(itemCreationPreview({...product,details:{...product.details,...delta}},[]).eligible,false);
+  for (const delta of [{catalogueListPrice:0},{cataloguePresent:false},{cataloguePrice:null},{catalogueObservedAt:null},{catalogueObservedAt:'2020-01-01'},{catalogueCurrency:'EUR'},{purchasingRetiredReason:'discontinued'}]) assert.equal(itemCreationPreview({...product,details:{...product.details,...delta}},[]).eligible,false);
   assert.equal(itemCreationPreview({...product,stockReview:{decision:'do_not_stock'}},[]).eligible,false);
 });
 test('succession and end-of-life require confirmed zero or complete-scan absence', () => {
@@ -26,4 +26,9 @@ test('succession and end-of-life require confirmed zero or complete-scan absence
 test('canonical predecessor cannot be offered without catalogue evidence', () => {
   const p=itemCreationPreview({...product,sku:'PMP482305010',details:{...product.details,cataloguePresent:false}},[{predecessor_sku:'PMP482305010',successor_sku:'PMP482305012'}]);
   assert.equal(p.eligible,false);assert.match(p.reason,/PMP482305012/);
+});
+
+test('new-item preview calculates missing list from normal cost', () => {
+  const p=itemCreationPreview({...product,details:{...product.details,catalogueListPrice:null,cataloguePrice:5245.28}},[]);
+  assert.equal(p.eligible,true); assert.equal(p.selling,9991.01); assert.equal(p.listSource,'calculated');
 });

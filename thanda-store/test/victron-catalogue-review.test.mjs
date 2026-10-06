@@ -6,10 +6,10 @@ const now = Date.now(), observedAt = new Date(now).toISOString();
 const p = { sku:'PMP482305012', description:'MultiPlus II', currency:'ZAR', price:525, enduser_price_zar:{price:1000}, price_break_price:400 };
 const items = {'thanda-solar':[], 'sensible-solar':[]};
 const run = options => reviewCatalogue({catalogue:[p], items, observedAt, now, ...options});
-test('company cost policies use supplier prices, not quantity breaks or reconstructed list', () => {
-  assert.deepEqual(prices(p), {cost:525,list:1000,sensible:600});
+test('company cost policies use supplier prices, not quantity breaks; explicit list takes precedence', () => {
+  assert.deepEqual(prices(p), {cost:525,list:1000,sensible:600,listSource:'eorder'});
   assert.equal(prices({...p,price:450}).sensible,600);
-  assert.equal(prices({...p,enduser_price_zar:null}).sensible,null);
+  assert.equal(prices({...p,enduser_price_zar:null}).sensible,600);
   assert.ok(prices({...p,currency:null}).error);
   assert.deepEqual(run().map(r=>r.proposed).sort((a,b)=>a-b),[525,600]);
 });
@@ -57,4 +57,13 @@ test('explicit successor with confirmed supplier zero stock qualifies for retire
   const row=run({items:existing,successions,catalogue:[{...p,stock_quantity:0}]}).find(r=>r.company==='thanda-solar');
   assert.equal(row.kind,'archive'); assert.equal(row.eligibleForArchiveReview,true);
   assert.equal(run({items:existing,successions}).filter(r=>r.company==='thanda-solar').length,0);
+});
+
+test('missing list uses normal cost / 0.525 for both companies and new products', () => {
+  for (const value of [undefined,null,'','   ']) {
+    const product={...p,price:5245.28,enduser_price_zar:{price:value}};
+    assert.deepEqual(prices(product),{cost:5245.28,list:9991.01,sensible:5994.61,listSource:'calculated'});
+    assert.ok(run({catalogue:[product]}).every(r=>r.kind==='new' && r.listSource==='calculated'));
+  }
+  for (const value of [0,-1,'invalid',Infinity]) assert.ok(prices({...p,enduser_price_zar:{price:value}}).error);
 });
