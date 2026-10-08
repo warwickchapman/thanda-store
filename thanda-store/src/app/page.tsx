@@ -326,7 +326,6 @@ export default function Home() {
   }, []);
 
   const catalogueProducts = products.filter(isStorefrontProduct);
-  const unavailableProductCount = catalogueProducts.filter(isUnavailable).length;
   const visibleProducts = catalogueProducts;
   const filteredProducts = visibleProducts.filter((product) => {
     const search = query.trim().toLowerCase();
@@ -368,7 +367,8 @@ export default function Home() {
   }));
   const selectedCategory = activeCategory;
   const categoryProducts = selectedCategory ? groupedProducts[selectedCategory] || [] : productsInSupplier;
-  const selectedProducts = categoryProducts.filter((product) => matchesCatalogueFilters(product, attributeFilters, availability));
+  const selectedProducts = categoryProducts.filter((product) =>
+    (showUnavailable || !isUnavailable(product)) && matchesCatalogueFilters(product, attributeFilters, availability));
   const facets = catalogueFacets(categoryProducts, attributeFilters, availability);
   const stockOptions = availabilityOptions.map((option) => ({
     ...option,
@@ -512,26 +512,29 @@ export default function Home() {
                 ...categoryTabs.map((tab) => ({ ...tab, label: displayLabel(tab.category) })).sort((a, b) => a.label.localeCompare(b.label))]}
               category={selectedCategory} onCategory={chooseCategory}
               facets={facets} selected={attributeFilters} onSelected={setAttributeFilters}
-              availabilityOptions={stockOptions} availability={availability} onAvailability={setAvailability}
+              availabilityOptions={stockOptions} availability={availability} onAvailability={(next) => {
+                setAvailability(next);
+                if (next.includes('unavailable')) setShowUnavailable(true);
+              }}
               resultCount={selectedProducts.length}
             />}
             <section className="space-y-4">
-              <div className="flex items-end justify-between gap-3 border-b border-zinc-200 pb-3">
+              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
                   <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : (selectedCategory ? displayLabel(selectedCategory) : 'All categories')}</h2>
                 </div>
-                <div className="flex items-center gap-3">
-                  {selectedSupplier === 'home' && unavailableProductCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowUnavailable((current) => !current)}
-                      className="text-xs font-semibold text-zinc-500 underline decoration-zinc-300 underline-offset-4 transition-colors hover:text-zinc-900"
-                    >
-                      {showUnavailable ? "Hide" : "Show"} unavailable ({unavailableProductCount})
-                    </button>
-                  )}
-                  <span aria-live="polite" className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-zinc-600">
+                    <input type="checkbox" role="switch" checked={showUnavailable}
+                      onChange={(event) => {
+                        setShowUnavailable(event.target.checked);
+                        if (!event.target.checked) setAvailability((current) => current.filter((value) => value !== 'unavailable'));
+                      }} className="peer sr-only" />
+                    <span aria-hidden="true" className="relative h-5 w-9 shrink-0 rounded-full bg-zinc-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform peer-checked:bg-amber-600 peer-checked:after:translate-x-4 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-amber-600" />
+                    Show unavailable
+                  </label>
+                  <span aria-live="polite" className="whitespace-nowrap text-xs font-medium uppercase tracking-widest text-zinc-400">
                     {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length} {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).length === 1 ? 'product' : 'products'}
                   </span>
                 </div>
@@ -552,7 +555,7 @@ export default function Home() {
                 </div>
               )}
               {selectedSupplier !== 'home' && selectedProducts.length === 0 && (
-                <p role="status" className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600">No products match these filters. Remove a filter or choose another category.</p>
+                <p role="status" className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600">No products match these filters.{!showUnavailable && ' Unavailable products are hidden.'}</p>
               )}
               <div className={`grid grid-cols-1 gap-5 sm:grid-cols-2 ${selectedSupplier === 'home' ? 'lg:grid-cols-3 xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
                 {(selectedSupplier === 'home' ? selectedHomeProducts : selectedProducts).map((product) => (

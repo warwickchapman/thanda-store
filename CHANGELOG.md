@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Catalogue and search results now hide confirmed unavailable products by default, matching Home favourites. A **Show unavailable** switch beside the product count reveals them, including when a search has no available matches. The sidebar's Unavailable filter stays consistent with the switch, unknown stock remains visible, and filtering makes no additional API calls.
+
 - The Victron archive checklist now has separate filters for **Ready for final checks**, **Waiting for supplier evidence**, and **Stock needs checking**, with counts for the selected company. Rows show company stock and archive status instead of irrelevant price columns. A short staff checklist explains current stock, open orders, replacements and recording completion after archiving in Xero. Unknown stock remains blocked, and filtering does not make supplier or Xero calls.
 
 - Product-action pause messages now tell staff exactly when to try again, using short sentences and South African time. A short wait shows the remaining seconds; reaching the daily limit shows the next 02:00 reset date. The message confirms that the paused action changed no products. Daily limits and the wait between actions are reported separately, with matching retry deadlines; the safety limits and provider request counts are unchanged.
