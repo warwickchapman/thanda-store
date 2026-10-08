@@ -37,7 +37,23 @@ export function zaWarehouseStock(product) {
   return Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
 }
 export function needsAttention(row) {
-  return row.kind !== 'review' || (!row.ignoredUntil && Number.isFinite(row.zaStock) && row.zaStock > 0);
+  return row.kind === 'price' || row.kind === 'new'
+    || (row.kind === 'review' && !row.ignoredUntil && Number.isFinite(row.zaStock) && row.zaStock > 0);
+}
+// One counting policy for the menu dot and both catalogue dropdowns. Counts are
+// literal saved rows per company, never stock/replacement-family aggregates.
+export function catalogueCounts(rows) {
+  const counts = Object.fromEntries(companies.map(company => [company,
+    { price: 0, new: 0, review: 0, archive: 0, total: 0 }]));
+  for (const row of rows) {
+    if (!Object.hasOwn(counts, row.company)) continue;
+    const company = counts[row.company];
+    if (!['price', 'new', 'review', 'archive'].includes(row.kind)) continue;
+    if (row.kind === 'review' && !needsAttention(row)) continue;
+    company[row.kind]++;
+    if (needsAttention(row)) company.total++;
+  }
+  return counts;
 }
 /** @returns {{reviewAction: 'new'|'price'|'keep'|null, approvalReason: string|null, reviewBlocker: string|null, ignoredUntil: string|null}} */
 function reviewFields() {

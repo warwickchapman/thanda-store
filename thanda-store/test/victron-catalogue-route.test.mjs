@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { submitCatalogueCommand } from '../src/lib/victron-catalogue-command.mjs';
 import { validCustomerViewOrigin } from '../src/lib/auth/impersonation-origin.mjs';
 import { stockSku } from '../src/lib/victron-sku-family.mjs';
-import { needsAttention, recordReviewDecision } from '../src/lib/victron-catalogue-review.mjs';
+import { needsAttention, catalogueCounts, recordReviewDecision } from '../src/lib/victron-catalogue-review.mjs';
 
 // Exercise the actual Next route with real Web Request/Response objects. Only
 // auth, stored evidence and I/O are replaced; command/audit handling is real.
@@ -62,7 +62,7 @@ function harness(options = {}) {
       return { rows };
     } },
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
-    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention, recordReviewDecision },
+    '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention, catalogueCounts, recordReviewDecision },
     '@/lib/victron-sku-family.mjs': { stockSku },
   };
   const exports = {};
@@ -92,7 +92,7 @@ test('review summary and full page silence zero/unknown stock without hiding row
   assert.equal((await stocked.get(true)).body.attention,true);
   assert.equal((await stocked.get()).body.attention,true);
   const acknowledged=harness({rows:[{...product,kind:'review',zaStock:1}],state:{acknowledged_signature:'current'}});
-  assert.equal((await acknowledged.get(true)).body.attention,false);
+  assert.equal((await acknowledged.get(true)).body.attention,true);
 });
 
 const reviewProduct = { ...product, kind:'review', reason:'120V-only model: South African eligibility requires review.',
@@ -166,13 +166,37 @@ test('stale review selection and unauthorised/cross-origin decisions are rejecte
   }
 });
 
-test('silenced review rows do not silence errors, overdue comparisons or other change kinds', async () => {
+test('archive-only, failed or overdue comparisons do not light the menu dot; page warnings remain', async () => {
   for (const state of [{error:'Comparison failed'},{checked_at:null}]) {
-    assert.equal((await harness({rows:[{...product,kind:'review',zaStock:0}],state}).get(true)).body.attention,true);
+    const h=harness({rows:[{...product,kind:'archive'},{...product,kind:'review',zaStock:0}],state});
+    assert.equal((await h.get(true)).body.attention,false);
+    const full=(await h.get()).body;
+    assert.equal(full.error,state.error);
+    assert.equal(full.overdue,state.checked_at===null);
+    assert.equal(full.rows.length,2);
+    assert.equal(full.counts['thanda-solar'].total,0);
+    assert.equal(h.calls.length,0);
   }
-  for (const kind of ['price','new','archive']) {
+  for (const kind of ['price','new']) {
     assert.equal((await harness({rows:[{...product,kind,zaStock:0}]}).get(true)).body.attention,true);
   }
+});
+test('full and summary GET use identical company counts, regardless of acknowledgement', async () => {
+  const rows=[product,{...product,kind:'new',sku:'NEW'},
+    {...product,kind:'review',zaStock:3,sku:'REVIEW'},
+    {...product,kind:'review',zaStock:3,ignoredUntil:'2027-01-01',sku:'IGNORED'},
+    {...product,kind:'archive',sku:'ARCHIVE'},
+    {...product,company:'sensible-solar',kind:'new',sku:'SENSIBLE_NEW'}];
+  const h=harness({rows,state:{acknowledged_signature:'current'}});
+  const summary=(await h.get(true)).body,full=(await h.get()).body;
+  assert.equal(summary.attention,true);
+  assert.equal(full.attention,true);
+  assert.deepEqual(summary.counts,full.counts);
+  assert.deepEqual(full.counts,{
+    'thanda-solar':{price:1,new:1,review:1,archive:1,total:3},
+    'sensible-solar':{price:0,new:1,review:0,archive:0,total:1},
+  });
+  assert.equal(h.calls.length,0);
 });
 
 for (const [name, body] of [['single', single], ['batch', batch]]) {

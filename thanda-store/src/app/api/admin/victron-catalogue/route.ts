@@ -4,7 +4,7 @@ import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin } from '@/lib/auth/impersonation-origin.mjs';
 import { refreshReview } from '@/lib/victron-catalogue-service.mjs';
 import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
-import { ensureReviewSchema, needsAttention, recordReviewDecision } from '@/lib/victron-catalogue-review.mjs';
+import { ensureReviewSchema, needsAttention, catalogueCounts, recordReviewDecision } from '@/lib/victron-catalogue-review.mjs';
 import { stockSku } from '@/lib/victron-sku-family.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -27,10 +27,11 @@ export async function GET(request: Request) {
     await ensureReviewSchema(pool);
     const state = (await pool.query('SELECT * FROM victron_catalogue_review WHERE id=true')).rows[0];
     const overdue = !state.checked_at || Date.now() - new Date(state.checked_at).getTime() > 26 * 3600000;
-    const attention = overdue || Boolean(state.error) || (state.signature !== state.acknowledged_signature && state.rows.some(needsAttention));
-    if (new URL(request.url).searchParams.get('summary') === '1') return NextResponse.json({ attention });
+    const counts = catalogueCounts(state.rows);
+    const attention = Object.values(counts).some(company => company.total > 0);
+    if (new URL(request.url).searchParams.get('summary') === '1') return NextResponse.json({ attention, counts });
     const events = (await pool.query('SELECT created_at,actor,action,company,sku,details FROM victron_catalogue_events ORDER BY id DESC LIMIT 50')).rows;
-    return NextResponse.json({ ...state, history: undefined, overdue, attention, events });
+    return NextResponse.json({ ...state, history: undefined, overdue, attention, counts, events });
   } catch { return NextResponse.json({ error: 'Catalogue review is unavailable.' }, { status: 503 }); }
 }
 export async function POST(request: Request) {

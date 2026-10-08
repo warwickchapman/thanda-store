@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature, zaWarehouseStock, needsAttention } from '../src/lib/victron-catalogue-review.mjs';
+import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature, zaWarehouseStock, needsAttention, catalogueCounts } from '../src/lib/victron-catalogue-review.mjs';
 import { readItems } from '../src/lib/victron-catalogue-service.mjs';
 const now = Date.now(), observedAt = new Date(now).toISOString();
 const p = { sku:'PMP482305012', description:'MultiPlus II', currency:'ZAR', price:525, enduser_price_zar:{price:1000}, price_break_price:400 };
@@ -155,12 +155,37 @@ test('ignore is company/SKU scoped, expires at its deadline and suppresses stock
   assert.equal(needsAttention(alias),true);
 });
 
-test('ignore cannot hide ordinary price or archive changes', () => {
+test('ignore leaves ordinary price changes and archive candidates in their queues', () => {
   const decision={company:'thanda-solar',sku:p.sku,ignoredUntil:new Date(now+90*86400000).toISOString()};
   const price=run({items:xeroAdvisory(400),decisions:[decision]}).find(row=>row.company==='thanda-solar');
   assert.equal(price.kind,'price'); assert.equal(needsAttention(price),true);
   const archive=run({items:xeroAdvisory(400),catalogue:[{...p,description:'Available until stock 0',stock_quantity:0}],decisions:[decision]}).find(row=>row.company==='thanda-solar');
-  assert.equal(archive.kind,'archive'); assert.equal(needsAttention(archive),true);
+  assert.equal(archive.kind,'archive'); assert.equal(archive.eligibleForArchiveReview,true);
+  assert.equal(needsAttention(archive),false);
+});
+test('company totals count update work, not archives, silenced reviews or replacement-family stock', () => {
+  const row = (company, sku, kind, fields = {}) => ({ company, sku, kind, ...fields });
+  const rows = [
+    row('thanda-solar','PMP482305010','price'),
+    row('thanda-solar','PMP482305012','new'),
+    row('thanda-solar','PMP482305012R','review',{zaStock:1}),
+    row('thanda-solar','IGNORED','review',{zaStock:5,ignoredUntil:'2027-01-01'}),
+    ...[0,null,undefined,-1,'3'].map((zaStock,i)=>row('thanda-solar',`SILENCED${i}`,'review',{zaStock})),
+    row('thanda-solar','RETIRED','archive',{stock:0,eligibleForArchiveReview:true}),
+    row('thanda-solar','UNKNOWN_KIND','other'),
+    row('sensible-solar','NEW','new'),
+    row('sensible-solar','RETIRED','archive'),
+    row('other-company','OTHER','price'),
+  ];
+  assert.deepEqual(catalogueCounts(rows), {
+    'thanda-solar':{price:1,new:1,review:1,archive:1,total:3},
+    'sensible-solar':{price:0,new:1,review:0,archive:1,total:1},
+  });
+  assert.deepEqual(catalogueCounts([]), {
+    'thanda-solar':{price:0,new:0,review:0,archive:0,total:0},
+    'sensible-solar':{price:0,new:0,review:0,archive:0,total:0},
+  });
+  assert.equal(changeSignature(rows.filter(r=>r.kind==='archive')),changeSignature([]));
 });
 test('successors are separate definitions; retail alias is manual review', () => {
   const successions=[{predecessor_sku:'PMP482305010',successor_sku:p.sku}];

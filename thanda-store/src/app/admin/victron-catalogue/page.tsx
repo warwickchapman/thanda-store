@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from '@/components/admin/admin-menu';
 type Row = { fingerprint: string; company: string; sku: string; name: string; kind: string; reason?: string; previous?: number; proposed?: number; list?: number; listSource?: string; stock?: number; zaStock?: number | null; reviewAction?: 'new' | 'price' | 'keep' | null; approvalReason?: string | null; reviewBlocker?: string | null; ignoredUntil?: string | null; replaces: string[]; replacedBy: string[]; eligibleForArchiveReview?: boolean };
 type AuditEvent = { created_at: string; actor: string; action: string; company?: string; sku?: string; details: { note?: string; changes?: { sku: string; previous?: number; proposed?: number }[]; result?: { error?: string } } };
-type State = { overdue: boolean; attention: boolean; rows: Row[]; error?: string; checked_at?: string; observed_at?: string; signature: string; acknowledged_signature?: string; events: AuditEvent[] };
+type Counts = { price: number; new: number; review: number; archive: number; total: number };
+type State = { overdue: boolean; attention: boolean; counts: Record<string, Counts>; rows: Row[]; error?: string; checked_at?: string; observed_at?: string; signature: string; acknowledged_signature?: string; events: AuditEvent[] };
 const money = (n?: number) => n == null ? 'Unknown' : `R ${Number(n).toFixed(2)}`;
 const hasZaStock = (row: Row) => row.zaStock != null && row.zaStock > 0;
 const needsReview = (row: Row) => hasZaStock(row) && !row.ignoredUntil;
 const archiveStatus = (row: Row) => !row.eligibleForArchiveReview ? 'waiting' : row.stock === 0 ? 'ready' : 'stock';
 const archiveLabels = { ready: 'Ready for final checks', waiting: 'Waiting for supplier evidence', stock: 'Stock needs checking' };
+const changeTypes = [['price','Cost changes'],['new','New products'],['review','Needs review'],['archive','Archive candidates']] as const;
 const reviewDate = (value: string) => new Date(value).toLocaleDateString('en-ZA', { timeZone: 'Africa/Johannesburg' });
 const unknownOutcome = 'The result could not be confirmed. Do not repeat this action until the saved attempt has been reconciled with Xero.';
 async function readResponse(response: Response, fallback: string) {
@@ -85,6 +87,7 @@ export default function VictronCatalogue() {
   }
   const stale = data?.overdue ?? true;
   const companyRows = (data?.rows || []).filter(r => r.company === company);
+  const counts = data?.counts?.[company];
   const rows = companyRows.filter(r => r.kind === kind && (kind !== 'archive' || archiveFilter === 'all' || archiveStatus(r) === archiveFilter) && `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase()));
   const isNew = kind === 'new';
   const isReview = kind === 'review';
@@ -95,14 +98,13 @@ export default function VictronCatalogue() {
   return <main className="min-h-screen bg-zinc-50 p-4 text-zinc-950"><div className="mx-auto max-w-6xl space-y-5">
     <header className="flex justify-between gap-3"><div><h1 className="text-2xl font-bold">Victron catalogue review</h1><p className="mt-2 text-sm">Thanda: E-Order cost. Sensible: E-Order ZAR list less 40%. All prices exclude VAT.</p></div><AdminMenu /></header>
     <p className="text-sm text-zinc-600">Daily checks use saved records. Existing selling prices and stock balances stay unchanged. New items start at list selling price with no stock balance.</p>
-    <div className="flex flex-wrap gap-3"><button className={button} disabled={busy} onClick={() => action({ action: 'refresh' })}>Compare saved records</button>
-      {data?.attention && data.signature && data.signature !== data.acknowledged_signature && <button className={button} disabled={busy} onClick={() => action({ action: 'acknowledge', signature: data.signature })}>Acknowledge change alert</button>}</div>
+    <div className="flex flex-wrap gap-3"><button className={button} disabled={busy} onClick={() => action({ action: 'refresh' })}>Compare saved records</button></div>
     <p className="text-xs">Last check: {data?.checked_at ? new Date(data.checked_at).toLocaleString('en-ZA') : 'Not yet run'}. Supplier observation: {data?.observed_at ? new Date(data.observed_at).toLocaleString('en-ZA') : 'Unavailable'}.</p>
     {(error || data?.error || stale) && <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-3">{error || data?.error || 'Daily check is overdue or has not run. Apply actions require fresh evidence.'}</p>}
     {message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
     <div className="flex flex-wrap gap-3">
-      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); setArchiveFilter('all'); resetSelection(); }}><option value="thanda-solar">Thanda</option><option value="sensible-solar">Sensible</option></select>
-      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); setArchiveFilter('all'); resetSelection(); }}>{[['price','Cost changes'],['new','New products'],['archive','Archive checklist'],['review','Needs review']].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === key && (key !== 'review' || needsReview(r))).length})</option>)}</select>
+      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); setArchiveFilter('all'); resetSelection(); }}><option value="thanda-solar">Thanda ({data?.counts?.['thanda-solar']?.total ?? '…'})</option><option value="sensible-solar">Sensible ({data?.counts?.['sensible-solar']?.total ?? '…'})</option></select>
+      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); setArchiveFilter('all'); resetSelection(); }}>{changeTypes.map(([key,label]) => <option key={key} value={key}>{label} ({counts?.[key] ?? '…'})</option>)}</select>
       {isArchive && <select aria-label="Archive status" className={button} disabled={busy} value={archiveFilter} onChange={e => { setArchiveFilter(e.target.value); resetSelection(); }}>{[['all','All pending checks'],...Object.entries(archiveLabels)].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === 'archive' && (key === 'all' || archiveStatus(r) === key)).length})</option>)}</select>}
       <input aria-label="Find product" disabled={busy} className="rounded border px-3 py-2" placeholder="Find SKU or description" value={query} onChange={e => { setQuery(e.target.value); resetSelection(); }} />
     </div>

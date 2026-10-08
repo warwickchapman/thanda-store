@@ -59,12 +59,24 @@ without automatically publishing them to the storefront.
   `victron_sku_successions` provides predecessor/successor labels; the shared
   resolver recognises R packaging aliases and prevents automatic duplicate creation.
 
-## Daily alert and retirement checklist
+## Daily work indicator and archive candidates
 
-The daily timer runs at 07:00 Africa/Johannesburg. It adds an in-app Admin menu
-alert for new changes, a failed comparison or an overdue run. Acknowledgement
-persists for the exact change set; refreshing observation timestamps alone does
-not repeat an alert. No email delivery or recipient configuration is included.
+The daily timer runs at 07:00 Africa/Johannesburg. The Admin menu orange dot is
+an outstanding-work indicator: it appears only when either company's **Cost
+changes**, **New products** or counted **Needs review** queue has entries. Archive
+candidates, comparison errors and overdue runs do not independently light the
+dot. Errors and overdue warnings remain visible on the catalogue page. The dot
+clears when the counted work is resolved or ignored; acknowledgement cannot
+hide outstanding work, so the acknowledgement button is no longer shown.
+No email delivery or recipient configuration is included.
+
+The company dropdown shows **Thanda (N)** and **Sensible (N)**, where each total
+is that company's cost changes + new products + counted review candidates.
+The change-type dropdown order is **Cost changes**, **New products**, **Needs
+review**, then **Archive candidates**. Its counts and company totals come from
+the same server calculation as the menu dot, before search or archive-status
+filtering. Archive rows remain available but never contribute to a company total.
+Counts refer to individual saved proposals, not replacement-family stock totals.
 
 **Needs review** counts only held products with positive stock in Victron's ZA
 warehouse. These review candidates appear first, sorted by SKU. Products with
@@ -102,9 +114,9 @@ generic supplier stock, successors and retail siblings do not contribute.
 The next daily comparison, or **Compare saved records**, promotes a silenced
 item automatically when the saved ZA quantity becomes positive. Supplier data
 continues to refresh on its existing four-hour schedule. Changes between positive
-quantities do not repeat an alert or invalidate an approval; a candidate returning
-after a silenced comparison alerts again even if its earlier alert was acknowledged.
-Failed or overdue comparisons continue to alert independently of this queue.
+quantities do not invalidate an approval; a candidate returning after a silenced
+comparison is counted again and restores the work indicator. Failed or overdue
+comparisons preserve prior rows and show a separate data warning on the page.
 
 After deploying this change, run one saved comparison to populate ZA quantities
 and review actions, and replace old category-based exclusions in saved rows.
@@ -119,7 +131,7 @@ check outstanding orders and complete archival in Xero. Recording completion
 requires known zero stock and is audited. The record hides that absence episode
 from the checklist; renewed availability resets the episode.
 
-The archive checklist has an **Archive status** filter, defaulting to **All pending
+**Archive candidates** has an **Archive status** filter, defaulting to **All pending
 checks**. Its counts cover the selected company's archive rows before the SKU/name
 search. The three groups are mutually exclusive:
 
@@ -139,6 +151,18 @@ company before recording completion here; the page does not verify orders or
 actual Xero archival. Repeated comparisons of the same saved supplier observation
 cannot satisfy the two-date absence rule. Filters and counts use saved rows only,
 with no provider calls or changes to archive eligibility.
+
+### Xero archive API verification — 8 October 2026
+
+The official Accounting API [Items operations](https://github.com/XeroAPI/Xero-OpenAPI/blob/fd9d44b04bf4934a7509b8e7ece51a9e0e462e4f/xero_accounting.yaml#L8892)
+and [Item schema](https://github.com/XeroAPI/Xero-OpenAPI/blob/fd9d44b04bf4934a7509b8e7ece51a9e0e462e4f/xero_accounting.yaml#L22661)
+provide no archive/restore operation or archived-state field. This is a check of
+the supported public contract; no authenticated Xero probe was made.
+[DELETE](https://developer.xero.com/documentation/api/accounting/items/#delete-items)
+is irreversible and cannot delete tracked items with the documented transaction,
+opening-balance or adjustment history. Setting `IsPurchased`/`IsSold` false is
+also different from archival and clears corresponding details. Actual archival
+therefore remains in Xero's interface; Store only records manual completion.
 
 The official announcement and PDFs are quarterly sanity-check evidence, never a
 replacement price authority. Record the quarter, document reference, checks and
@@ -167,8 +191,9 @@ or instructions to archive. PDF price extraction/comparison remains a manual che
 5. Install the checked-in `thanda-store-victron-review.service` and `.timer` using
    the project's authorised deployment procedure. The service reads supplier and
    Xero environment files. Enable/start the timer only after the first comparison.
-6. Archive checklist completion remains in Xero. Daily alerts appear in the Admin
-   menu; use the audit history to review approvals and quarterly checks.
+6. Archive candidates must still be archived in Xero before recording completion.
+   The Admin menu indicates counted catalogue work; use the audit history to review
+   approvals and quarterly checks.
 
 ## API budget and failure behaviour
 
