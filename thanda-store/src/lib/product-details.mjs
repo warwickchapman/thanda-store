@@ -1,4 +1,5 @@
 import { deriveCatalogueAttributes, filterDefinitions } from './catalogue-filters.mjs';
+import { datasheetResource } from './store-product-datasheet.mjs';
 const manufacturerHosts = {
   victron: ['www.victronenergy.com','victronenergy.com'],
   renogy: ['www.renogy.com','renogy.com','uk.renogy.com','au.renogy.com'],
@@ -26,6 +27,8 @@ export function productDetails(product) {
     if(label&&value&&!specifications.some(s=>s.label.toLowerCase()===label.toLowerCase())) specifications.push({label:label[0].toUpperCase()+label.slice(1),value});
   }
   const links=[];
+  const uploadedDatasheet = datasheetResource(product);
+  if (uploadedDatasheet) links.push(uploadedDatasheet);
   for(const doc of [...(Array.isArray(details.publicResources)?details.publicResources:[]),...(Array.isArray(details.documents)?details.documents:[])]) {
     const type=String(doc.kind||doc.document_type||'').toLowerCase();
     const kind=type==='product'?'product':type==='datasheet'?'datasheet':['manual','product manual'].includes(type)?'manual':null;

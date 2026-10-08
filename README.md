@@ -321,9 +321,26 @@ normal database backups. No filesystem upload directory or deployment copy is
 needed. The image table is created on first save. Product details retain the
 last editing administrator and edit time.
 
+The same editor accepts **one optional PDF datasheet per product**. Upload it
+beside the photograph; when editing, the current filename opens the saved PDF.
+Choosing another PDF replaces it when you save. **Remove datasheet** marks it
+for removal, with **Undo removal** available before saving. Leaving the field
+empty preserves the existing file. Customers see a **Datasheet** link under
+**Product resources** in the product-details panel.
+
+PDFs must be readable and password-free. Photo and PDF uploads together are
+limited to **8 MB per save**, within the existing 9 MB multipart request limit;
+large photo and datasheet uploads can be saved in two steps. The PDF bytes and
+filename are stored transactionally in PostgreSQL `store_product_datasheets`,
+with a revision recorded in product details. They survive stock syncs and are
+included in database backups. `/api/store-product-datasheets/[id]` requires a
+signed-in user; hidden products are accessible only to administrators. Replaced
+or removed files stop resolving at their old revision URLs. File reads and
+datasheet edits make zero external API calls.
+
 The Store's Nginx HTTPS server block must set `client_max_body_size 9m;` to
 allow an 8 MB photograph plus multipart form fields. Keep the application's
-8 MB photo and 9 MB request limits in place. Back up the proxy configuration,
+8 MB combined upload and 9 MB request limits in place. Back up the proxy configuration,
 run `nginx -t`, and reload Nginx after changing this setting.
 
 API budget review: search and new-product validation each read one complete
@@ -339,7 +356,9 @@ Validation: `node --test test/store-products.test.mjs` covers input, duplicate
 and succession handling, stored-source failure and stock identity semantics.
 `RUN_STORE_PRODUCTS_DB_TESTS=1 node test/store-products.integration.mjs` uses a
 disposable local schema and fake Hub to test imports, concurrent duplicates,
-photos, edits and subsequent stock sync without contacting Xero.
+photos, datasheet replacement/removal, edits and subsequent stock sync without
+contacting Xero. `node --test test/store-product-datasheet.test.mjs` checks PDF
+validation and product-detail links.
 
 The storefront should not render supplier originals directly when a local thumbnail exists. Supplier images can be very large, inconsistently framed, or temporarily unavailable.
 

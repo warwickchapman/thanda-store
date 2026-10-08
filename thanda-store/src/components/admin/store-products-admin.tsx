@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from './admin-menu';
 
 type XeroItem = {
@@ -8,8 +8,9 @@ type XeroItem = {
   existing: { id: number; editable: boolean; hidden: boolean } | null;
   replaces: string[]; replacedBy: string[];
 };
-type StoreProduct = { id: number; sku: string; name: string; description: string; price: string; category: string; image_url: string; hidden: boolean };
-type Draft = { id?: number; itemId?: string; sku: string; name: string; description: string; price: string | number; category: string; image_url?: string; hidden?: boolean };
+type Datasheet = { filename: string; revision: string };
+type StoreProduct = { id: number; sku: string; name: string; description: string; price: string; category: string; image_url: string; hidden: boolean; datasheet?: Datasheet | null };
+type Draft = { id?: number; itemId?: string; sku: string; name: string; description: string; price: string | number; category: string; image_url?: string; hidden?: boolean; datasheet?: Datasheet | null };
 const field = 'mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 font-normal text-zinc-950';
 const button = 'rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 disabled:opacity-50';
 
@@ -23,6 +24,9 @@ function ProductEditor({ draft, onCancel, onSaved }: { draft: Draft; onCancel: (
   const [preview, setPreview] = useState(draft.image_url || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [removeDatasheet, setRemoveDatasheet] = useState(false);
+  const [datasheetName, setDatasheetName] = useState('');
+  const datasheetInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     return () => { if (preview.startsWith('blob:')) URL.revokeObjectURL(preview); };
   }, [preview]);
@@ -30,7 +34,15 @@ function ProductEditor({ draft, onCancel, onSaved }: { draft: Draft; onCancel: (
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const photo = form.get('photo');
+    const pdf = form.get('datasheet');
+    const uploadBytes = (photo instanceof File ? photo.size : 0) + (pdf instanceof File ? pdf.size : 0);
+    if (uploadBytes > 8 * 1024 * 1024) {
+      setError('Photo and PDF uploads together can total up to 8 MB. Save one file first, then add the other.');
+      return;
+    }
     form.set('visible', form.get('visible') === 'on' ? 'true' : 'false');
+    form.set('removeDatasheet', String(removeDatasheet));
     if (draft.id) form.set('id', String(draft.id));
     else form.set('itemId', draft.itemId!);
     setBusy(true); setError('');
@@ -60,6 +72,21 @@ function ProductEditor({ draft, onCancel, onSaved }: { draft: Draft; onCancel: (
             }} />
           </label>
           <p className="mt-2 text-xs text-zinc-500">JPG, PNG or WebP. Up to 8 MB and 25 megapixels. {draft.image_url ? 'Leave empty to keep the current photo.' : 'You can add a photo later.'}</p>
+          <div className="mt-5 border-t border-zinc-200 pt-4">
+            <label htmlFor="store-product-datasheet" className="block text-sm font-semibold">PDF datasheet</label>
+            {draft.datasheet && !removeDatasheet && !datasheetName && <a href={`/api/store-product-datasheets/${draft.id}?v=${draft.datasheet.revision}`} target="_blank" rel="noopener noreferrer" className="mt-2 block break-all text-sm text-sky-800 underline">{draft.datasheet.filename}</a>}
+            <input ref={datasheetInput} id="store-product-datasheet" name="datasheet" type="file" accept="application/pdf,.pdf" className="mt-2 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-zinc-100 file:p-2 file:font-semibold" onChange={event => {
+              const file = event.target.files?.[0];
+              if (file && file.size > 8 * 1024 * 1024) { setError('Choose a PDF datasheet up to 8 MB.'); event.target.value = ''; setDatasheetName(''); return; }
+              setError(''); setDatasheetName(file?.name || ''); if (file) setRemoveDatasheet(false);
+            }} />
+            <p className="mt-2 text-xs text-zinc-500">One PDF per product. Photo and PDF uploads together can total up to 8 MB per save. {draft.datasheet ? 'Choose a new PDF to replace the current file.' : 'Optional.'}</p>
+            {datasheetName && <p className="mt-2 text-xs text-zinc-600">The selected PDF will be saved with your changes.</p>}
+            {draft.datasheet && <button type="button" className="mt-2 text-xs font-semibold text-sky-800 underline" onClick={() => {
+              setRemoveDatasheet(value => !value); setDatasheetName(''); if (datasheetInput.current) datasheetInput.current.value = '';
+            }}>{removeDatasheet ? 'Undo removal' : 'Remove datasheet'}</button>}
+            {removeDatasheet && <p role="status" className="mt-2 text-xs text-amber-800">The datasheet will be removed when you save.</p>}
+          </div>
         </div>
         <div className="space-y-4">
           <label className="block text-sm font-semibold">Store name<input name="name" required maxLength={200} defaultValue={draft.name} className={field} /></label>

@@ -82,6 +82,12 @@ export async function ensureStoreProductSchema(db) {
     image BYTEA NOT NULL,
     revision TEXT NOT NULL
   )`);
+  await db.query(`CREATE TABLE IF NOT EXISTS store_product_datasheets (
+    product_id BIGINT PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+    document BYTEA NOT NULL,
+    filename TEXT NOT NULL,
+    revision TEXT NOT NULL
+  )`);
 }
 
 export async function productIndex(db) {
@@ -90,8 +96,9 @@ export async function productIndex(db) {
   return { products: products.rows, successions: successions.rows };
 }
 
-export async function saveStoreProduct(pool, { id, item, observedAt, input, image, imageRevision, actorId }) {
+export async function saveStoreProduct(pool, { id, item, observedAt, input, image, imageRevision, datasheet, removeDatasheet = false, actorId }) {
   const fields = validateStoreProduct(input);
+  if (datasheet && removeDatasheet) throw new ProductInputError('Choose either a replacement datasheet or Remove datasheet.');
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
@@ -125,6 +132,16 @@ export async function saveStoreProduct(pool, { id, item, observedAt, input, imag
       await db.query(`INSERT INTO store_product_images(product_id,image,revision) VALUES($1,$2,$3)
         ON CONFLICT(product_id) DO UPDATE SET image=EXCLUDED.image, revision=EXCLUDED.revision`, [productId, image, imageRevision]);
       await db.query('UPDATE products SET image_url=$2 WHERE id=$1', [productId, `/api/store-product-images/${productId}?v=${imageRevision}`]);
+    }
+    if (datasheet) {
+      await db.query(`INSERT INTO store_product_datasheets(product_id,document,filename,revision) VALUES($1,$2,$3,$4)
+        ON CONFLICT(product_id) DO UPDATE SET document=EXCLUDED.document, filename=EXCLUDED.filename, revision=EXCLUDED.revision`,
+      [productId, datasheet.document, datasheet.filename, datasheet.revision]);
+      await db.query(`UPDATE products SET details=details || jsonb_build_object('storeDatasheet',$2::jsonb) WHERE id=$1`,
+        [productId, JSON.stringify({ filename: datasheet.filename, revision: datasheet.revision })]);
+    } else if (removeDatasheet) {
+      await db.query('DELETE FROM store_product_datasheets WHERE product_id=$1', [productId]);
+      await db.query("UPDATE products SET details=details - 'storeDatasheet' WHERE id=$1", [productId]);
     }
     await db.query('COMMIT');
     return productId;

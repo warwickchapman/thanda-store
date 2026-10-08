@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin as validAdminOrigin } from '@/lib/auth/impersonation-origin.mjs';
 import pool from '@/lib/db';
+import { MAX_PRODUCT_UPLOAD_BYTES, validateDatasheet } from '@/lib/store-product-datasheet.mjs';
 import { ProductInputError, productIndex, saveStoreProduct, searchXeroProducts, storedXeroItems } from '@/lib/admin/store-products.mjs';
 
 export const runtime = 'nodejs';
@@ -13,7 +14,8 @@ export async function GET(request: Request) {
   try {
     if (params.get('source') === 'store') {
       const result = await pool.query(`SELECT id,sku,name,category,image_url,details->>'description' AS description,
-        details->>'recommendedRetailExVat' AS price, COALESCE((details->>'hidden')::boolean,false) AS hidden
+        details->>'recommendedRetailExVat' AS price, details->'storeDatasheet' AS datasheet,
+        COALESCE((details->>'hidden')::boolean,false) AS hidden
         FROM products WHERE details->>'storeManaged'='true' ORDER BY name`);
       return Response.json({ products: result.rows }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
@@ -29,7 +31,7 @@ export async function GET(request: Request) {
 
 async function boundedFormData(request: Request) {
   const maxBytes = 9 * 1024 * 1024;
-  if (Number(request.headers.get('content-length')) > maxBytes) throw new ProductInputError('Upload a photo smaller than 8 MB.', 413);
+  if (Number(request.headers.get('content-length')) > maxBytes) throw new ProductInputError('Photo and datasheet uploads together must be at most 8 MB per save.', 413);
   const reader = request.body?.getReader();
   if (!reader) throw new ProductInputError('Product details are required.');
   const chunks: Uint8Array[] = [];
@@ -38,7 +40,7 @@ async function boundedFormData(request: Request) {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > maxBytes) { await reader.cancel(); throw new ProductInputError('Upload a photo smaller than 8 MB.', 413); }
+    if (size > maxBytes) { await reader.cancel(); throw new ProductInputError('Photo and datasheet uploads together must be at most 8 MB per save.', 413); }
     chunks.push(value);
   }
   try { return await new Response(Buffer.concat(chunks), { headers: request.headers }).formData(); }
@@ -61,6 +63,16 @@ async function save(request: Request, editing: boolean) {
     };
     let image: Buffer | undefined;
     const photo = form.get('photo');
+    const pdf = form.get('datasheet');
+    const removeDatasheet = form.get('removeDatasheet') === 'true';
+    if (removeDatasheet && pdf instanceof File && (pdf.name || pdf.size)) throw new ProductInputError('Choose either a replacement datasheet or Remove datasheet.');
+    const uploadBytes = (photo instanceof File ? photo.size : 0) + (pdf instanceof File ? pdf.size : 0);
+    if (uploadBytes > MAX_PRODUCT_UPLOAD_BYTES) throw new ProductInputError('Photo and datasheet uploads together must be at most 8 MB per save.', 413);
+    let datasheet;
+    if (pdf instanceof File && (pdf.name || pdf.size)) {
+      try { datasheet = await validateDatasheet(Buffer.from(await pdf.arrayBuffer()), pdf.name); }
+      catch (error) { throw new ProductInputError(error instanceof Error ? error.message : 'Choose a valid PDF datasheet.'); }
+    }
     if (photo instanceof File && photo.size) {
       if (photo.size > 8 * 1024 * 1024) throw new ProductInputError('Upload a photo smaller than 8 MB.', 413);
       try {
@@ -73,7 +85,7 @@ async function save(request: Request, editing: boolean) {
     const snapshot = editing ? null : await storedXeroItems();
     const item = snapshot?.items.find((candidate: { ItemID: string }) => candidate.ItemID === form.get('itemId'));
     const productId = await saveStoreProduct(pool, {
-      id, item, observedAt: snapshot?.observedAt, input, image,
+      id, item, observedAt: snapshot?.observedAt, input, image, datasheet, removeDatasheet,
       imageRevision: image ? crypto.createHash('sha256').update(image).digest('hex').slice(0, 20) : undefined, actorId: user.id,
     });
     return Response.json({ id: productId, message: editing ? 'Product saved.' : 'Product added to the store.' }, { status: editing ? 200 : 201 });

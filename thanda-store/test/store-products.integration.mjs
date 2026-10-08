@@ -6,6 +6,9 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { ensureProductSchema } from '../scripts/product-sync-lib.mjs';
 import { saveStoreProduct } from '../src/lib/admin/store-products.mjs';
+import { validateDatasheet } from '../src/lib/store-product-datasheet.mjs';
+import { productDetails } from '../src/lib/product-details.mjs';
+import { testDatasheetPdf } from './fixtures/store-product-pdf.mjs';
 
 if (process.env.RUN_STORE_PRODUCTS_DB_TESTS !== '1' || !process.env.DATABASE_URL) throw new Error('Set RUN_STORE_PRODUCTS_DB_TESTS=1 and a local test DATABASE_URL.');
 const url = new URL(process.env.DATABASE_URL);
@@ -36,7 +39,8 @@ try {
   await admin.query(`CREATE SCHEMA ${schema}`);
   await ensureProductSchema(pool);
   const input = { name: 'Store name', description: 'Store description', category: 'Other products', price: '149.95', visible: true };
-  const args = { id: null, item, observedAt, input, image: Buffer.from('synthetic-photo'), imageRevision: 'test-photo', actorId: 123 };
+  const datasheet = await validateDatasheet(testDatasheetPdf(), 'Example.pdf');
+  const args = { id: null, item, observedAt, input, image: Buffer.from('synthetic-photo'), imageRevision: 'test-photo', datasheet, actorId: 123 };
   const results = await Promise.allSettled([saveStoreProduct(pool, args), saveStoreProduct(pool, args)]);
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
@@ -45,11 +49,22 @@ try {
   assert.equal(row.details.localStockOnHand, 3);
   assert.equal(row.details.xeroStockSyncedAt, observedAt);
   assert.equal(row.details.storeEditedBy, 123);
-  await saveStoreProduct(pool, { ...args, id, image: undefined, input: { ...input, price: '175.50', name: 'Edited store name', visible: false } });
+  await saveStoreProduct(pool, { ...args, id, image: undefined, datasheet: undefined, input: { ...input, price: '175.50', name: 'Edited store name', visible: false } });
   row = (await pool.query('SELECT * FROM products WHERE id=$1', [id])).rows[0];
   assert.equal(row.details.hidden, true);
   assert.equal(row.details.recommendedRetailExVat, 175.5);
   assert.equal((await pool.query('SELECT image FROM store_product_images WHERE product_id=$1', [id])).rows[0].image.toString(), 'synthetic-photo');
+  assert.equal(row.details.storeDatasheet.revision, datasheet.revision);
+  assert.deepEqual((await pool.query('SELECT document FROM store_product_datasheets WHERE product_id=$1', [id])).rows[0].document, datasheet.document);
+  const replacement = await validateDatasheet(testDatasheetPdf('Updated specification'), 'Replacement.pdf');
+  await saveStoreProduct(pool, { ...args, id, image: undefined, datasheet: replacement });
+  row = (await pool.query('SELECT * FROM products WHERE id=$1', [id])).rows[0];
+  assert.equal(row.details.storeDatasheet.filename, 'Replacement.pdf');
+  assert.equal(productDetails(row).links[0].url, `/api/store-product-datasheets/${id}?v=${replacement.revision}`);
+  assert.equal((await pool.query('SELECT COUNT(*)::int AS count FROM store_product_datasheets')).rows[0].count, 1);
+  await assert.rejects(() => saveStoreProduct(pool, { ...args, id, datasheet: replacement, removeDatasheet: true }), /either/);
+  // Restore the edited fields while retaining the replacement datasheet.
+  await saveStoreProduct(pool, { ...args, id, image: undefined, datasheet: undefined, input: { ...input, price: '175.50', name: 'Edited store name', visible: false } });
   await assert.rejects(() => saveStoreProduct(pool, { ...args, id: id + 1 }), /not editable/);
   assert.equal((await pool.query('SELECT COUNT(*)::int AS count FROM products')).rows[0].count, 1);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -60,13 +75,19 @@ try {
   assert.equal(row.details.description, input.description); assert.equal(row.details.recommendedRetailExVat, 175.5);
   assert.equal(row.details.localStockOnHand, 8); assert.equal(row.details.hidden, true);
   assert.equal(row.image_url, `/api/store-product-images/${id}?v=test-photo`);
+  assert.equal(row.details.storeDatasheet.revision, replacement.revision);
   item = { ...item, ItemID: 'different-item-reusing-code' };
   await sync();
   row = (await pool.query('SELECT * FROM products WHERE id=$1', [id])).rows[0];
   assert.equal(row.details.localStockOnHand, null); assert.equal(row.details.xeroStockStatus, 'missing');
   assert.equal(row.name, 'Edited store name'); assert.equal(row.details.recommendedRetailExVat, 175.5);
   assert.equal(calls.length, 4, 'Only the existing stock job Hub reads are used.');
-  console.log('PASS: concurrent duplicate protection, transactional photos, edits/hiding, stock refresh without editorial/price loss, identity mismatch safety.');
+  await saveStoreProduct(pool, { ...args, id, image: undefined, datasheet: undefined, removeDatasheet: true });
+  row = (await pool.query('SELECT * FROM products WHERE id=$1', [id])).rows[0];
+  assert.equal(row.details.storeDatasheet, undefined);
+  assert.equal(productDetails(row).links.length, 0);
+  assert.equal((await pool.query('SELECT COUNT(*)::int AS count FROM store_product_datasheets')).rows[0].count, 0);
+  console.log('PASS: duplicate protection, transactional photos/datasheets, PDF replacement/retention/removal, edits/hiding, stock refresh and identity mismatch safety.');
 } finally {
   await new Promise(resolve => server.close(resolve));
   await pool.end(); await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await admin.end();
