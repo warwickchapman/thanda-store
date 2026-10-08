@@ -1,5 +1,5 @@
-// Admin reads only the Hub's stored contact snapshot via getContact. No Xero calls,
-// sync commands, polling or retries. At most one stored contact read per edit.
+// Contact evidence comes from the injected getter: company creation supplies a
+// live Xero detail read, while ordinary user edits use stored Hub evidence.
 export function defaultCompanyDiscount() {
   const configured = Number(process.env.DEFAULT_B2B_DISCOUNT_PERCENT);
   return Math.max(0, Math.min(40, Number.isFinite(configured) ? configured : 30));
@@ -108,31 +108,36 @@ export async function saveCompanyDiscounts(pool, { organisationId, victron, reno
   });
 }
 
-export async function createCompany(pool, { contactId, victron, renogy, actor, getContact, primaryUser }) {
+export async function createCompany(pool, { contactId, victron, renogy, actor, getContact,
+  selectedPeople = /** @type {Array<{ email: string, passwordHash: string }>} */ ([]) }) {
   validateDiscounts(victron, renogy);
-  if (!String(contactId || '').trim()) throw new CompanyManagementError('Select a Xero contact.');
+  contactId = String(contactId || '').trim().toLowerCase();
+  if (!contactId) throw new CompanyManagementError('Select a Xero contact.');
   const contact = await getContact(contactId);
-  if (primaryUser) {
-    const primary = contact.people.find((person) => person.kind === 'primary');
-    if (!primary?.email || primary.email.toLowerCase() !== primaryUser.email) {
-      throw new CompanyManagementError('The selected Xero contact needs a primary email before the company can be added.');
-    }
+  if (!Array.isArray(selectedPeople) || selectedPeople.length > 20) throw new CompanyManagementError('Select no more than 20 Xero people.');
+  const selectedEmails = selectedPeople.map((person) => String(person.email || '').trim().toLowerCase());
+  if (new Set(selectedEmails).size !== selectedEmails.length || selectedEmails.some((email) => !contact.people.some((person) => person.email === email))
+      || selectedPeople.some((person) => typeof person.passwordHash !== 'string' || !person.passwordHash)) {
+    throw new CompanyManagementError('Selected people must have distinct emails on the current Xero contact. Search again and review your selection.');
   }
   return transaction(pool, async (db) => {
-    const existing = await db.query('SELECT id FROM organisations WHERE xero_contact_id=$1', [contactId]);
+    const existing = await db.query('SELECT id FROM organisations WHERE LOWER(xero_contact_id)=$1', [contactId]);
     if (existing.rowCount) throw new CompanyManagementError('This Xero contact already has a company record. Open that company to manage its users or pricing.', 409);
     const company = (await db.query(`INSERT INTO organisations(name,xero_contact_id,xero_contact_name)
       VALUES($1,$2,$1) RETURNING id`, [contact.name, contactId])).rows[0];
     await db.query(`INSERT INTO contact_supplier_discounts(contact_id,supplier,discount_percent)
       VALUES($1,'victron',$2),($1,'renogy',$3) ON CONFLICT DO NOTHING`, [contactId, victron, renogy]);
-    if (primaryUser) {
-      company.primaryUser = (await db.query(`INSERT INTO portal_users
+    company.users = [];
+    for (const [index, selected] of selectedPeople.entries()) {
+      const person = contact.people.find((candidate) => candidate.email === selectedEmails[index]);
+      const created = (await db.query(`INSERT INTO portal_users
         (organisation_id,email,password_hash,role,is_active,xero_person_kind,xero_person_email)
-        VALUES($1,$2,$3,'buyer',true,'primary',$2) RETURNING id,email,organisation_id`,
-      [company.id, primaryUser.email, primaryUser.passwordHash])).rows[0];
+        VALUES($1,$2,$3,'buyer',true,$4,$2) RETURNING id,email,organisation_id`,
+      [company.id, person.email, selected.passwordHash, person.kind])).rows[0];
+      company.users.push(created);
     }
     await audit(db, actor, 'company_created', 'organisation', company.id,
-      { contactId, primaryUserId: company.primaryUser?.id ?? null });
+      { contactId, selectedUserIds: company.users.map((user) => user.id) });
     return company;
   });
 }

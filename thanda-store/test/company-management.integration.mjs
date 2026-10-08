@@ -14,7 +14,10 @@ const contacts = {
   'company-b': { name: 'Company B', people: [{ email: 'new-a@example.test', kind: 'additional' }, { email: 'moved-peer@example.test', kind: 'additional' }] },
   'company-c': { name: 'Company C', people: [] },
   'company-d': { name: 'Company D', people: [{ email: 'primary-d@example.test', kind: 'primary' }] },
-  'company-e': { name: 'Company E', people: [{ email: 'a@example.test', kind: 'primary' }] },
+  'company-e': { name: 'Company E', people: [{ email: 'a@example.test', kind: 'primary' }, { email: 'new-e@example.test', kind: 'additional' }] },
+  'company-f': { name: 'Company F', people: [{ email: 'primary-f@example.test', kind: 'primary' }, { email: 'other-f@example.test', kind: 'additional' }] },
+  'company-g': { name: 'Company G', people: [{ email: 'primary-g@example.test', kind: 'primary' }, { email: 'other-g@example.test', kind: 'additional' }] },
+  'company-legacy': { name: 'Legacy', people: [] },
 };
 const getContact = async (id) => { assert.ok(contacts[id]); return contacts[id]; };
 try {
@@ -98,20 +101,35 @@ try {
   assert.deepEqual((await snapshot()).organisations, initial.organisations);
   const created = await createCompany(pool, { contactId: 'company-c', victron: 10, renogy: 20, actor, getContact });
   assert.ok(created.id);
+  assert.deepEqual(created.users, [], 'Creating a company without selected people activates nobody');
+  await assert.rejects(() => createCompany(pool, { contactId: 'COMPANY-C', victron: 0, renogy: 0, actor, getContact }), /already has/);
   await assert.rejects(() => createCompany(pool, { contactId: 'company-c', victron: 0, renogy: 0, actor, getContact }), /already has/);
   assert.equal((await pool.query("SELECT discount_percent FROM contact_supplier_discounts WHERE contact_id='company-c' AND supplier='victron'")).rows[0].discount_percent, '10');
-  const beforeMissingPrimary = await snapshot();
-  await assert.rejects(() => createCompany(pool, { contactId: 'company-c', victron: 10, renogy: 20, actor, getContact,
-    primaryUser: { email: 'missing@example.test', passwordHash: 'unused' } }), /primary email/);
-  assert.deepEqual(await snapshot(), beforeMissingPrimary);
+  const beforeMissingPerson = await snapshot();
+  await assert.rejects(() => createCompany(pool, { contactId: 'company-f', victron: 10, renogy: 20, actor, getContact,
+    selectedPeople: [{ email: 'removed@example.test', passwordHash: 'unusable-hash' }] }), /current Xero contact/);
+  await assert.rejects(() => createCompany(pool, { contactId: 'company-f', victron: 10, renogy: 20, actor, getContact,
+    selectedPeople: [{ email: 'other-f@example.test', passwordHash: 'hash' }, { email: 'OTHER-F@EXAMPLE.TEST', passwordHash: 'hash' }] }), /distinct emails/);
+  assert.deepEqual(await snapshot(), beforeMissingPerson);
   const invited = await createCompany(pool, { contactId: 'company-d', victron: 15, renogy: 25, actor, getContact,
-    primaryUser: { email: 'primary-d@example.test', passwordHash: 'unusable-hash' } });
-  assert.equal(invited.primaryUser.email, 'primary-d@example.test');
-  assert.equal(Number(invited.primaryUser.organisation_id), Number(invited.id));
-  assert.equal((await userRow(invited.primaryUser.id)).xero_person_kind, 'primary');
+    selectedPeople: [{ email: 'primary-d@example.test', passwordHash: 'unusable-hash' }] });
+  assert.equal(invited.users[0].email, 'primary-d@example.test');
+  assert.equal(Number(invited.users[0].organisation_id), Number(invited.id));
+  assert.equal((await userRow(invited.users[0].id)).xero_person_kind, 'primary');
+  const additionalOnly = await createCompany(pool, { contactId: 'company-f', victron: 15, renogy: 25, actor, getContact,
+    selectedPeople: [{ email: 'other-f@example.test', passwordHash: 'unusable-hash' }] });
+  assert.deepEqual(additionalOnly.users.map((user) => user.email), ['other-f@example.test']);
+  assert.equal((await userRow(additionalOnly.users[0].id)).xero_person_kind, 'additional');
+  const both = await createCompany(pool, { contactId: 'company-g', victron: 15, renogy: 25, actor, getContact,
+    selectedPeople: [{ email: 'primary-g@example.test', passwordHash: 'unusable-hash' },
+      { email: 'other-g@example.test', passwordHash: 'unusable-hash' }] });
+  assert.deepEqual(both.users.map((user) => user.email), ['primary-g@example.test', 'other-g@example.test']);
+  assert.deepEqual((await pool.query('SELECT xero_person_kind FROM portal_users WHERE organisation_id=$1 ORDER BY id', [both.id])).rows.map((row) => row.xero_person_kind), ['primary', 'additional']);
+  await pool.query("INSERT INTO organisations(name,xero_contact_id) VALUES('Legacy','COMPANY-LEGACY')");
+  await assert.rejects(() => createCompany(pool, { contactId: 'company-legacy', victron: 15, renogy: 25, actor, getContact }), /already has/);
   const beforeDuplicate = await snapshot();
   await assert.rejects(() => createCompany(pool, { contactId: 'company-e', victron: 15, renogy: 25, actor, getContact,
-    primaryUser: { email: 'a@example.test', passwordHash: 'unusable-hash' } }), /already/);
+    selectedPeople: [{ email: 'new-e@example.test', passwordHash: 'unusable-hash' }, { email: 'a@example.test', passwordHash: 'unusable-hash' }] }), /already/);
   assert.deepEqual(await snapshot(), beforeDuplicate);
   const self = await updateUserEmail(pool, { userId: 99, email: 'new-admin@example.test', actor, getContact: async () => { throw new Error('Staff must not look up Xero'); } });
   assert.equal(self.signedOut, true);

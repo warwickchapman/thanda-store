@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
 import { ensureAuthSchema } from '@/lib/auth/schema';
-import { getXeroContactDetails } from '@/lib/xero/oauth';
+import { getLiveXeroContactDetails, XeroLiveLookupError } from '@/lib/xero/oauth';
 import crypto from 'node:crypto';
 import { createAccountSetupToken, hashPassword } from '@/lib/auth/server';
 import { sendAccountSetupEmail } from '@/lib/email/resend';
@@ -27,28 +27,49 @@ export async function POST(request: Request) {
   await ensureAuthSchema();
   const body = await request.json();
   try {
-    const contactId = String(body.xeroContactId || '').trim();
+    const contactId = String(body.xeroContactId || '').trim().toLowerCase();
     if (!contactId) return NextResponse.json({ error: 'Select a Xero contact.' }, { status: 400 });
-    const contact = await getXeroContactDetails(contactId);
-    const primaryEmail = contact.people.find((person) => person.kind === 'primary')?.email;
-    if (!primaryEmail) return NextResponse.json({ error: 'This Xero contact has no primary email. Add one in Xero before creating the company.' }, { status: 400 });
+    if (![body.victronDiscount, body.renogyDiscount].every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 40)) {
+      return NextResponse.json({ error: 'Victron and Renogy discounts must be between 0% and 40%.' }, { status: 400 });
+    }
+    if (!Array.isArray(body.selectedPeopleEmails) || body.selectedPeopleEmails.length > 20
+      || body.selectedPeopleEmails.some((email: unknown) => typeof email !== 'string')) {
+      return NextResponse.json({ error: 'Choose up to 20 Xero people to activate, or choose none.' }, { status: 400 });
+    }
+    const selectedEmails = body.selectedPeopleEmails.map((email: string) => email.trim().toLowerCase());
+    if (new Set(selectedEmails).size !== selectedEmails.length || selectedEmails.some((email: string) => !email)) {
+      return NextResponse.json({ error: 'Each selected Xero person must have a distinct email.' }, { status: 400 });
+    }
+    const existing = await pool.query('SELECT id FROM organisations WHERE LOWER(xero_contact_id)=$1 LIMIT 1', [contactId]);
+    if (existing.rowCount) return NextResponse.json({ error: 'This Xero contact already has a company record. Open that company to manage its users or pricing.' }, { status: 409 });
+    const contact = await getLiveXeroContactDetails(contactId);
+    const selectedPeople = await Promise.all(selectedEmails.map(async (email: string) => ({
+      email, passwordHash: await hashPassword(crypto.randomBytes(32).toString('hex')),
+    })));
     const company = await createCompany(pool, { contactId, victron: body.victronDiscount,
       renogy: body.renogyDiscount, actor: user, getContact: async () => contact,
-      primaryUser: { email: primaryEmail, passwordHash: await hashPassword(crypto.randomBytes(32).toString('hex')) } });
-    try {
-      const token = await createAccountSetupToken({ userId: Number(company.primaryUser.id), email: company.primaryUser.email,
-        organisationId: Number(company.id) });
-      if (!token) throw new Error('Account changed before the invitation was issued.');
-      await sendAccountSetupEmail({ to: company.primaryUser.email, token });
-      return NextResponse.json({ ok: true, company, inviteSent: true }, { status: 201 });
-    } catch (error) {
-      console.error('Created company and primary user but could not send setup email:', error);
-      return NextResponse.json({ ok: true, company, inviteSent: false }, { status: 202 });
+      selectedPeople });
+    const invitations = [];
+    for (const person of company.users) {
+      let inviteSent = false;
+      try {
+        const token = await createAccountSetupToken({ userId: Number(person.id), email: person.email,
+          organisationId: Number(company.id) });
+        if (!token) throw new Error('Account changed before the invitation was issued.');
+        await sendAccountSetupEmail({ to: person.email, token });
+        inviteSent = true;
+      } catch (error) {
+        console.error('Created company and buyer but could not send setup email:', error);
+      }
+      invitations.push({ email: person.email, userId: Number(person.id), inviteSent });
     }
+    return NextResponse.json({ ok: true, company, invitations }, { status: invitations.some((invite) => !invite.inviteSent) ? 202 : 201 });
   } catch (error) {
     if (error instanceof CompanyManagementError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof XeroLiveLookupError) return NextResponse.json({ error: error.message }, { status: error.status,
+      headers: error.retryAfter ? { 'Retry-After': error.retryAfter } : {} });
     console.error('Could not create company:', error);
-    return NextResponse.json({ error: 'Unable to verify the stored Xero contact. No company was created. Try again when the Hub is available.' }, { status: 503 });
+    return NextResponse.json({ error: 'Unable to create the company. Check the Xero connection and try again.' }, { status: 503 });
   }
 }
 

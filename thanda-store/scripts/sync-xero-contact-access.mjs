@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
+import { contactObservedAt, usersRemovedByContact } from '../src/lib/xero/contact-reconciliation.mjs';
 import pg from 'pg';
 
 const CONTACTS_URL = '/Contacts';
@@ -14,15 +15,16 @@ async function xeroContact(token, contactId) {
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(`Xero contact ${contactId} fetch failed: ${response.status}`);
+  const observedAt = contactObservedAt(payload);
   const contact = payload.Contacts?.[0];
   if (!contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED') {
-    return { name: '', emails: new Set() };
+    return { name: '', emails: new Set(), observedAt };
   }
   const primaryEmail = String(contact.EmailAddress || '').trim().toLowerCase();
   const additionalEmails = (contact.ContactPersons || [])
     .map((person) => String(person.EmailAddress || '').trim().toLowerCase())
     .filter((email) => email && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(email));
-  return { name: String(contact.Name || '').trim(), emails: new Set([primaryEmail, ...additionalEmails].filter(Boolean)) };
+  return { name: String(contact.Name || '').trim(), emails: new Set([primaryEmail, ...additionalEmails].filter(Boolean)), observedAt };
 }
 
 async function ensurePortalUserSchema(client) {
@@ -52,7 +54,7 @@ async function main() {
       WHERE xero_contact_id IS NOT NULL
     `);
     const result = await client.query(`
-      SELECT u.id, u.xero_person_email, o.xero_contact_id
+      SELECT u.id, u.xero_person_email, u.created_at, o.xero_contact_id
       FROM portal_users u
       JOIN organisations o ON o.id = u.organisation_id
       WHERE u.is_active = true
@@ -74,13 +76,11 @@ async function main() {
       const allowedEmails = contact.emails;
       if (contact.name) {
         await client.query(
-          'UPDATE organisations SET name = $2, xero_contact_name = $2, updated_at = NOW() WHERE xero_contact_id = $1',
-          [contactId, contact.name],
+          'UPDATE organisations SET name = $2, xero_contact_name = $2, updated_at = NOW() WHERE xero_contact_id = $1 AND created_at < $3',
+          [contactId, contact.name, contact.observedAt],
         );
       }
-      const missingIds = users
-        .filter((user) => !allowedEmails.has(String(user.xero_person_email || '').toLowerCase()))
-        .map((user) => Number(user.id));
+      const missingIds = usersRemovedByContact(users, allowedEmails, contact.observedAt);
       stats.checkedUsers += users.length;
       if (!missingIds.length) continue;
 

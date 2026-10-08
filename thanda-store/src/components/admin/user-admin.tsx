@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { ApiAccess, UserCompany, type Company } from './company-access';
 import { useRouter } from 'next/navigation';
-import { Search } from 'lucide-react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { AdminMenu } from './admin-menu';
 
 export type AdminUser = {
@@ -105,144 +104,12 @@ export type XeroStatus = {
   };
 };
 
-type XeroContact = {
-  id: string;
-  name: string;
-  email: string;
-};
-
 type XeroContactPerson = {
   email: string;
   name: string;
   kind: 'primary' | 'additional';
   includeInEmails: boolean;
 };
-
-async function fetchXeroContacts(email: string): Promise<XeroContact[]> {
-  const response = await fetch(`/api/admin/xero/contacts?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Unable to search Xero contacts.');
-  return data.contacts as XeroContact[];
-}
-
-export function XeroContactFields({
-  email,
-  initialContactId = '',
-  autoLookup = false,
-  emailInput,
-  onContactSelected,
-}: {
-  email: string;
-  initialContactId?: string;
-  autoLookup?: boolean;
-  emailInput?: ReactNode;
-  onContactSelected?: (contact: XeroContact) => void;
-}) {
-  const [contactId, setContactId] = useState(initialContactId);
-  const [contactName, setContactName] = useState('');
-  const [contacts, setContacts] = useState<XeroContact[]>([]);
-  const [lookupMessage, setLookupMessage] = useState('');
-  const [lookingUp, setLookingUp] = useState(false);
-  const [matchedEmail, setMatchedEmail] = useState(initialContactId ? email : '');
-  const [lookupEmail, setLookupEmail] = useState('');
-
-  const selectContact = useCallback((contact: XeroContact) => {
-    setContactId(contact.id);
-    setContactName(contact.name);
-    setMatchedEmail(email);
-    onContactSelected?.(contact);
-  }, [email, onContactSelected]);
-
-  async function findContacts() {
-    if (!email) {
-      setLookupMessage('Enter an email address first.');
-      return;
-    }
-    setLookingUp(true);
-    setLookupMessage('');
-    setContacts([]);
-    setLookupEmail(email);
-    try {
-      const matches = await fetchXeroContacts(email);
-      setContacts(matches);
-      if (matches.length === 1) {
-        selectContact(matches[0]);
-        setLookupMessage(`Matched ${matches[0].name}.`);
-      } else if (matches.length === 0) {
-        setLookupMessage('No exact Xero contact match. Enter the contact manually.');
-      } else {
-        setLookupMessage(`${matches.length} Xero contacts match this email. Select the correct contact.`);
-      }
-    } catch (err) {
-      setLookupMessage(err instanceof Error ? err.message : 'Unable to search Xero contacts.');
-    } finally {
-      setLookingUp(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!autoLookup || !email || initialContactId) return;
-    let active = true;
-
-    async function lookupAutomatically() {
-      setLookingUp(true);
-      setLookupMessage('');
-      setLookupEmail(email);
-      try {
-        const matches = await fetchXeroContacts(email);
-        if (!active) return;
-        setContacts(matches);
-        if (matches.length === 1) {
-          selectContact(matches[0]);
-          setLookupMessage(`Matched ${matches[0].name}.`);
-        } else if (matches.length === 0) {
-          setLookupMessage('No exact Xero contact match. Enter the contact manually.');
-        } else {
-          setLookupMessage(`${matches.length} Xero contacts match this email. Select the correct contact.`);
-        }
-      } catch (err) {
-        if (active) setLookupMessage(err instanceof Error ? err.message : 'Unable to search Xero contacts.');
-      } finally {
-        if (active) setLookingUp(false);
-      }
-    }
-
-    void lookupAutomatically();
-    return () => {
-      active = false;
-    };
-  }, [autoLookup, email, initialContactId, selectContact]);
-
-  return (
-    <div className="grid gap-3 lg:col-span-6">
-      {emailInput && <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-        {emailInput}
-        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
-      </div>}
-      {emailInput ? <input type="hidden" name="xeroContactId" value={matchedEmail === email ? contactId : ''} /> : <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-        <label className="grid gap-1 text-sm font-semibold">Xero Contact ID<input name="xeroContactId" value={contactId} onChange={(event) => { setContactId(event.target.value); setMatchedEmail(email); }} required className="h-10 rounded-md border border-zinc-300 px-3 font-normal" /></label>
-        <button type="button" onClick={findContacts} disabled={lookingUp} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 disabled:opacity-60"><Search className="h-4 w-4" />{lookingUp ? 'Searching' : 'Find in Xero'}</button>
-      </div>}
-      {lookupEmail === email && contacts.length > 1 && (
-        <label className="grid gap-1 text-sm font-semibold">Matching Xero contacts
-          <select
-            defaultValue=""
-            onChange={(event) => {
-              const contact = contacts.find((candidate) => candidate.id === event.target.value);
-              if (contact) selectContact(contact);
-            }}
-            className="h-10 rounded-md border border-zinc-300 bg-white px-3 font-normal"
-          >
-            <option value="" disabled>Select a contact</option>
-            {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name} ({contact.email})</option>)}
-          </select>
-        </label>
-      )}
-      {emailInput && matchedEmail === email && contactName && <p className="text-sm text-zinc-700">Xero customer: <span className="font-semibold">{contactName}</span></p>}
-      {lookupEmail === email && lookupMessage && <p className="text-sm text-zinc-500">{lookupMessage}</p>}
-    </div>
-  );
-}
 
 export function XeroPeopleAccess({
   organisationId,

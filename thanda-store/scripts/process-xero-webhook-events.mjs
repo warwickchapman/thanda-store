@@ -3,6 +3,7 @@
 // Projects completed Hub webhook evidence into portal sales and access state.
 // It makes no Xero calls and leaves unfinished Hub events queued for retry.
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
+import { contactObservedAt, usersRemovedByContact } from '../src/lib/xero/contact-reconciliation.mjs';
 import { refreshAccountDocuments } from '../src/lib/xero/customer-document-projection.mjs';
 import pg from 'pg';
 
@@ -64,6 +65,7 @@ async function cacheCreditNote(client, creditNote, stats) {
 
 async function reconcileContact(client, token, contactId, stats) {
   const payload = await xeroJson(client, token, `/Contacts/${encodeURIComponent(contactId)}`);
+  const observedAt = contactObservedAt(payload);
   const contact = payload.Contacts?.[0];
   const archived = !contact || String(contact.ContactStatus || '').toUpperCase() === 'ARCHIVED';
   const contactName = archived ? '' : String(contact.Name || '').trim();
@@ -71,15 +73,13 @@ async function reconcileContact(client, token, contactId, stats) {
     String(contact.EmailAddress || '').trim().toLowerCase(),
     ...(contact.ContactPersons || []).map((person) => String(person.EmailAddress || '').trim().toLowerCase()),
   ].filter((email) => email && !EXCLUDED_ADDITIONAL_PERSON_EMAILS.has(email)));
-  if (contactName) await client.query('UPDATE organisations SET name = $2, xero_contact_name = $2, updated_at = NOW() WHERE xero_contact_id = $1', [contactId, contactName]);
+  if (contactName) await client.query('UPDATE organisations SET name = $2, xero_contact_name = $2, updated_at = NOW() WHERE xero_contact_id = $1 AND created_at < $3', [contactId, contactName, observedAt]);
   const users = await client.query(`
-    SELECT u.id, u.xero_person_email
+    SELECT u.id, u.xero_person_email, u.created_at
     FROM portal_users u JOIN organisations o ON o.id = u.organisation_id
     WHERE o.xero_contact_id = $1 AND u.is_active = true AND u.xero_person_kind IN ('primary', 'additional')
   `, [contactId]);
-  const missingIds = users.rows
-    .filter((user) => !emails.has(String(user.xero_person_email || '').toLowerCase()))
-    .map((user) => Number(user.id));
+  const missingIds = usersRemovedByContact(users.rows, emails, observedAt);
   if (missingIds.length) {
     await client.query('BEGIN');
     try {

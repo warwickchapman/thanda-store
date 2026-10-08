@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { CompanyDiscounts, type Company } from '@/components/admin/company-access';
-import { XeroContactFields, XeroPeopleAccess, type AdminUser } from '@/components/admin/user-admin';
+import { XeroPeopleAccess, type AdminUser } from '@/components/admin/user-admin';
+import { AddCompany } from '@/components/admin/add-company';
 import { AdminMenu } from '@/components/admin/admin-menu';
 
 export default function CompaniesPage() {
@@ -12,14 +13,8 @@ export default function CompaniesPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [query, setQuery] = useState('');
-  const [email, setEmail] = useState('');
-  const [contactId, setContactId] = useState('');
-  const [message, setMessage] = useState('');
-  const [invitedUserId, setInvitedUserId] = useState<number | null>(null);
-  const [inviteFailed, setInviteFailed] = useState(false);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [defaultDiscount, setDefaultDiscount] = useState(30);
 
   async function load() {
@@ -51,37 +46,13 @@ export default function CompaniesPage() {
     openLinkedCompany();
     window.addEventListener('hashchange', openLinkedCompany);
     return () => window.removeEventListener('hashchange', openLinkedCompany);
-  }, [loaded]);
+  }, [loaded, query]);
 
-  async function create(form: HTMLFormElement) {
-    setBusy(true); setMessage(''); setError(''); setInvitedUserId(null); setInviteFailed(false);
-    const data = new FormData(form);
-    try {
-      const response = await fetch('/api/admin/companies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        xeroContactId: data.get('xeroContactId'), victronDiscount: Number(data.get('victronDiscount')), renogyDiscount: Number(data.get('renogyDiscount')),
-      }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Unable to create company.');
-      setEmail(''); setContactId(''); form.reset();
-      setInvitedUserId(Number(result.company.primaryUser.id));
-      setInviteFailed(!result.inviteSent);
-      setMessage(result.inviteSent
-        ? `Company created and setup invitation sent to ${result.company.primaryUser.email}.`
-        : `Company and primary buyer created, but the setup email could not be sent to ${result.company.primaryUser.email}. Open the user and resend the invitation.`);
-      await load().catch(() => setError('Company was created, but the list could not refresh. Reload this page to see it.'));
-    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to create company.'); }
-    finally { setBusy(false); }
-  }
   const matching = companies.filter((company) => [company.name, company.xero_contact_id].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())));
   return <main className="min-h-screen bg-zinc-50 text-zinc-950"><div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b pb-4"><div><h1 className="text-2xl font-bold">Companies</h1><p className="mt-1 text-sm text-zinc-600">Manage each company’s Xero contact, pricing and people in one place.</p></div><AdminMenu /></header>
     {error && <div role="alert" className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}<button type="button" className="ml-3 underline" onClick={() => { setError(''); void load().catch((error) => setError(error instanceof Error ? error.message : 'Unable to load companies.')); }}>Retry</button></div>}
-    {message && <p role="status" className={`mb-4 rounded border p-3 text-sm ${inviteFailed ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-green-200 bg-green-50 text-green-800'}`}>{message}{invitedUserId && <Link href={`/admin/users/${invitedUserId}`} className="ml-2 font-semibold underline">Open user</Link>}</p>}
-    {canManage && <section id="add-company" className="mb-6 scroll-mt-6"><h2 className="text-lg font-bold">Add a company</h2><p className="mb-4 mt-1 text-sm text-zinc-600">Find the primary contact email in the stored Xero catalogue. Creating the company also creates that person’s buyer account and emails a setup invitation. A company’s Xero identity stays fixed; move individual users if they belong elsewhere.</p><form onSubmit={(event) => { event.preventDefault(); void create(event.currentTarget); }} className="grid gap-3 rounded-lg border bg-white p-4 lg:grid-cols-6">
-      <XeroContactFields email={email} emailInput={<label className="grid gap-1 text-sm font-semibold">Primary Xero contact email<input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setContactId(''); }} required className="h-10 rounded border px-3 font-normal" /></label>} onContactSelected={(contact) => setContactId(contact.id)} />
-      <div className="flex flex-wrap gap-3 lg:col-span-6"><label className="grid gap-1 text-sm font-semibold">Victron discount (%)<input name="victronDiscount" type="number" min={0} max={40} step="0.01" defaultValue={defaultDiscount} required className="h-10 w-40 rounded border px-3 font-normal" /></label><label className="grid gap-1 text-sm font-semibold">Renogy discount (%)<input name="renogyDiscount" type="number" min={0} max={40} step="0.01" defaultValue={defaultDiscount} required className="h-10 w-40 rounded border px-3 font-normal" /></label></div>
-      <button disabled={busy || !contactId} className="h-10 justify-self-start rounded lg:col-span-6 bg-zinc-950 px-4 text-sm font-semibold text-white disabled:opacity-60">{busy ? 'Creating and inviting…' : 'Create company and invite primary contact'}</button>
-    </form></section>}
+    {canManage && <AddCompany companies={companies} users={users} defaultDiscount={defaultDiscount} onCreated={async () => { setQuery(''); await load(); }} onOpenCompany={() => setQuery('')} />}
     <label className="mb-4 grid gap-1 text-sm font-semibold">Search companies<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Company name or Xero contact ID" className="h-10 rounded border bg-white px-3 font-normal" /></label>
     <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">{matching.map((company) => {
       const people = users.filter((user) => Number(user.organisation_id) === Number(company.id));

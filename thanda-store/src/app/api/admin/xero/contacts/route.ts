@@ -1,27 +1,30 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth/server';
-import { findXeroContactsByEmail } from '@/lib/xero/oauth';
+import { findLiveXeroContacts, XeroLiveLookupError } from '@/lib/xero/oauth';
 
 export const dynamic = 'force-dynamic';
 
-const EMAIL_PATTERN = /^[^\s@"<>]+@[^\s@]+\.[^\s@]+$/;
-
 export async function GET(request: Request) {
   const user = await currentUser();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  if (!user || user.role !== 'admin' || !user.canManageUsers) {
+    return NextResponse.json({ error: 'Manage users permission required.' }, { status: 403 });
   }
 
-  const email = new URL(request.url).searchParams.get('email')?.trim().toLowerCase() || '';
-  if (!EMAIL_PATTERN.test(email)) {
-    return NextResponse.json({ error: 'A valid email address is required.' }, { status: 400 });
+  const params = new URL(request.url).searchParams;
+  const query = (params.get('query') || '').trim();
+  if (query.length < 2 || query.length > 100 || /[\x00-\x1f]/.test(query)) {
+    return NextResponse.json({ error: 'Enter 2–100 characters to search Xero.' }, { status: 400 });
   }
 
   try {
-    const contacts = await findXeroContactsByEmail(email);
-    return NextResponse.json({ contacts }, { headers: { 'Cache-Control': 'no-store' } });
+    const result = await findLiveXeroContacts(query);
+    return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('Xero contact lookup failed:', error);
-    return NextResponse.json({ error: 'Unable to search Xero contacts. Reconnect Xero if the issue persists.' }, { status: 502 });
+    if (error instanceof XeroLiveLookupError) {
+      return NextResponse.json({ error: error.message }, { status: error.status,
+        headers: error.retryAfter ? { 'Retry-After': error.retryAfter, 'Cache-Control': 'no-store' } : { 'Cache-Control': 'no-store' } });
+    }
+    return NextResponse.json({ error: 'Unable to search current Xero contacts. Try again later.' }, { status: 502 });
   }
 }
