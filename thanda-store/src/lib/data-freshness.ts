@@ -24,7 +24,7 @@ export type StockSourceStatus = {
 export type DataSourceStatus = StockSourceStatus & {
   lastError: string | null;
   recovery?: string[];
-  issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null }>;
+  issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null; reviewUrl?: string }>;
 };
 export type StockReviewItem = {
   supplier: string; sku: string; name: string; xeroStatus: string;

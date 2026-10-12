@@ -5,12 +5,32 @@ with complete, tenant-isolated Xero Item snapshots. It is independent of the
 quarterly Store assortment allowlist: new inventory candidates are discovered
 without automatically publishing them to the storefront.
 
+## Data health and catalogue decisions
+
+This page owns Victron product additions, cost changes, eligibility acceptance,
+90-day ignores and archive-candidate decisions. **Data health → Missing Xero
+items** diagnoses missing Thanda definitions and links to this page with
+`company=thanda-solar&sku=<literal SKU>`. The exact saved proposal and category
+are selected, including silenced or ignored rows. A predecessor or R retail code
+is not silently substituted with another family member. If no exact proposal is
+saved, the page explains that absence and offers **Compare saved records**;
+absence from the comparison never proves the item is present in Xero.
+
+Data health's missing-definition count is diagnostic, not an instruction to add
+every missing item. It can include excluded panels and unstocked 120V models
+that do not contribute to this page's work total. Data health retains source
+errors, stock unknowns, directed replacement labels and prior review/lifecycle
+context, but no Victron creation or decision controls. LoRa review stays separate.
+The old Data health creation/stock-review requests are rejected locally with a
+clear catalogue link before any product lookup or Hub request. There is no
+parallel Victron creation preview, and existing audits are retained.
+
 ## Pricing and approval
 
 - Thanda purchase cost: normal E-Order `price`, explicitly in ZAR, excluding VAT.
 - List price: use E-Order `enduser_price_zar.price` when present. If missing,
   calculate it as normal E-Order Thanda cost ÷ **0.525**, rounded to cents.
-  Calculated list prices are labelled in the review and creation preview.
+  Calculated list prices are labelled in the review.
 - Sensible purchase cost: list price × **0.60**, rounded to cents.
 - The same explicit-or-calculated list price initialises new-item selling prices.
 - Do not use quantity-break prices. Missing/zero/non-ZAR account costs and invalid
@@ -52,7 +72,7 @@ without automatically publishing them to the storefront.
   (monocrystalline) and `SPP` (polycrystalline). The broad E-Order category
   **Solar panels and cables** also includes `SCA` cables/connectors and `SLS`
   SolarSense products; those prefixes are not panels and are not excluded by
-  this rule. Store catalogue review, Data health creation and the Hub write
+  this rule. Store catalogue review and the Hub write
   guard use the same prefix rule. 120V-only and solar-home-system products still
   require review. The original supplier observation is retained.
 - Pricing applies to literal article codes, never across a successor family.
@@ -290,7 +310,7 @@ and a `reconciled` event was added to the Store audit.
 
 ## Verification
 
-- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/xero-item-create.test.mjs`
+- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/victron-catalogue-lifecycle.test.mjs test/data-health-review-routes.test.mjs test/stock-review-view.test.mjs test/stock-item-review-ui.test.mjs test/victron-catalogue-navigation.test.mjs test/data-health-actions.test.mjs`
   includes the actual Store route boundary with plain-text errors, lost connections,
   audit failures, deferrals, stable selections and separate operation identifiers,
   plus 50-product creation batches for both companies, packaging conflicts,

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from '@/components/admin/admin-menu';
+import { linkedCatalogueItem } from '@/lib/victron-catalogue-navigation.mjs';
 type Row = { fingerprint: string; company: string; sku: string; name: string; kind: string; reason?: string; previous?: number; proposed?: number; list?: number; listSource?: string; stock?: number; zaStock?: number | null; reviewAction?: 'new' | 'price' | 'keep' | null; approvalReason?: string | null; reviewBlocker?: string | null; ignoredUntil?: string | null; replaces: string[]; replacedBy: string[]; eligibleForArchiveReview?: boolean };
 type AuditEvent = { created_at: string; actor: string; action: string; company?: string; sku?: string; details: { note?: string; changes?: { sku: string; previous?: number; proposed?: number }[]; result?: { error?: string } } };
 type Counts = { price: number; new: number; review: number; archive: number; total: number };
@@ -34,6 +35,8 @@ export default function VictronCatalogue() {
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmBatch, setConfirmBatch] = useState(false);
   const [proposal, setProposal] = useState<Row | null>(null);
+  const [linkedItem, setLinkedItem] = useState<{ company: string; sku: string } | null>(null);
+  const followLinkedCategory = useRef(false);
   function resetSelection() {
     setLimit(50); setSelected([]); setConfirmBatch(false); setProposal(null);
     setActiveUpdate(null); setError(''); setMessage('');
@@ -43,6 +46,9 @@ export default function VictronCatalogue() {
     const payload = await readResponse(response, 'The comparison could not be loaded. Please try again.');
     if (!response.ok) throw new Error(payload.error || 'The comparison could not be loaded.');
     setData(payload);
+    if (followLinkedCategory.current && linkedItem?.company === company && linkedItem.sku === query) {
+      setKind(payload.rows.find((row: Row) => row.company === company && row.sku === linkedItem.sku)?.kind || 'review');
+    }
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -50,6 +56,12 @@ export default function VictronCatalogue() {
       const payload = await readResponse(response, 'The comparison could not be loaded. Please try again.');
       if (!response.ok) throw new Error(payload.error || 'The comparison could not be loaded.');
       setData(payload);
+      const linked = linkedCatalogueItem(window.location.search, payload.rows);
+      if (linked) {
+        followLinkedCategory.current = true;
+        setCompany(linked.company); setQuery(linked.sku); setKind(linked.kind);
+        setLinkedItem({ company: linked.company, sku: linked.sku });
+      }
     }).catch(e => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
   }, []);
@@ -88,7 +100,10 @@ export default function VictronCatalogue() {
   const stale = data?.overdue ?? true;
   const companyRows = (data?.rows || []).filter(r => r.company === company);
   const counts = data?.counts?.[company];
-  const rows = companyRows.filter(r => r.kind === kind && (kind !== 'archive' || archiveFilter === 'all' || archiveStatus(r) === archiveFilter) && `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase()));
+  const focusedSku = linkedItem?.company === company && linkedItem.sku === query ? linkedItem.sku : null;
+  const linkedRow = focusedSku ? companyRows.find(row => row.sku === focusedSku) : null;
+  const rows = companyRows.filter(r => r.kind === kind && (kind !== 'archive' || archiveFilter === 'all' || archiveStatus(r) === archiveFilter)
+    && (focusedSku ? r.sku === focusedSku : `${r.sku} ${r.name}`.toLowerCase().includes(query.toLowerCase())));
   const isNew = kind === 'new';
   const isReview = kind === 'review';
   const isArchive = kind === 'archive';
@@ -103,11 +118,16 @@ export default function VictronCatalogue() {
     {(error || data?.error || stale) && <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-3">{error || data?.error || 'Daily check is overdue or has not run. Apply actions require fresh evidence.'}</p>}
     {message && <p role="status" className="rounded bg-green-50 p-3">{message}</p>}
     <div className="flex flex-wrap gap-3">
-      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { setCompany(e.target.value); setArchiveFilter('all'); resetSelection(); }}><option value="thanda-solar">Thanda ({data?.counts?.['thanda-solar']?.total ?? '…'})</option><option value="sensible-solar">Sensible ({data?.counts?.['sensible-solar']?.total ?? '…'})</option></select>
-      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { setKind(e.target.value); setArchiveFilter('all'); resetSelection(); }}>{changeTypes.map(([key,label]) => <option key={key} value={key}>{label} ({counts?.[key] ?? '…'})</option>)}</select>
-      {isArchive && <select aria-label="Archive status" className={button} disabled={busy} value={archiveFilter} onChange={e => { setArchiveFilter(e.target.value); resetSelection(); }}>{[['all','All pending checks'],...Object.entries(archiveLabels)].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === 'archive' && (key === 'all' || archiveStatus(r) === key)).length})</option>)}</select>}
-      <input aria-label="Find product" disabled={busy} className="rounded border px-3 py-2" placeholder="Find SKU or description" value={query} onChange={e => { setQuery(e.target.value); resetSelection(); }} />
+      <select aria-label="Company" className={button} disabled={busy} value={company} onChange={e => { followLinkedCategory.current = false; setCompany(e.target.value); setArchiveFilter('all'); resetSelection(); }}><option value="thanda-solar">Thanda ({data?.counts?.['thanda-solar']?.total ?? '…'})</option><option value="sensible-solar">Sensible ({data?.counts?.['sensible-solar']?.total ?? '…'})</option></select>
+      <select aria-label="Change type" className={button} disabled={busy} value={kind} onChange={e => { followLinkedCategory.current = false; setKind(e.target.value); setArchiveFilter('all'); resetSelection(); }}>{changeTypes.map(([key,label]) => <option key={key} value={key}>{label} ({counts?.[key] ?? '…'})</option>)}</select>
+      {isArchive && <select aria-label="Archive status" className={button} disabled={busy} value={archiveFilter} onChange={e => { followLinkedCategory.current = false; setArchiveFilter(e.target.value); resetSelection(); }}>{[['all','All pending checks'],...Object.entries(archiveLabels)].map(([key,label]) => <option key={key} value={key}>{label} ({companyRows.filter(r => r.kind === 'archive' && (key === 'all' || archiveStatus(r) === key)).length})</option>)}</select>}
+      <input aria-label="Find product" disabled={busy} className="rounded border px-3 py-2" placeholder="Find SKU or description" value={query} onChange={e => { followLinkedCategory.current = false; setQuery(e.target.value); resetSelection(); }} />
     </div>
+    {linkedItem && company === linkedItem.company && query === linkedItem.sku && <p role="status" className="rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+      Opened from the missing-item link for <b>{linkedItem.sku}</b>. {linkedRow
+        ? `Its saved proposal is in ${changeTypes.find(([key]) => key === linkedRow.kind)?.[1] || linkedRow.kind}. A silenced or ignored item remains visible but is not counted for review.`
+        : 'There is no pending proposal for this exact SKU in the saved comparison. Use Compare saved records to check the latest imported evidence. This does not confirm that the item is present in Xero.'}
+    </p>}
     {supportsBatch && <div className="flex flex-wrap gap-3"><button className={button} disabled={busy || stale || Boolean(data?.error) || !selectableRows.length} onClick={() => { setSelected(selectableRows.slice(0,50).map(r => r.fingerprint)); setConfirmBatch(false); }}>Select first {Math.min(50,selectableRows.length)} matching {isNew ? 'products' : 'changes'}</button><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => { setConfirmBatch(true); setProposal(null); }}>Review {selected.length} selected {isNew ? 'additions' : 'updates'}</button><button className={button} disabled={busy} onClick={() => { setSelected([]); setConfirmBatch(false); }}>Clear selection</button></div>}
     {confirmBatch && <section aria-label={isNew ? 'Confirm product additions' : 'Confirm cost batch'} className="rounded border-2 border-sky-700 bg-white p-4"><h2 className="font-bold">Confirm {selected.length} {isNew ? 'product additions' : 'cost updates'} for {company === 'thanda-solar' ? 'Thanda' : 'Sensible'}</h2><p className="my-3 text-sm">{isNew ? 'Add the selected products shown below at their displayed purchase costs and initial list selling prices, with no opening stock balance. Existing product codes are checked again before creating.' : 'Only the selected purchase costs shown below will change. Prices are checked again before writing.'} An uncertain result stops retries until reconciled.</p><button className={button} disabled={busy || !selected.length || stale || Boolean(data?.error)} onClick={() => action({ action: isNew ? 'apply-create-batch' : 'apply-batch', fingerprints: selected })}>{busy ? (isNew ? 'Adding…' : 'Working…') : (isNew ? 'Add selected products to Xero' : 'Confirm selected cost updates')}</button></section>}
     {isNew && <p className="text-sm text-zinc-600">Add to Xero creates the product at the purchase cost and initial list selling price shown below, with no opening stock balance.</p>}

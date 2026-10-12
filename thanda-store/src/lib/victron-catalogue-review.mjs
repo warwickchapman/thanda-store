@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { prices } from './victron-pricing.mjs';
 export { prices } from './victron-pricing.mjs';
-import { retirementReason } from './xero-item-create.mjs';
+import { retirementReason } from './victron-catalogue-lifecycle.mjs';
 import { skuReplacementContext, stockSku as article } from './victron-sku-family.mjs';
 
 export const companies = ['thanda-solar', 'sensible-solar'];

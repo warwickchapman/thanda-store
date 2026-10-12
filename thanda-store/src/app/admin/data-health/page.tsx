@@ -49,6 +49,7 @@ function Recovery({ source }: { source: HealthSource }) {
         <p><b>{item.sku}</b> · {item.name}</p>
         <p className="mt-1 text-amber-900">{item.reason}</p>
         <details className="mt-1"><summary className="cursor-pointer text-sky-800">How to resolve</summary><p className="mt-2 text-zinc-700">{item.remedy}</p></details>
+        {item.reviewUrl && <Link href={item.reviewUrl} className="mt-2 inline-block font-semibold text-sky-800 underline">Open catalogue review</Link>}
       </li>)}</ul>
       {!filtered.length && <p className="mt-2 text-sm text-zinc-600">No affected SKUs match.</p>}
       {filtered.length > limit && <button type="button" onClick={() => setLimit(value => value + 50)} className="mt-2 text-sm font-semibold text-sky-800 underline">Show more ({filtered.length - limit} remaining)</button>}
@@ -83,7 +84,7 @@ export default function DataHealthPage() {
   const sorted = [...sources].sort((a, b) => Number(['current', 'manual'].includes(a.status)) - Number(['current', 'manual'].includes(b.status)));
   return <main className="min-h-screen bg-zinc-50 text-zinc-950"><div className="mx-auto max-w-5xl space-y-5 px-4 py-6 sm:px-6">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><h1 className="text-2xl font-bold">Data health</h1><p className="mt-2 text-sm text-zinc-600">Check which stock and planning sources need attention.</p></div><AdminMenu />
+      <div><h1 className="text-2xl font-bold">Data health</h1><p className="mt-2 text-sm text-zinc-600">Check missing data and late updates for stock and planning.</p><Link href="/admin/victron-catalogue?company=thanda-solar" className="mt-2 inline-block text-sm font-semibold text-sky-800 underline">Open Victron catalogue review</Link></div><AdminMenu />
     </div>
     <button type="button" disabled={loading} onClick={() => { setLoading(true); setAttempt(value => value + 1); }} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 disabled:opacity-50">{loading ? 'Checking…' : 'Check status'}</button>
     <p className="text-xs text-zinc-500">This checks stored update records; it does not request new data from suppliers or Xero.{checkedAt && ` Status checked ${date(checkedAt)}.`}</p>

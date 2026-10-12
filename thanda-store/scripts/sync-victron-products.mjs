@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import { saveCatalogueEvidence } from '../src/lib/victron-catalogue-review.mjs';
-import { recordCatalogueLifecycle } from '../src/lib/xero-item-create.mjs';
+import { recordCatalogueLifecycle } from '../src/lib/victron-catalogue-lifecycle.mjs';
 import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '../src/lib/victron-http.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
