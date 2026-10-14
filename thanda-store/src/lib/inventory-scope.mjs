@@ -55,7 +55,7 @@ export async function saveInventoryEvidence(db, items, { observedAt, snapshot, c
   const clean = sanitizedItems(items);
   const seen = Object.fromEntries(clean.filter(item => item.IsTrackedAsInventory === true)
     .map(item => [item.Code, new Date(observed).toISOString()]));
-  const owned = clean.filter(item => /\bVictron\b/i.test(item.Name)).map(item => item.Code);
+  const owned = clean.filter(item => /\bVictron\b/i.test(item.Name) && item.IsTrackedAsInventory === true).map(item => item.Code);
   await ensureInventoryEvidenceSchema(db);
   // The row lock taken by ON CONFLICT serialises writers. Old imports cannot
   // erase current stock or the durable record that an article was tracked.
@@ -191,10 +191,15 @@ export async function loadInventoryScope(db, { products = [], successions = [], 
     register(succession.predecessor_sku);
     register(succession.successor_sku);
   }
-  if (usableIdentity && validOwnership) for (const sku of knownVictron) register(sku);
+  // A brand name on a service (for example an extended warranty) is not an
+  // inventory requirement. Retain orphan ownership only with tracked history;
+  // known catalogue articles and operational commitments are registered too.
+  if (usableIdentity && validOwnership) for (const sku of knownVictron) {
+    if (!validHistory || savedHistory[sku]) register(sku);
+  }
   for (const item of items) {
     const article = stockSku(item.Code);
-    if (/\bVictron\b/i.test(item.Name)) register(article);
+    if (/\bVictron\b/i.test(item.Name) && (item.IsTrackedAsInventory === true || item.QuantityOnHand > 0)) register(article);
     const rows = itemsByArticle.get(article) || [];
     rows.push(item);
     itemsByArticle.set(article, rows);

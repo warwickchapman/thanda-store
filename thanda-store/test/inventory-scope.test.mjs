@@ -124,6 +124,20 @@ test('explicit Victron items outside the Store remain in inventory health', asyn
   assert.equal(result.articles.has('OTHER001'), false);
 });
 
+test('a service-only Victron Xero record is not stock, while inventory history or commitments still require it', async () => {
+  const warranty = item('VEW', null, { Name: 'Victron Extended Warranty', IsTrackedAsInventory: false });
+  const options = { products: [], successions: [], items: [warranty], evidenceOverrides: { known_victron_codes: ['VEW'] } };
+  const service = await scope(options);
+  assert.equal(service.complete, true);
+  assert.equal(service.articles.has('VEW'), false);
+  assert.deepEqual(service.stockProducts, []);
+  const previouslyTracked = await scope({ ...options, previouslyTracked: { VEW: observedAt } });
+  assert.equal(previouslyTracked.articles.get('VEW').kind, 'required');
+  assert.equal(previouslyTracked.stockProducts[0].details.localStockOnHand, null);
+  const commitment = await scope({ ...options, requirements: [{ sku: 'VEW', signal: 'Open inbound delivery', is_victron: true }] });
+  assert.equal(commitment.articles.get('VEW').kind, 'required');
+});
+
 test('a positively identified Victron orphan remains required after it disappears', async () => {
   const first = await scope({ products: [], successions: [], items: [item('ORPHAN001', 3, { Name: 'Victron old stock' })] });
   assert.equal(first.articles.get('ORPHAN001').kind, 'required');
