@@ -15,11 +15,13 @@ export function replenishmentSourceKnown(source) {
 }
 
 /**
- * A family is only known when every distinct stock article has an observation.
- * Hidden predecessors still contribute. Retail packaging is an alternate row
- * for the same article, not a second quantity to add to its base SKU.
+ * A family is only known when every inventory-required stock article has an
+ * observation. Only the shared scope's explicit catalogue-only articles can
+ * be omitted; an unknown scope remains required. Hidden predecessors still
+ * contribute. Retail packaging is an alternate row for the same article, not
+ * a second quantity to add to its base SKU.
  */
-export function replenishmentFamilyStocks(products, successions, { checkedAt, staleAfterMinutes }) {
+export function replenishmentFamilyStocks(products, successions, { checkedAt, staleAfterMinutes, inventoryScope }) {
   const familyFor = victronSkuFamilyResolver(successions);
   const membersByFamily = new Map();
   const productsByArticle = new Map();
@@ -41,12 +43,20 @@ export function replenishmentFamilyStocks(products, successions, { checkedAt, st
     register(succession.predecessor_sku);
     register(succession.successor_sku);
   }
+  // Exposure can require an article no longer present in the supplier
+  // catalogue. It must still withhold the family total if stock is unknown.
+  for (const article of inventoryScope?.keys() || []) register(article);
   return new Map([...membersByFamily].map(([family, members]) => {
     let knownStock = 0;
     const missingSkus = [];
     const staleSkus = [];
+    const catalogueOnlySkus = [];
     const observations = [];
     for (const article of members) {
+      if (inventoryScope?.get(article)?.kind === 'catalogue') {
+        catalogueOnlySkus.push(article);
+        continue;
+      }
       const rows = [...(productsByArticle.get(article) || [])].sort((left, right) =>
         Number(String(left.sku).toUpperCase().endsWith('R')) - Number(String(right.sku).toUpperCase().endsWith('R')));
       const observation = rows.map(localStockObservation).find((candidate) => candidate.quantity !== null
@@ -60,10 +70,12 @@ export function replenishmentFamilyStocks(products, successions, { checkedAt, st
       if (Date.parse(checkedAt) - Date.parse(observation.observedAt) > staleAfterMinutes * 60_000) staleSkus.push(article);
     }
     return [family, {
-      localStock: missingSkus.length ? null : knownStock,
-      knownStock,
+      // An empty inventory scope does not establish physical stock zero.
+      localStock: missingSkus.length || !observations.length ? null : knownStock,
+      knownStock: observations.length ? knownStock : null,
       missingSkus: missingSkus.sort(),
       staleSkus: staleSkus.sort(),
+      catalogueOnlySkus: catalogueOnlySkus.sort(),
       observedAt: observations.sort()[0] || null,
     }];
   }));

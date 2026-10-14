@@ -29,10 +29,6 @@ type ProductRow = {
   price_break_qty: string | number | null;
   price_break_price: string | number | null;
 };
-type LocalStockRow = {
-  sku: string;
-  details: Record<string, unknown>;
-};
 type SaleRow = {
   sku: string;
   sales_30: string | number;
@@ -83,7 +79,6 @@ export async function GET() {
   try {
     const [
       products,
-      localStocks,
       sales,
       inbound,
       backorders,
@@ -102,11 +97,6 @@ export async function GET() {
           NULLIF(details->>'priceBreakPrice', '')::numeric AS price_break_price
         FROM products WHERE supplier = 'victron' AND COALESCE((details->>'hidden')::boolean, false) = false
           AND (NULLIF(details->>'purchasingRetiredReason','') IS NULL OR details->>'purchasingRetirementOverride'='true')
-      `),
-      pool.query<LocalStockRow>(`
-        SELECT sku, details
-        FROM products
-        WHERE supplier = 'victron'
       `),
       pool.query<SaleRow>(`
         SELECT UPPER(sku) AS sku,
@@ -195,7 +185,7 @@ export async function GET() {
           AND inbound.status = 'open'
         ORDER BY shipment.shipping_date, inbound.supplier_order_number
       `),
-      getDataHealth(),
+      getDataHealth({ includeInventoryScope: true }),
     ]);
     // Source observations are read locally. Viewing or reloading this report
     // makes no supplier or Xero request and never turns a missing input into 0.
@@ -208,9 +198,12 @@ export async function GET() {
     );
     const localStockState = sourceFor("thanda");
     const supplierStockState = sourceFor("victron");
-    const stockByFamily = replenishmentFamilyStocks(localStocks.rows, successions.rows, {
+    const inventoryScope = dataHealth.inventoryScope;
+    if (!inventoryScope) throw new Error("Local inventory scope is unavailable.");
+    const stockByFamily = replenishmentFamilyStocks(inventoryScope.stockProducts, successions.rows, {
       checkedAt: dataHealth.checkedAt,
       staleAfterMinutes: localStockState?.staleAfterMinutes || 120,
+      inventoryScope: inventoryScope.articles,
     });
     const resolveFamily = victronSkuFamilyResolver(successions.rows);
     const predecessorSkus = new Set(
@@ -340,7 +333,9 @@ export async function GET() {
           (group.sales90 <= 0 &&
             group.minimumStock <= 0 &&
             group.provisional <= 0 &&
-            group.reserved <= 0)
+            group.reserved <= 0 &&
+            group.inbound <= 0 &&
+            group.backorder <= 0)
         )
           return [];
         const currentProduct = [...group.products].sort(
@@ -357,6 +352,11 @@ export async function GET() {
         const supplierStock = supplierObservation.quantity;
         const reviewReasons: string[] = [];
         const itemReviewReasons: string[] = [];
+        if (!inventoryScope.complete) {
+          const scopeWarning = inventoryScope.reason || "Inventory requirements could not be confirmed. Open Data health for source recovery steps.";
+          reviewReasons.push(scopeWarning);
+          itemReviewReasons.push(scopeWarning);
+        }
         if (!salesKnown || !ordersKnown || !quotesKnown)
           itemReviewReasons.push(`Suggested cannot be calculated: ${[!salesKnown && "sales", !ordersKnown && "inbound/backorders", !quotesKnown && "accepted quotes"].filter(Boolean).join(", ")} quantities are unknown. Open Data health for source recovery steps.`);
         if (localStock === null)
@@ -405,6 +405,7 @@ export async function GET() {
             sales90: salesKnown ? group.sales90 : null,
             localStock,
             knownLocalStock: stock?.knownStock ?? null,
+            catalogueOnlySkus: stock?.catalogueOnlySkus || [],
             localStockObservedAt: stock?.observedAt || null,
             inbound: ordersKnown ? group.inbound : null,
             backorder: ordersKnown ? group.backorder : null,

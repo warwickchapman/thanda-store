@@ -97,13 +97,15 @@ export default function DataHealthPage() {
     <ul className="space-y-3">{sorted.map(source => <li id={source.id} key={source.id} className="scroll-mt-6 rounded-lg border border-zinc-200 bg-white p-4 text-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-2"><h2 className="font-semibold">{source.label}</h2><span className={`text-xs font-semibold ${['current', 'manual'].includes(source.status) ? 'text-zinc-600' : 'text-amber-800'}`}>{labels[source.status]}</span></div>
       <p className="mt-2 text-sm text-zinc-600">{source.message}</p>
+      {source.id === 'thanda' && (source.catalogueOnlyCount || 0) > 0 && <p className="mt-2 text-sm text-zinc-600">{source.catalogueOnlyCount} catalogue-only {source.catalogueOnlyCount === 1 ? 'article does' : 'articles do'} not need a stock-record action. The saved Xero list and stocking activity show no inventory requirement. This does not confirm physical stock is zero. Manage these products in Victron catalogue review.</p>}
+      {source.inventoryScopeMessage && <p className="mt-2 text-sm text-amber-800">{source.inventoryScopeMessage}</p>}
       {source.mode !== 'manual' && <>
         <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
           <div><dt className="text-zinc-500">Oldest source observation</dt><dd className="mt-1">{date(source.observedAt)}</dd></div>
           <div><dt className="text-zinc-500">Last local update attempt</dt><dd className="mt-1">{date(source.lastAttemptAt)}</dd></div>
           <div><dt className="text-zinc-500">Last successful local update</dt><dd className="mt-1">{date(source.lastSuccessAt)}</dd></div>
         </dl>
-        {(source.missingCount > 0 || source.staleCount > 0) && <p className="mt-3 text-xs text-amber-800">{source.missingCount} unknown · {source.staleCount} overdue · {source.totalCount} records checked</p>}
+        {(source.missingCount > 0 || source.staleCount > 0) && <p className="mt-3 text-xs text-amber-800">{source.missingCount} unknown · {source.staleCount} overdue · {source.totalCount} {source.id === 'thanda' ? 'inventory articles assessed' : 'records checked'}</p>}
         {source.lastError && <p className="mt-3 text-xs text-amber-800">{source.lastError}</p>}
       </>}
       <Recovery source={source} />

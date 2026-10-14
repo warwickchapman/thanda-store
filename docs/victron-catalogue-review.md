@@ -23,6 +23,19 @@ overdue observations. Individual source evidence stays under collapsed
 catalogue queue or an instruction to add every missing definition. No data is
 changed to manufacture healthy or zero stock. LoRa review stays separate, with
 its panel hidden when empty. Prior review/lifecycle/audit records remain stored.
+
+Data health and Replenishment use the same local **inventory-required /
+catalogue-only / uncertain** assessment for Thanda. An absent article with no
+recorded stocking requirement is catalogue-only only after complete current
+Items and stocking-source evidence. This is information, not a stock-record
+task or proof of physical zero. Current/prior tracked items, positive retained
+stock and recorded activity/commitments still require usable inventory records,
+including hidden or retired predecessors. Inactive successor definitions do not
+invalidate a known predecessor family balance. ZA stock and 90-day ignores affect
+catalogue review, never this inventory assessment. A confirmed completed Xero
+archive can release dated historical requirements after a later complete absence
+observation; active obligations and unresolved creation outcomes remain required.
+See [stock policy and API budget](../README.md#stock-freshness-and-data-health).
 The old Data health creation/stock-review requests are rejected locally with a
 clear catalogue link before any product lookup or Hub request. There is no
 parallel Victron creation preview, and existing audits are retained.

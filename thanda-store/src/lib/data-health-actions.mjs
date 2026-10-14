@@ -8,15 +8,18 @@ export function stockHealthIssues(source, products, now = new Date()) {
     const local = source.id === 'thanda';
     const managedInventory = product.details?.storeManaged === true && product.details?.xeroStockStatus !== 'untracked';
     if (local ? !['victron', 'lora'].includes(product.supplier) && !managedInventory : product.supplier !== source.id) return [];
-    if (local && activeStockReview(product)) return [];
+    if (local && product.supplier === 'victron' && product.details?.inventoryScope === 'catalogue') return [];
+    if (local && product.supplier !== 'victron' && activeStockReview(product)) return [];
     const observation = local ? localStockObservation(product) : supplierStockObservation(product);
     const details = product.details || {};
     let reason = '';
     let remedy = '';
     if (local && details.xeroStockStatus === 'missing') {
-      reason = 'SKU not found in the imported Xero item list';
+      reason = details.inventoryScope === 'unknown'
+        ? 'Cannot confirm whether this article needs an inventory record'
+        : 'Required inventory article is missing from the saved Xero item list';
       remedy = product.supplier === 'victron'
-        ? 'Open this exact SKU in Victron catalogue review for Thanda. That page owns eligibility, additions and review decisions. Missing from Xero alone is not an instruction to create the item; it may be excluded, ignored or have no ZA stock. If you suspect an article-code mismatch, check it with the bookkeeper. After a change, allow the normal stock import and check status again.'
+        ? `${details.inventoryRequirementReasons?.length ? details.inventoryRequirementReasons.join('; ') + '. ' : ''}Check the inventory record and article code with the bookkeeper. Use Victron catalogue review for a product addition if required. An exclusion, zero ZA supplier stock or 90-day ignore does not confirm zero Thanda stock. After a change, allow the normal stock import and check status again.`
         : 'Check the article code in Xero Products and services with the bookkeeper. Correct a code mismatch or configure the tracked item if you hold this stock. After correcting Xero, allow the next stock sync and check status again.';
     } else if (local && details.xeroStockStatus === 'untracked') {
       reason = 'Xero item is not tracked as inventory';
@@ -49,7 +52,7 @@ export function sourceRecovery(source) {
   } else if (source.status === 'error' || source.status === 'stale') {
     actions.push('Check again after the next scheduled update. If it still fails, download the diagnostic report for the Store maintainer to check the scheduled job and provider response. Saved quantities remain available.');
   }
-  if (source.id === 'thanda') actions.push('Review the affected SKUs below. Use Victron catalogue review for Victron additions and eligibility decisions; missing items may be intentional. Ask the bookkeeper about article-code mismatches or untracked inventory. Stock imports run every 30 minutes from the shared Hub.');
+  if (source.id === 'thanda') actions.push('Check the required inventory articles in Technical details with the bookkeeper. Catalogue-only products do not need a stock-record action. Use Victron catalogue review for product additions and eligibility decisions. Stock imports run every 30 minutes from the shared Hub; missing or uncertain balances are never treated as zero.');
   if (source.id === 'victron') actions.push('Victron stock is checked every four hours. Review Victron API activity for request counts and cooldown deadlines; Retry catalogue is available outside the cooldown. Confirm availability in E-Order if ordering before recovery. Supplier availability warnings do not change the calculated order quantity.');
   if (source.id === 'renogy') actions.push('Renogy stock is checked every five minutes. For individual missing items, verify the SKU in the supplier portal and ask the Store maintainer to check its catalogue mapping.');
   if (source.id === 'sales') actions.push('Sales and credit history is imported daily. If incomplete, ask the Store maintainer to check both invoice and credit-note snapshots in the shared Hub before retrying the import.');

@@ -3,6 +3,7 @@
 import { hubFetch, hubStatus } from '../src/lib/xero/hub.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { matchingXeroItem } from '../src/lib/admin/store-products.mjs';
+import { saveInventoryEvidence, inventoryQuantity } from '../src/lib/inventory-scope.mjs';
 
 import { createPool, ensureProductSchema } from './product-sync-lib.mjs';
 
@@ -13,11 +14,9 @@ function normalizeSku(value) {
 }
 
 function quantityOnHand(item) {
-  if (!item || item.IsTrackedAsInventory !== true || item.QuantityOnHand === null || item.QuantityOnHand === undefined || item.QuantityOnHand === '') return null;
-  const quantity = Number(item.QuantityOnHand);
-  if (!Number.isFinite(quantity)) return null;
-  if (quantity <= 0) return 0;
-  return Math.floor(quantity);
+  if (item?.IsTrackedAsInventory !== true) return null;
+  const quantity = inventoryQuantity(item.QuantityOnHand);
+  return quantity === null ? null : Math.floor(quantity);
 }
 
 function moneyOrNull(value) {
@@ -48,9 +47,12 @@ async function fetchXeroItems(client, token) {
     throw new Error(`Xero Items fetch failed: ${response.status} ${response.statusText}`);
   }
 
-  const items = Array.isArray(payload.Items) ? payload.Items : [];
+  if (!Array.isArray(payload.Items) || payload._hub?.company !== 'thanda-solar' || payload._hub.last_error) {
+    throw new Error('Complete Thanda Xero Items evidence is required');
+  }
+  const items = payload.Items;
   console.error(`Fetched Xero Items: ${items.length}`);
-  return { items, observedAt: payload._hub.observed_at };
+  return { items, observedAt: payload._hub.observed_at, snapshot: payload._hub.snapshot, company: payload._hub.company };
 }
 
 async function ensureSyncState(client) {
@@ -161,6 +163,7 @@ async function main() {
   const client = await pool.connect();
   let locked = false;
   let started = false;
+  let transaction = false;
   const stats = {
     requestedOnly,
     refreshedToken: false,
@@ -202,6 +205,11 @@ async function main() {
     }
 
     await ensureProductSchema(client);
+    await client.query('BEGIN');
+    transaction = true;
+    // Publish inventory scope and product quantities from the same complete
+    // saved collection. No new Hub or provider request is introduced.
+    await saveInventoryEvidence(client, xeroItems, fetched);
     const products = await targetProducts(client);
     stats.targetProducts = products.length;
 
@@ -226,7 +234,10 @@ async function main() {
     }
     await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NULL, last_completed_at = NOW(), updated_at = NOW() WHERE id = true');
     await finishDataSync(client, 'thanda', { observedAt: fetched.observedAt, counts: stats });
+    await client.query('COMMIT');
+    transaction = false;
   } catch (error) {
+    if (transaction) await client.query('ROLLBACK').catch(() => {});
     if (started) await finishDataSync(client, 'thanda', { status: 'failed', error }).catch(() => {});
     throw error;
   } finally {

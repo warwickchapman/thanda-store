@@ -13,20 +13,23 @@ test('diagnostics distinguish missing Xero items, untracked items and confirmed 
     { sku: 'D', supplier: 'renogy', details: {} },
   ], now);
   assert.deepEqual(issues.map(row => row.sku), ['A', 'B']);
-  assert.match(issues[0].reason, /not found/);
-  assert.match(issues[0].remedy, /catalogue review for Thanda/);
+  assert.match(issues[0].reason, /Required inventory article is missing/);
+  assert.match(issues[0].remedy, /catalogue review for a product addition if required/);
   assert.match(issues[1].remedy, /bookkeeper/);
 });
-test('missing definitions remain diagnostic even when excluded or unstocked; LoRa keeps its own controls', () => {
+test('catalogue omissions are informational; unknown and required inventory remain diagnostic regardless of ZA stock or retired decisions', () => {
   const issues = stockHealthIssues(source('thanda'), [
-    { sku: 'PIN121250500', supplier: 'victron', details: { xeroStockStatus: 'missing' }, stock_on_hand: 0 },
-    { sku: 'SPM040303604', supplier: 'victron', details: { xeroStockStatus: 'missing' }, stock_on_hand: 0 },
+    { sku: 'PIN121250500', supplier: 'victron', details: { xeroStockStatus: 'missing', inventoryScope: 'catalogue' }, stock_on_hand: 0 },
+    { sku: 'SPM040303604', supplier: 'victron', details: { xeroStockStatus: 'missing', inventoryScope: 'unknown' }, stock_on_hand: 0 },
+    { sku: 'RETIRED', supplier: 'victron', details: { xeroStockStatus: 'missing', inventoryScope: 'required' }, stockReview: { decision: 'retired' }, stock_on_hand: 0 },
     { sku: 'LRS1', supplier: 'lora', details: { xeroStockStatus: 'missing' } },
   ], now);
   assert.equal(issues.length, 3);
   for (const issue of issues.filter(issue => issue.sku !== 'LRS1')) {
-    assert.match(issue.remedy, /Missing from Xero alone is not an instruction to create/);
+    assert.match(issue.remedy, /does not confirm zero Thanda stock/);
   }
+  assert.ok(!issues.some(issue => issue.sku === 'PIN121250500'));
+  assert.match(issues.find(issue => issue.sku === 'SPM040303604').reason, /Cannot confirm/);
   assert.equal(issues.find(issue => issue.sku === 'LRS1').reviewUrl, undefined);
 });
 test('supplier diagnostics separate missing observations and stale retained quantities', () => {

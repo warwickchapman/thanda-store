@@ -2,6 +2,7 @@ import pool from '@/lib/db';
 import { DATA_SOURCES, localStockObservation, supplierStockObservation, observationTime, summarizeSource } from './data-freshness.mjs';
 import { sourceRecovery, stockHealthIssues } from './data-health-actions.mjs';
 import { activeStockReview } from './stock-review.mjs';
+import { loadInventoryScope } from './inventory-scope.mjs';
 
 export type StockSourceStatus = {
   id: string;
@@ -22,6 +23,8 @@ export type StockSourceStatus = {
 };
 export type DataSourceStatus = StockSourceStatus & {
   lastError: string | null;
+  catalogueOnlyCount?: number;
+  inventoryScopeMessage?: string | null;
   recovery?: string[];
   issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null }>;
 };
@@ -34,10 +37,14 @@ export type StockReviewItem = {
   purchasingRestored?: boolean;
   replaces: string[]; replacedBy: string[];
 };
-export type DataHealth = { checkedAt: string; sources: DataSourceStatus[]; stockReviews?: StockReviewItem[] };
+export type DataHealth = {
+  checkedAt: string; sources: DataSourceStatus[]; stockReviews?: StockReviewItem[];
+  // Internal planning evidence. Maps are never included in the public status DTO.
+  inventoryScope?: Awaited<ReturnType<typeof loadInventoryScope>>;
+};
 type StoredState = Record<string, unknown>;
 
-async function optionalRows(sql: string): Promise<StoredState[]> {
+async function optionalRows<T = StoredState>(sql: string): Promise<T[]> {
   try {
     return (await pool.query(sql)).rows;
   } catch (error) {
@@ -59,11 +66,11 @@ function existingRun(row: StoredState | undefined, observedAt: unknown, sourceId
   };
 }
 
-export async function getDataHealth({ includeIssues = false } = {}): Promise<DataHealth> {
+export async function getDataHealth({ includeIssues = false, includeInventoryScope = false } = {}): Promise<DataHealth> {
   // All reads are local. Do not ask the Hub, Xero or a supplier for dashboard
   // evidence: this page must remain usable while an upstream service is down.
-  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, victronCooldowns] = await Promise.all([
-    optionalRows(`SELECT supplier, sku, name, stock_on_hand, details FROM products WHERE COALESCE((details->>'hidden')::boolean, false)=false`),
+  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, victronCooldowns, successions] = await Promise.all([
+    optionalRows('SELECT supplier, sku, name, stock_on_hand, details FROM products'),
     optionalRows('SELECT * FROM data_sync_status'),
     optionalRows('SELECT * FROM victron_order_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM xero_accepted_quote_sync_state WHERE id=true'),
@@ -71,20 +78,32 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
     optionalRows('SELECT * FROM xero_credit_note_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM product_stock_reviews'),
     optionalRows("SELECT scope, MAX(blocked_until) AS blocked_until FROM victron_http_state WHERE blocked_until>NOW() GROUP BY scope"),
+    optionalRows<{ predecessor_sku: string; successor_sku: string }>('SELECT predecessor_sku, successor_sku FROM victron_sku_successions'),
   ]);
   const reviewsBySku = new Map(reviews.map(row => [`${row.supplier}:${row.sku}`, row]));
   for (const product of products) product.stockReview = reviewsBySku.get(`${product.supplier}:${product.sku}`);
   const checkedAt = new Date().toISOString();
   const bySource = new Map(runs.map(row => [row.source_id, row]));
+  const visibleProducts = products.filter(row => (row.details as StoredState)?.hidden !== true);
+  // Order imports predate data_sync_status. Reuse their retained successful
+  // observation rather than requiring a second job or a provider request.
+  const orderObservedAt = observationTime(orderRows[0]?.last_successful_sync_at);
+  const scopeRuns = [...runs.filter(row => row.source_id !== 'victron-orders'), {
+    source_id: 'victron-orders', source_observed_at: orderObservedAt,
+    ...existingRun(orderRows[0], orderObservedAt, 'victron-orders'),
+    ...bySource.get('victron-orders'),
+  }];
+  const inventoryScope = await loadInventoryScope(pool, { products, successions, runs: scopeRuns, now: Date.parse(checkedAt) });
+  const stockProducts = [...inventoryScope.stockProducts, ...visibleProducts.filter(row => row.supplier !== 'victron')];
   const sources = DATA_SOURCES.map(source => {
     let observations: Array<{ quantity: number | null; observedAt: string | null }> = [];
     let run: StoredState = bySource.get(source.id) || {};
     if (source.id === 'thanda') {
-      observations = products.filter(row => (row.supplier === 'victron' || row.supplier === 'lora'
+      observations = stockProducts.filter(row => (row.supplier === 'victron' || row.supplier === 'lora'
         || ((row.details as StoredState)?.storeManaged === true && (row.details as StoredState)?.xeroStockStatus !== 'untracked'))
-        && !activeStockReview(row)).map(localStockObservation);
+        && (row.supplier === 'victron' || !activeStockReview(row))).map(localStockObservation);
     } else if (['victron', 'renogy', 'hubble', 'lora'].includes(source.id)) {
-      observations = products.filter(row => row.supplier === source.id).map(supplierStockObservation);
+      observations = visibleProducts.filter(row => row.supplier === source.id).map(supplierStockObservation);
     } else if (source.id === 'sales') {
       // The old last_successful_sync_at was import time. Never relabel it as
       // source freshness; source_observed_at is populated by the next job.
@@ -101,18 +120,34 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       run = { ...existingRun(row, observedAt, source.id), ...run };
     }
     const status = summarizeSource(source, observations, run, new Date(checkedAt)) as DataSourceStatus;
+    if (source.id === 'thanda') {
+      status.catalogueOnlyCount = inventoryScope.catalogueOnly.length;
+      status.inventoryScopeMessage = inventoryScope.reason;
+      // An empty inventory subset is not proof of a healthy import. Keep the
+      // full collection's actual timestamp/outcome; do not invent a stock row.
+      if (!observations.length) {
+        const observed = observationTime(inventoryScope.observedAt);
+        status.observedAt = status.latestObservedAt = observed;
+        if (!['failed', 'partial'].includes(String(run.last_status))) {
+          status.status = !observed || Date.parse(observed) > Date.parse(checkedAt) + 300_000
+            ? 'missing' : Date.parse(checkedAt) - Date.parse(observed) > source.staleAfterMinutes! * 60_000 ? 'stale' : !inventoryScope.complete ? 'missing' : 'current';
+        }
+        status.message = status.status === 'current' ? 'The saved inventory list is current. No inventory articles require a stock record.'
+          : status.status === 'error' ? status.message : 'The inventory assessment needs a complete, current saved update.';
+      }
+    }
     const cooldownScopes = source.id === 'victron' ? ['catalogue','account'] : source.id === 'victron-orders' ? ['orders','account'] : [];
     const retryAt = Math.max(0, ...victronCooldowns.filter(row => cooldownScopes.includes(String(row.scope))).map(row => new Date(String(row.blocked_until)).getTime()));
     if (retryAt > Date.now()) status.message = `Victron requested a cooldown until ${new Date(retryAt).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST. Retained data is shown; scheduled attempts skip locally until then.`;
     if (includeIssues) {
       status.recovery = sourceRecovery(status);
-      status.issues = stockHealthIssues(source, products, new Date(checkedAt));
+      status.issues = stockHealthIssues(source, source.id === 'thanda' ? stockProducts : visibleProducts, new Date(checkedAt));
     }
     return status;
   });
   // Victron's worklist belongs to catalogue review. Keep its stock evidence in
   // the source diagnostics above, but never build a second item-review queue.
-  const stockReviews = includeIssues ? products.filter(product => {
+  const stockReviews = includeIssues ? visibleProducts.filter(product => {
     const details = product.details as Record<string, unknown>;
     return product.supplier === 'lora'
       && (details?.xeroStockStatus === 'missing' || details?.purchasingRetiredReason || reviewsBySku.get(`${product.supplier}:${product.sku}`)?.decision);
@@ -130,7 +165,7 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       purchasingRestored: details?.purchasingRetirementOverride === true,
     };
   }).sort((a, b) => a.sku.localeCompare(b.sku)) : undefined;
-  return { checkedAt, sources, ...(stockReviews ? { stockReviews } : {}) };
+  return { checkedAt, sources, ...(stockReviews ? { stockReviews } : {}), ...(includeInventoryScope ? { inventoryScope } : {}) };
 }
 
 export async function getCatalogueStatus(): Promise<{ checkedAt: string; sources: StockSourceStatus[] }> {
