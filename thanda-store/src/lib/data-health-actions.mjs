@@ -1,6 +1,5 @@
 import { localStockObservation, supplierStockObservation } from './data-freshness.mjs';
 import { activeStockReview } from './stock-review.mjs';
-import { catalogueReviewUrl } from './stock-review-view.mjs';
 
 // Stored evidence only: displaying remedies must never trigger a provider call.
 export function stockHealthIssues(source, products, now = new Date()) {
@@ -34,8 +33,7 @@ export function stockHealthIssues(source, products, now = new Date()) {
       reason = 'Stock observation is overdue';
       remedy = 'Follow the source recovery steps above. The saved quantity remains visible while the scheduled update recovers.';
     }
-    return reason ? [{ sku: product.sku, name: product.name || '', reason, remedy, observedAt: observation.observedAt,
-      ...(local && product.supplier === 'victron' ? { reviewUrl: catalogueReviewUrl(product.sku) } : {}) }] : [];
+    return reason ? [{ sku: product.sku, name: product.name || '', reason, remedy, observedAt: observation.observedAt }] : [];
   }).sort((a, b) => a.sku.localeCompare(b.sku));
 }
 

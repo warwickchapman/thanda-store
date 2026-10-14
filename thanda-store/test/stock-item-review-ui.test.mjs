@@ -54,7 +54,6 @@ function harness(items) {
   };
   const modules = {
     react, 'react/jsx-runtime': jsx,
-    'next/link': props => jsx.jsx('a', props),
     '@/lib/stock-review-view.mjs': views,
   };
   const exports = {};
@@ -69,7 +68,7 @@ function harness(items) {
     cursor = 0;
     const tree = exports.StockItemReview({ items, onChanged: () => changed++ });
     const dialog = children(tree).find(node => node.type === 'dialog');
-    dialog.props.ref.current = { showModal: () => shown++, close: () => closed++ };
+    if (dialog) dialog.props.ref.current = { showModal: () => shown++, close: () => closed++ };
     return tree;
   }
   return { render, calls, get changed() { return changed; }, get shown() { return shown; }, get closed() { return closed; } };
@@ -81,40 +80,57 @@ function button(tree, label) {
   return found;
 }
 
-test('Victron diagnostics link the literal SKU to Thanda catalogue without creation or decision controls', () => {
-  const h = harness([item('PMP482305010', { name: 'MultiPlus', replacedBy: ['PMP482305012'] })]);
+test('mixed diagnostics show only LoRa rows and counts without duplicating Victron review', () => {
+  const victron = Array.from({ length: 22 }, (_, index) => item(`PIN-${index}`));
+  const h = harness([...victron, item('LORA-1', { supplier: 'lora' })]);
   const tree = h.render();
-  const row = children(tree).find(node => node.type === 'li');
-  const link = children(row).find(node => node.type === 'a');
-  assert.equal(text(link), 'Open catalogue review');
-  const target = new URL(link.props.href, 'https://store.example');
-  assert.equal(target.pathname, '/admin/victron-catalogue');
-  assert.equal(target.searchParams.get('company'), 'thanda-solar');
-  assert.equal(target.searchParams.get('sku'), 'PMP482305010');
-  assert.match(text(row), /Replaced by PMP482305012/);
-  assert.equal(children(row).filter(node => node.type === 'button').length, 0);
-  assert.doesNotMatch(text(tree), /Create in Xero|Other actions|Mark as discontinued|Review price preview/);
+  assert.match(text(tree), /LoRa item review/);
+  button(tree, 'Missing from Xero (1)');
+  button(tree, 'Awaiting Xero sync (0)');
+  button(tree, 'Previously reviewed (0)');
+  const rows = children(tree).filter(node => node.type === 'li');
+  assert.equal(rows.length, 1);
+  assert.match(text(rows[0]), /LORA-1/);
+  button(rows[0], 'Other actions');
+  assert.doesNotMatch(text(tree), /PIN-|Victron|Open catalogue review|Create in Xero|Replaces|Replaced by/);
   assert.equal(h.calls.length, 0);
 });
 
-test('pending and historical Victron rows remain read-only diagnostics with catalogue navigation', () => {
-  const h = harness([
+test('the review panel is hidden without LoRa records, including historical or pending Victron rows', () => {
+  for (const items of [[], [
+    item('PIN-1'),
     item('ASS030065051', { creationPending: true }),
-    item('PIN12150500', { active: true, decision: 'do_not_stock', note: 'Local purchasing decision', reviewedAt: '2026-10-07T10:00:00Z' }),
+    item('PIN12150500', { active: true, decision: 'do_not_stock' }),
+  ]]) {
+    const h = harness(items);
+    assert.equal(h.render(), null);
+    assert.equal(h.calls.length, 0);
+  }
+});
+
+test('LoRa pending and historical reviews preserve status, notes and observation dates', () => {
+  const h = harness([
+    item('VIC-PENDING', { creationPending: true }),
+    item('VIC-REVIEWED', { active: true, decision: 'do_not_stock' }),
+    item('LORA-PENDING', { supplier: 'lora', creationPending: true }),
+    item('LORA-REVIEWED', { supplier: 'lora', active: true, decision: 'do_not_stock', note: 'Local purchasing decision', reviewedAt: '2026-10-07T10:00:00Z' }),
   ]);
   let tree = h.render();
+  button(tree, 'Missing from Xero (0)');
   button(tree, 'Awaiting Xero sync (1)').props.onClick();
   tree = h.render();
   assert.match(text(tree), /normal Xero stock import finds them/);
-  assert.equal(children(tree).filter(node => node.type === 'a' && text(node) === 'Open catalogue review').length, 1);
-  assert.doesNotMatch(text(tree), /Other actions|Create in Xero/);
+  assert.match(text(tree), /LORA-PENDING/);
+  assert.doesNotMatch(text(tree), /VIC-PENDING|VIC-REVIEWED/);
+  assert.match(text(tree), /Last saved Xero observation: .*SAST/);
   button(tree, 'Previously reviewed (1)').props.onClick();
   tree = h.render();
   assert.match(text(tree), /This does not mean they are archived in Xero/);
   assert.match(text(tree), /Saved purchasing decision: do not stock — Local purchasing decision/);
-  assert.match(text(tree), /reviewed/);
-  assert.equal(children(tree).filter(node => node.type === 'a' && text(node) === 'Open catalogue review').length, 1);
-  assert.doesNotMatch(text(tree), /Undo saved decision|Do not stock|Other actions|Create in Xero/);
+  assert.match(text(tree), /reviewed .*SAST/);
+  assert.match(text(tree), /LORA-REVIEWED/);
+  assert.doesNotMatch(text(tree), /VIC-PENDING|VIC-REVIEWED|Open catalogue review|Create in Xero/);
+  button(tree, 'Other actions');
   assert.equal(h.calls.length, 0);
 });
 

@@ -2,7 +2,6 @@ import pool from '@/lib/db';
 import { DATA_SOURCES, localStockObservation, supplierStockObservation, observationTime, summarizeSource } from './data-freshness.mjs';
 import { sourceRecovery, stockHealthIssues } from './data-health-actions.mjs';
 import { activeStockReview } from './stock-review.mjs';
-import { familyMemberSkus, victronSkuFamilyResolver, skuReplacementContext } from './victron-sku-family.mjs';
 
 export type StockSourceStatus = {
   id: string;
@@ -24,7 +23,7 @@ export type StockSourceStatus = {
 export type DataSourceStatus = StockSourceStatus & {
   lastError: string | null;
   recovery?: string[];
-  issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null; reviewUrl?: string }>;
+  issues?: Array<{ sku: string; name: string; reason: string; remedy: string; observedAt: string | null }>;
 };
 export type StockReviewItem = {
   supplier: string; sku: string; name: string; xeroStatus: string;
@@ -63,7 +62,7 @@ function existingRun(row: StoredState | undefined, observedAt: unknown, sourceId
 export async function getDataHealth({ includeIssues = false } = {}): Promise<DataHealth> {
   // All reads are local. Do not ask the Hub, Xero or a supplier for dashboard
   // evidence: this page must remain usable while an upstream service is down.
-  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, successions, victronCooldowns] = await Promise.all([
+  const [products, runs, orderRows, quoteRows, invoiceRows, creditRows, reviews, victronCooldowns] = await Promise.all([
     optionalRows(`SELECT supplier, sku, name, stock_on_hand, details FROM products WHERE COALESCE((details->>'hidden')::boolean, false)=false`),
     optionalRows('SELECT * FROM data_sync_status'),
     optionalRows('SELECT * FROM victron_order_sync_state WHERE id=true'),
@@ -71,7 +70,6 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
     optionalRows('SELECT * FROM xero_invoice_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM xero_credit_note_sync_state WHERE id=true'),
     optionalRows('SELECT * FROM product_stock_reviews'),
-    includeIssues ? optionalRows('SELECT predecessor_sku, successor_sku FROM victron_sku_successions') : Promise.resolve([]),
     optionalRows("SELECT scope, MAX(blocked_until) AS blocked_until FROM victron_http_state WHERE blocked_until>NOW() GROUP BY scope"),
   ]);
   const reviewsBySku = new Map(reviews.map(row => [`${row.supplier}:${row.sku}`, row]));
@@ -112,10 +110,11 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
     }
     return status;
   });
-  const familyFor = victronSkuFamilyResolver(successions);
+  // Victron's worklist belongs to catalogue review. Keep its stock evidence in
+  // the source diagnostics above, but never build a second item-review queue.
   const stockReviews = includeIssues ? products.filter(product => {
     const details = product.details as Record<string, unknown>;
-    return ['victron', 'lora'].includes(String(product.supplier))
+    return product.supplier === 'lora'
       && (details?.xeroStockStatus === 'missing' || details?.purchasingRetiredReason || reviewsBySku.get(`${product.supplier}:${product.sku}`)?.decision);
   }).map(product => {
     const review = reviewsBySku.get(`${product.supplier}:${product.sku}`);
@@ -125,9 +124,7 @@ export async function getDataHealth({ includeIssues = false } = {}): Promise<Dat
       supplier: String(product.supplier), sku, name: String(product.name), xeroStatus: String(details?.xeroStockStatus || 'unknown'),
       decision: (review?.decision || null) as StockReviewItem['decision'], active: Boolean(activeStockReview(product)),
       note: String(review?.note || ''), reviewedAt: observationTime(review?.reviewed_at), observedAt: observationTime(details?.xeroStockSyncedAt),
-      family: product.supplier === 'victron' ? familyFor(sku) : sku,
-      familySkus: product.supplier === 'victron' ? familyMemberSkus(successions, sku) : [sku],
-      ...(product.supplier === 'victron' ? skuReplacementContext(successions, sku) : { replaces: [], replacedBy: [] }),
+      family: sku, familySkus: [sku], replaces: [], replacedBy: [],
       purchasingRetiredReason: details?.purchasingRetiredReason ? String(details.purchasingRetiredReason) : null,
       creationPending: Boolean(details?.xeroCreatedItemId && details?.xeroStockStatus === 'missing'),
       purchasingRestored: details?.purchasingRetirementOverride === true,

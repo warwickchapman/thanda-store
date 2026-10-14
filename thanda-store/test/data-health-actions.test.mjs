@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stockHealthIssues, sourceRecovery } from '../src/lib/data-health-actions.mjs';
 import { DATA_SOURCES } from '../src/lib/data-freshness.mjs';
-import { catalogueReviewUrl } from '../src/lib/stock-review-view.mjs';
 
 const now = new Date('2026-09-28T12:00:00Z');
 const source = id => DATA_SOURCES.find(row => row.id === id);
@@ -16,7 +15,6 @@ test('diagnostics distinguish missing Xero items, untracked items and confirmed 
   assert.deepEqual(issues.map(row => row.sku), ['A', 'B']);
   assert.match(issues[0].reason, /not found/);
   assert.match(issues[0].remedy, /catalogue review for Thanda/);
-  assert.equal(issues[0].reviewUrl, catalogueReviewUrl('A'));
   assert.match(issues[1].remedy, /bookkeeper/);
 });
 test('missing definitions remain diagnostic even when excluded or unstocked; LoRa keeps its own controls', () => {
@@ -28,7 +26,6 @@ test('missing definitions remain diagnostic even when excluded or unstocked; LoR
   assert.equal(issues.length, 3);
   for (const issue of issues.filter(issue => issue.sku !== 'LRS1')) {
     assert.match(issue.remedy, /Missing from Xero alone is not an instruction to create/);
-    assert.equal(issue.reviewUrl, catalogueReviewUrl(issue.sku));
   }
   assert.equal(issues.find(issue => issue.sku === 'LRS1').reviewUrl, undefined);
 });

@@ -8,19 +8,21 @@ without automatically publishing them to the storefront.
 ## Data health and catalogue decisions
 
 This page owns Victron product additions, cost changes, eligibility acceptance,
-90-day ignores and archive-candidate decisions. **Data health → Missing Xero
-items** diagnoses missing Thanda definitions and links to this page with
-`company=thanda-solar&sku=<literal SKU>`. The exact saved proposal and category
-are selected, including silenced or ignored rows. A predecessor or R retail code
-is not silently substituted with another family member. If no exact proposal is
-saved, the page explains that absence and offers **Compare saved records**;
-absence from the comparison never proves the item is present in Xero.
+90-day ignores and archive-candidate decisions. Data health has one link to this
+page and no separate Victron item list or work count. Excluded, silenced and
+ignored products remain here. Exact-SKU links using
+`company=thanda-solar&sku=<literal SKU>` still select the saved proposal and
+category. A predecessor or R retail code is not silently substituted with another
+family member. If no exact proposal is saved, the page explains that absence and
+offers **Compare saved records**; absence from the comparison never proves the
+item is present in Xero.
 
-Data health's missing-definition count is diagnostic, not an instruction to add
-every missing item. It can include excluded panels and unstocked 120V models
-that do not contribute to this page's work total. Data health retains source
-errors, stock unknowns, directed replacement labels and prior review/lifecycle
-context, but no Victron creation or decision controls. LoRa review stays separate.
+Data health retains stock-source errors, tracking problems, stock unknowns and
+overdue observations. Individual source evidence stays under collapsed
+**Technical details** and in its diagnostic download; this is not a second
+catalogue queue or an instruction to add every missing definition. No data is
+changed to manufacture healthy or zero stock. LoRa review stays separate, with
+its panel hidden when empty. Prior review/lifecycle/audit records remain stored.
 The old Data health creation/stock-review requests are rejected locally with a
 clear catalogue link before any product lookup or Hub request. There is no
 parallel Victron creation preview, and existing audits are retained.
@@ -310,7 +312,7 @@ and a `reconciled` event was added to the Store audit.
 
 ## Verification
 
-- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/victron-catalogue-lifecycle.test.mjs test/data-health-review-routes.test.mjs test/stock-review-view.test.mjs test/stock-item-review-ui.test.mjs test/victron-catalogue-navigation.test.mjs test/data-health-actions.test.mjs`
+- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/victron-catalogue-lifecycle.test.mjs test/data-health-review-routes.test.mjs test/data-health-review-scope.test.mjs test/stock-review-view.test.mjs test/stock-item-review-ui.test.mjs test/victron-catalogue-navigation.test.mjs test/data-health-actions.test.mjs`
   includes the actual Store route boundary with plain-text errors, lost connections,
   audit failures, deferrals, stable selections and separate operation identifiers,
   plus 50-product creation batches for both companies, packaging conflicts,

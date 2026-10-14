@@ -43,13 +43,13 @@ function Recovery({ source }: { source: HealthSource }) {
       <button type="button" onClick={downloadReport} className="text-sky-800 underline">Download diagnostic report</button>
     </div>
     {issues.length > 0 && <details className="mt-4">
-      <summary className="cursor-pointer text-sm font-semibold">Review {issues.length} affected {issues.length === 1 ? 'SKU' : 'SKUs'}</summary>
+      <summary className="cursor-pointer text-sm font-semibold">Technical details · {issues.length} affected {issues.length === 1 ? 'SKU' : 'SKUs'}</summary>
+      {source.id === 'thanda' && <p className="mt-2 text-sm text-zinc-600">These are saved stock and import diagnostics. Manage Victron products in catalogue review using the link at the top of this page.</p>}
       <input aria-label={`Find affected ${source.label} SKU`} placeholder="Find SKU, name or issue" value={query} onChange={event => { setQuery(event.target.value); setLimit(25); }} className="mt-3 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" />
       <ul className="mt-2 max-h-96 divide-y divide-zinc-200 overflow-y-auto">{filtered.slice(0, limit).map(item => <li key={item.sku} className="py-3 text-sm">
         <p><b>{item.sku}</b> · {item.name}</p>
         <p className="mt-1 text-amber-900">{item.reason}</p>
         <details className="mt-1"><summary className="cursor-pointer text-sky-800">How to resolve</summary><p className="mt-2 text-zinc-700">{item.remedy}</p></details>
-        {item.reviewUrl && <Link href={item.reviewUrl} className="mt-2 inline-block font-semibold text-sky-800 underline">Open catalogue review</Link>}
       </li>)}</ul>
       {!filtered.length && <p className="mt-2 text-sm text-zinc-600">No affected SKUs match.</p>}
       {filtered.length > limit && <button type="button" onClick={() => setLimit(value => value + 50)} className="mt-2 text-sm font-semibold text-sky-800 underline">Show more ({filtered.length - limit} remaining)</button>}
