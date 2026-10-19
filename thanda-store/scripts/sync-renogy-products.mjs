@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
+import { RenogyAuthError, RenogyRateLimitError, ensureSupplierAuthSchema, recordRenogyAuthFailure, resolveRenogyAuthFailure, recordRenogyRateLimit, renogyRetryDeadline } from '../src/lib/supplier-auth-alerts.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
@@ -24,7 +25,10 @@ const WAREHOUSE_CSV = process.env.WAREHOUSE_CSV || path.resolve(__dirname, '../.
 const PRODUCT_SOURCE = process.env.RENOGY_PRODUCT_SOURCE || 'export';
 const REQUEST_TIMEOUT_MS = Number(process.env.RENOGY_REQUEST_TIMEOUT_MS || 12000);
 
-let authToken = normalizeToken(INITIAL_TOKEN) || readCachedToken();
+let authToken = readCachedToken() || normalizeToken(INITIAL_TOKEN);
+let loginAttempted = false;
+let currentUserDetails = null;
+let syncStarted = false;
 
 const pool = createPool();
 
@@ -81,10 +85,12 @@ function readCachedToken() {
 
 function writeCachedToken(token) {
   fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true });
-  fs.writeFileSync(TOKEN_CACHE_FILE, `${JSON.stringify({
+  const temporary = `${TOKEN_CACHE_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify({
     token,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, TOKEN_CACHE_FILE);
 }
 
 function renogyHeaders(referer = 'https://partner.renogy.com/product') {
@@ -101,13 +107,12 @@ function renogyHeaders(referer = 'https://partner.renogy.com/product') {
 }
 
 function isAuthFailure(body, status) {
-  return status === 401 || body?.code === 401;
+  return [401, 403].includes(status) || [401, 403].includes(Number(body?.code));
 }
 
 async function loginRenogy() {
-  if (!RENOGY_EMAIL || !RENOGY_PASSWORD) {
-    throw new Error('Renogy token expired and RENOGY_EMAIL/RENOGY_PASSWORD are not configured');
-  }
+  if (loginAttempted || !RENOGY_EMAIL || !RENOGY_PASSWORD) throw new RenogyAuthError();
+  loginAttempted = true;
   const json = await fetchJson(`${BASE_URL}/user/prelogin`, {
     method: 'POST',
     headers: {
@@ -117,13 +122,13 @@ async function loginRenogy() {
       'User-Agent': 'ThandaStoreSync/1.0',
     },
     body: JSON.stringify({
-      email: RENOGY_EMAIL.replace(/\s/g, ''),
-      password: RENOGY_PASSWORD.replace(/\s/g, ''),
+      email: RENOGY_EMAIL.trim(),
+      password: RENOGY_PASSWORD,
     }),
-  }, { retryAuth: false });
+  }, { retryAuth: false, loginRequest: true });
 
   if (json.code !== 200 || !json.data?.token) {
-    throw new Error(`Renogy login failed with code ${json.code}: ${json.msg || 'missing token'}`);
+    throw new RenogyAuthError();
   }
   authToken = normalizeToken(json.data.token);
   writeCachedToken(authToken);
@@ -142,7 +147,12 @@ async function fetchJson(url, options, behavior = {}) {
     } catch {
       body = { raw: text };
     }
-    if (isAuthFailure(body, response.status) && behavior.retryAuth !== false) {
+    if (response.status === 429 || Number(body?.code) === 429) {
+      await recordRenogyRateLimit(pool, response.headers);
+      throw new RenogyRateLimitError();
+    }
+    if (isAuthFailure(body, response.status)) {
+      if (behavior.retryAuth === false) throw new RenogyAuthError();
       await loginRenogy();
       return fetchJson(url, {
         ...options,
@@ -153,6 +163,7 @@ async function fetchJson(url, options, behavior = {}) {
       }, { retryAuth: false });
     }
     if (!response.ok) {
+      if (behavior.loginRequest) throw new Error(`Renogy login request failed (HTTP ${response.status}).`);
       const message = body?.msg || body?.message || text.slice(0, 200);
       throw new Error(`HTTP ${response.status}: ${message}`);
     }
@@ -167,6 +178,10 @@ async function fetchText(url, options) {
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
+    if (response.status === 429) {
+      await recordRenogyRateLimit(pool, response.headers);
+      throw new RenogyRateLimitError();
+    }
     const text = await response.text();
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
@@ -178,6 +193,7 @@ async function fetchText(url, options) {
 }
 
 async function fetchCurrentUser() {
+  if (currentUserDetails) return currentUserDetails;
   const json = await fetchJson(`${BASE_URL}/user/info`, {
     method: 'GET',
     headers: renogyHeaders(),
@@ -185,7 +201,8 @@ async function fetchCurrentUser() {
   if (json.code !== 200) {
     throw new Error(`Renogy user info returned code ${json.code}: ${json.msg || 'unknown error'}`);
   }
-  return json.data;
+  currentUserDetails = json.data;
+  return currentUserDetails;
 }
 
 async function fetchProductExportRows() {
@@ -232,16 +249,8 @@ async function loadProductRows() {
 }
 
 async function ensureAuthenticated() {
-  if (!authToken) {
-    await loginRenogy();
-    return;
-  }
-  try {
-    await fetchCurrentUser();
-  } catch (error) {
-    if (!String(error.message).includes('401')) throw error;
-    await loginRenogy();
-  }
+  if (!authToken) await loginRenogy();
+  await fetchCurrentUser();
 }
 
 async function findRenogyItemBySku(sku) {
@@ -378,9 +387,19 @@ async function buildProduct(row, wrapper, detail, observedAt) {
 }
 
 async function main() {
-  await startDataSync(pool, 'renogy');
-  if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) throw new Error('Renogy authentication is not configured.');
+  const authOnly = process.argv.includes('--check-auth');
+  await ensureSupplierAuthSchema(pool);
+  const retryAt = await renogyRetryDeadline(pool);
+  if (retryAt) {
+    console.log(`Renogy cooldown until ${new Date(retryAt).toISOString()}; no provider requests made.`);
+    if (authOnly) process.exitCode = 75;
+    return;
+  }
+  if (!authOnly) { await startDataSync(pool, 'renogy'); syncStarted = true; }
+  if (!authToken && (!RENOGY_EMAIL || !RENOGY_PASSWORD)) throw new RenogyAuthError();
   await ensureAuthenticated();
+  await resolveRenogyAuthFailure(pool);
+  if (authOnly) { console.log('Renogy authentication verified. No catalogue or stock was changed.'); return; }
   const rows = await loadProductRows();
   const client = await pool.connect();
   const stats = {
@@ -407,6 +426,9 @@ async function main() {
         stats.synced += 1;
         if (!product.image_url) stats.missingImages.push(sku);
       } catch (error) {
+        // Stop the run on authentication loss; do not spend a login request for
+        // every remaining SKU or report a rejected connection as partial stock.
+        if (error instanceof RenogyAuthError || error instanceof RenogyRateLimitError) throw error;
         stats.failed.push({ sku, error: error.message });
       }
     }
@@ -425,8 +447,34 @@ async function main() {
   if (stats.failed.length > 0) process.exitCode = 1;
 }
 
-main().catch(async (error) => {
-  await finishDataSync(pool, 'renogy', { status: 'failed', error }).catch(() => {});
+async function runLocked() {
+  const db = await pool.connect();
+  let locked = false;
+  try {
+    locked = (await db.query('SELECT pg_try_advisory_lock(742042) AS locked')).rows[0].locked;
+    if (!locked) {
+      console.log('Another Renogy sync or authentication check is running.');
+      if (process.argv.includes('--check-auth')) process.exitCode = 75;
+      return;
+    }
+    await main();
+  } catch (error) {
+    // Persist the outcome while the source lock is still held, so a concurrent
+    // successful check cannot be followed by this older failure reopening it.
+    if (error instanceof RenogyAuthError) {
+      try { await recordRenogyAuthFailure(pool); }
+      catch { console.error('Renogy authentication incident could not be recorded. Check the database.'); }
+    }
+    if (syncStarted) await finishDataSync(pool, 'renogy', { status: 'failed', error }).catch(() => {});
+    console.error(error);
+    process.exitCode = 1;
+  } finally {
+    try { if (locked) await db.query('SELECT pg_advisory_unlock(742042)'); }
+    finally { db.release(); }
+  }
+}
+
+runLocked().catch(async (error) => {
   console.error(error);
   process.exitCode = 1;
 }).finally(() => pool.end());

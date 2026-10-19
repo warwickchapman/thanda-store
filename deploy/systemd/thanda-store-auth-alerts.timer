@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Store supplier authentication alert outbox each minute
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+Unit=thanda-store-auth-alerts.service
+
+[Install]
+WantedBy=timers.target

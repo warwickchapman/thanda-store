@@ -1,0 +1,11 @@
+[Unit]
+Description=Send Store supplier authentication alerts to active administrators
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/thanda-store/thanda-store
+EnvironmentFile=/etc/thanda-store-supplier.env
+EnvironmentFile=/etc/thanda-store-notifications.env
+ExecStart=/usr/bin/node scripts/process-supplier-auth-alerts.mjs
+TimeoutStartSec=65

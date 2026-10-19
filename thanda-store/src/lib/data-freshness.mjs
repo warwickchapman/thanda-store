@@ -90,6 +90,7 @@ export function summarizeSource(source, observations = [], run = {}, now = new D
 // only a useful bounded category in the shared status table/UI; service logs
 // already contain the original exception for an operator's investigation.
 export function safeSyncError(error) {
+  if (error?.code === 'RENOGY_AUTH_FAILED') return 'Renogy authentication failed. Ask the Store maintainer to restore the partner login.';
   const message = String(error?.message || error || '');
   const http = message.match(/(?:HTTP|status|failed:)\s*(\d{3})\b/i);
   if (http) return `Source request failed (HTTP ${http[1]}). Check the service log.`;

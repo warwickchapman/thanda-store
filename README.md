@@ -504,6 +504,95 @@ The sync job also creates or extends the required table defensively before writi
 
 ## Renogy sync
 
+### Automatic login and authentication alerts
+
+Configure the Renogy partner email/password securely on the production server:
+
+```bash
+ssh -t -F /dev/null root@app-01.sensible.co.za 'python3 /root/thanda-store/deploy/configure-renogy-auth.py'
+```
+
+The helper prompts for both values with hidden input, saves them in the existing
+root-owned `0600` `/etc/thanda-store-supplier.env`, keeps a protected backup, and
+runs an authentication-only check through systemd. Passwords, including spaces,
+are preserved exactly. Do not paste credentials into chat, shell arguments or
+Git. The normal five-minute timer picks up the new configuration automatically;
+its next successful catalogue run supplies new stock observations. If another
+sync owns the lock, verification exits with code 75; retry the check after it
+finishes without re-entering credentials:
+
+```bash
+systemd-run --wait --pipe --collect --quiet \
+  --property=EnvironmentFile=/etc/thanda-store-supplier.env \
+  --property=WorkingDirectory=/root/thanda-store/thanda-store \
+  /usr/bin/node scripts/sync-renogy-products.mjs --check-auth
+```
+
+Each job prefers its atomically saved `0600` token cache over the initial
+environment token. A rejected token triggers at most one partner-login attempt
+and one request retry per run. Successful identity verification resolves the
+auth incident; it does not manufacture a stock observation or claim a catalogue
+sync succeeded. A failure while processing products stops further SKU work.
+Timeouts and provider outages remain separate from confirmed auth rejection.
+Renogy HTTP/body `429` responses stop the job and persist `Retry-After` plus
+returned rate-limit headers in `renogy_retry_state`. Scheduled jobs and auth-only
+checks skip locally until that deadline; they never bypass a supplier cooldown.
+
+An unresolved incident displays a persistent **Renogy login needs attention**
+banner on every page for signed-in administrators, linking to Data health. It
+refreshes local status on navigation, focus and every minute, and disappears
+after verified recovery. Buyers and customer-view sessions cannot read these
+alerts. Repeated failed jobs retain the same incident; the banner has no dismiss
+control. It also warns when alert emails fail or exhaust their retry window.
+
+The auth-alert worker emails each active administrator once per incident.
+Email acceptance is distinguished from delivery; bounced/failed delivery is
+reported locally. It reuses the protected Resend configuration and shared email
+cooldown/worker lock already used by quote notifications. Install its timer after
+deploying the committed application:
+
+```bash
+sudo install -m 0644 deploy/systemd/thanda-store-auth-alerts.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/thanda-store-auth-alerts.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now thanda-store-auth-alerts.timer
+```
+
+The service reads `/etc/thanda-store-supplier.env` and
+`/etc/thanda-store-notifications.env`; the latter must contain the existing
+`RESEND_API_KEY`. `OTP_FROM_EMAIL` and `PORTAL_BASE_URL` are optional, defaulting
+to the Store sender and production URL. No email key goes into the supplier sync
+environment. Incidents and the durable outbox live in PostgreSQL
+`supplier_auth_incidents` and `supplier_auth_emails`. A recovered incident cancels
+outstanding messages; a later auth failure opens a fresh incident.
+
+API budget review: banners/status checks make **zero provider calls**. Scheduled
+Renogy runs retain the five-minute schedule (288/day), with one cached identity
+check per healthy run instead of two; recovery uses at most three auth requests
+(failed identity, login, retried identity), or 864 auth requests/day in the
+worst case of every scheduled run needing renewal. Only one login attempt/run
+is allowed. Existing export, image and per-SKU calls are unchanged; Renogy does
+not publish a verified API allowance here, so no higher traffic is assumed safe.
+No backfill, polling of Renogy, Xero requests or Xero reserve impact is added.
+
+Resend sends one message/admin/incident, with at most five send attempts inside
+23 hours and three delivery checks (at most eight requests/admin/incident),
+eight requests/worker run and a 40-second run budget. With no incident it makes
+zero email-provider calls. Persistent idempotency keys and immutable payloads
+prevent repeat sends on ambiguous outcomes. The worker paces at one request/sec,
+retains allowance headers and honours shared `Retry-After`/quota cooldowns.
+Resend's documented default is 10 requests/sec/team; account sending quotas are
+plan-dependent. See [usage limits](https://resend.com/docs/api-reference/rate-limit)
+and [24-hour idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys).
+Repeated failures do not enqueue new mail; exhausted or permanent failures need
+operator review, rather than an unbounded resend loop.
+
+Validation: `RUN_SUPPLIER_AUTH_DB_TESTS=1 DATABASE_URL=<local-test-db> node
+test/supplier-auth.integration.mjs` runs the real sync entry point against fake
+Renogy and Resend services in a disposable schema. It covers credential handling,
+renewal, cached tokens, incident recovery, recipients, deduplication, delivery
+failure, provider cooldown and retry expiry without live provider requests.
+
 Run a one-off sync from the repository root:
 
 ```bash
