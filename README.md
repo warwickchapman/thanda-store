@@ -408,6 +408,38 @@ Home is the first catalogue tab. **My favourites** ranks current visible catalog
 
 Victron description markers in the exact form `If 0, order <SKU>` create a local SKU-succession relationship. The old SKU remains its own card while it has stock. The named successor is a deliberate exception to the quarterly PDF allow-list and is synchronised as a current catalogue product. Invoice history for all family members is combined into one Home ranking, which selects the newest orderable SKU.
 
+Renogy replacements use the same stock-aware fulfilment and Home-history rules,
+with explicit administrator-confirmed links in `renogy_sku_successions`. In
+**Admin → Products → Renogy SKU replacements**, choose the previous and current
+SKU from the saved catalogue, then save the link. For the Core Mini battery,
+record `RBT12100LFP-M-G1-SA → RBT12100LFP-M-G2-SA`. Generation numbers and similar
+names never create links automatically. Links can be removed, conflicts and
+cycles are rejected, and the saved evidence identifies the administrator.
+
+A Renogy predecessor with observed positive supplier or Thanda stock keeps its
+own card and can fulfil the replacement family. Otherwise it leaves catalogue
+discovery once its explicit successor is present; its database row, original
+stock observations, prices, resources and sales history remain intact. Unknown
+stock is never converted to zero. The replacement shows its own availability,
+so a confirmed zero remains **Out of stock**, visible with **Show unavailable**.
+Searching a previous item code also finds its replacement. Product details show
+**Replaces / Replaced by**, and catalogue exports include `successor_sku` for
+either supplier. Saved carts retain their original lines and resolve stock and
+current pricing at quote confirmation; copying an old quote can select the
+current successor. Renogy article codes are literal: Victron's retail `R` alias
+rule applies only to Victron. The Victron table remains its canonical source.
+
+API budget: succession administration, discovery, Home ranking, cart resolution,
+quote-copy preview and exports read PostgreSQL only: **0 additional Renogy or
+Xero requests per action, run or day**. No new provider endpoint, retry, cache
+invalidation or sync schedule is introduced; existing provider limits and
+protected reserves are unchanged. Supplier syncs preserve these local links.
+The existing quote-submission request and its budget remain unchanged. Run the
+focused unit tests with `node --test test/*succession*.test.mjs
+test/sku-fulfilment.test.mjs test/sku-quote-copy.test.mjs` from the app
+directory; the guarded `test/renogy-sku-successions.integration.mjs` exercises
+saved-data workflows in a disposable local PostgreSQL schema.
+
 For fulfilment, the server resolves the family when a product is added to the cart and again immediately before creating its Xero quote. It uses the closest older SKU that has either KZN or Victron warehouse stock; if no older SKU has stock, it uses the newest SKU, because that is the SKU Thanda can procure from Victron. This is deliberately a server-side rule so it remains correct if stock changes between adding an item and checkout. Where multiple cart lines resolve to the same SKU, they are consolidated into one Xero quote line.
 
 When a successor has no own supplier image or generated thumbnail, its card temporarily uses the predecessor's image or thumbnail. The fallback is evaluated on every catalogue read: as soon as the successor receives its own supplier image or local thumbnail, the predecessor image is no longer used. This avoids blank cards without retaining a copied image as permanent successor data.

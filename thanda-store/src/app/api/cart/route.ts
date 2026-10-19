@@ -8,7 +8,9 @@ async function cartResponse() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   const rows = await pool.query('SELECT product_id, quantity FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
-  const products = await currentCatalogue(user.discounts);
+  // Keep an existing cart's original SKU visible even when discovery now
+  // prefers its replacement. Quote confirmation resolves the current family.
+  const products = await currentCatalogue(user.discounts, { includeSuperseded: true });
   const byId = new Map(products.map((product) => [product.id, product]));
   const lines = rows.rows.flatMap((row) => {
     const product = byId.get(Number(row.product_id));

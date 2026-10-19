@@ -35,5 +35,6 @@ export function productDetails(product) {
     const url=publicManufacturerUrl(doc.url,product.supplier);
     if(kind&&url&&!links.some(l=>l.url===url)) links.push({kind,title:plainText(doc.title||doc.name)||({product:'Manufacturer product page',datasheet:'Datasheet',manual:'Manual'})[kind],url});
   }
-  return { description:plainText(details.description)||String(product.name),specifications:specifications.slice(0,80),links:links.slice(0,30) };
+  const skuList = value => Array.isArray(value) ? value.filter(sku => typeof sku === 'string').slice(0, 100) : [];
+  return { description:plainText(details.description)||String(product.name),specifications:specifications.slice(0,80),links:links.slice(0,30),replaces:skuList(details.replaces),replacedBy:skuList(details.replacedBy) };
 }

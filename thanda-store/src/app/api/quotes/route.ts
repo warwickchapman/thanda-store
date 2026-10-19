@@ -27,7 +27,7 @@ export async function POST(request: Request) {
 
     const cart = await pool.query('SELECT product_id, quantity, updated_at::text AS updated_at FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
     if (!cart.rowCount) return NextResponse.json({ error: 'Your cart is empty.' }, { status: 400 });
-    const catalogue = await currentCatalogue(user.discounts);
+    const catalogue = await currentCatalogue(user.discounts, { includeSuperseded: true });
     const products = new Map(catalogue.map((product) => [product.id, product]));
     const resolvedQuantities = new Map<number, number>();
     for (const line of cart.rows) {

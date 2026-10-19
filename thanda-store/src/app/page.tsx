@@ -8,6 +8,7 @@ import { CartDrawer } from '@/components/cart-drawer';
 import { useStoreSearch } from '@/components/store-search';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
+import { catalogueProductMatchesQuery } from '@/lib/catalogue-succession.mjs';
 import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters, productAvailability } from '@/lib/catalogue-filters.mjs';
 
 interface Product {
@@ -327,15 +328,7 @@ export default function Home() {
 
   const catalogueProducts = products.filter(isStorefrontProduct);
   const visibleProducts = catalogueProducts;
-  const filteredProducts = visibleProducts.filter((product) => {
-    const search = query.trim().toLowerCase();
-    if (!search) return true;
-    return product.sku.toLowerCase().includes(search)
-      || product.name.toLowerCase().includes(search)
-      || product.supplier.toLowerCase().includes(search)
-      || product.category.toLowerCase().includes(search)
-      || product.supplier_category?.toLowerCase().includes(search);
-  });
+  const filteredProducts = visibleProducts.filter(product => catalogueProductMatchesQuery(product, query));
   const supplierProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
     const supplier = product.supplier || 'unknown';
     groups[supplier] = groups[supplier] || [];
@@ -588,6 +581,7 @@ export default function Home() {
                         <div className="mb-2 flex items-center justify-between">
                           <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{product.sku}</div>
                         </div>
+                        {Array.isArray(product.details.replaces) && product.details.replaces.length > 0 && <p className="mb-2 break-words text-xs text-zinc-500">Replaces {product.details.replaces.join(', ')}</p>}
                         
                         <h3 className="mb-4 min-h-[2.5rem] line-clamp-2 text-sm font-bold leading-tight text-zinc-900 transition-colors group-hover:text-amber-600">
                           <button type="button" onClick={() => openProductDetails(product)} className="text-left hover:underline">{product.name}</button>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth/server';
 import { currentCatalogue } from '@/lib/catalogue';
 import pool from '@/lib/db';
+import { loadSkuSuccessions, normalizeSku, successorSkus } from '@/lib/sku-successions.mjs';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accounts';
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
@@ -15,8 +16,8 @@ function integerQuantity(value: unknown) {
   return Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
 }
 
-async function currentProducts(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>) {
-  return currentCatalogue(user.discounts);
+async function currentProducts(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, includeSuperseded = false) {
+  return currentCatalogue(user.discounts, { includeSuperseded });
 }
 
 async function sourceQuote(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, quoteId: string) {
@@ -30,26 +31,34 @@ async function sourceQuote(user: NonNullable<Awaited<ReturnType<typeof currentUs
 async function copyLines(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, quoteId: string) {
   const quote = await sourceQuote(user, quoteId);
   const catalogue = await currentProducts(user);
-  const bySku = new Map(catalogue.map((product) => [product.sku.toUpperCase(), product]));
+  const successions = await loadSkuSuccessions(pool);
   const lines: ProductLine[] = [];
   const skipped: string[] = [];
   for (const line of quote.LineItems || []) {
     const sku = String(line.ItemCode || '').trim().toUpperCase();
     const quantity = integerQuantity(line.Quantity);
-    let product = bySku.get(sku);
-    if (!product && sku) {
-      const successors = await pool.query<{ successor_sku: string }>(`
-        WITH RECURSIVE replacements AS (
-          SELECT successor_sku, ARRAY[UPPER(predecessor_sku)] AS path
-          FROM victron_sku_successions WHERE UPPER(predecessor_sku) = $1
-          UNION ALL
-          SELECT next.successor_sku, replacements.path || UPPER(next.predecessor_sku)
-          FROM replacements
-          JOIN victron_sku_successions next ON UPPER(next.predecessor_sku) = UPPER(replacements.successor_sku)
-          WHERE NOT UPPER(next.predecessor_sku) = ANY(replacements.path)
-        ) SELECT successor_sku FROM replacements
-      `, [sku]).catch((error: { code?: string }) => error.code === '42P01' ? { rows: [] } : Promise.reject(error));
-      product = successors.rows.map((row) => bySku.get(row.successor_sku.toUpperCase())).find(Boolean);
+    const matching = catalogue.filter((candidate) => normalizeSku(candidate.supplier, candidate.sku) === normalizeSku(candidate.supplier, sku));
+    const suppliers = [...new Set([
+      ...matching.map((candidate) => candidate.supplier),
+      ...successions.filter((row) => [row.predecessor_sku, row.successor_sku]
+        .some((member) => normalizeSku(row.supplier, member) === normalizeSku(row.supplier, sku)))
+        .map((row) => String(row.supplier)),
+    ])];
+    // Xero's historic ItemCode has no supplier field. A retired Renogy code
+    // still identifies Renogy even when only another brand's literal card is
+    // visible. Never guess from that remaining card.
+    let product;
+    if (sku && suppliers.length === 1) {
+      const supplier = suppliers[0];
+      product = matching.find((candidate) => candidate.supplier === supplier && candidate.sku.toUpperCase() === sku)
+        || matching.find((candidate) => candidate.supplier === supplier);
+      if (!product) {
+        for (const successor of successorSkus(successions, supplier, sku)) {
+          product = catalogue.find((candidate) => candidate.supplier === supplier
+            && normalizeSku(supplier, candidate.sku) === normalizeSku(supplier, successor));
+          if (product) break;
+        }
+      }
     }
     if (!sku || !quantity || !product || product.your_price_ex_vat === null || product.recommended_retail_ex_vat === null) {
       if (sku) skipped.push(sku);
@@ -87,7 +96,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const source = await sourceQuote(user, quoteId);
     const requestedLines = Array.isArray(body.lines) ? body.lines : [];
     if (!requestedLines.length) return NextResponse.json({ error: 'Add at least one product.' }, { status: 400 });
-    const catalogue = await currentProducts(user);
+    const catalogue = await currentProducts(user, true);
     const products = new Map(catalogue.map((product) => [product.id, product]));
     const resolvedQuantities = new Map<number, number>();
     for (const line of requestedLines) {

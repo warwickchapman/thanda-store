@@ -3,6 +3,8 @@ import path from 'node:path';
 import pool from '@/lib/db';
 import { catalogueDerivedDetails } from '@/lib/catalogue-filters.mjs';
 import { localStockObservation, supplierStockObservation } from '@/lib/data-freshness.mjs';
+import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
+import { isSupersededForDiscovery, withSuccessionDetails } from '@/lib/catalogue-succession.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -117,42 +119,29 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   };
 }
 
-export async function currentCatalogue(discounts: Record<string, number>) {
+export async function currentCatalogue(discounts: Record<string, number>, { includeSuperseded = false } = {}) {
   const result = await pool.query(`
     SELECT id, name, supplier, category, price, sku, image_url, stock_on_hand, details
     FROM products
-    WHERE COALESCE((details->>'hidden')::boolean, false) = false
     ORDER BY category ASC, name DESC
   `);
-  const fallbackResult = await pool.query<{
-    successor_sku: string;
-    predecessor_sku: string;
-    id: number;
-    supplier: string;
-    sku: string;
-    image_url: string;
-  }>(`
-    SELECT s.successor_sku, s.predecessor_sku, p.id, p.supplier, p.sku, p.image_url
-    FROM victron_sku_successions s
-    JOIN products p ON p.supplier = 'victron' AND p.sku = s.predecessor_sku
-  `).catch((error: { code?: string }) => {
-    // The supplier sync creates this table; a freshly rebuilt database can
-    // serve the catalogue normally before the first Victron sync completes.
-    if (error.code === '42P01') return { rows: [] as Array<{
-      successor_sku: string; predecessor_sku: string; id: number; supplier: string; sku: string; image_url: string;
-    }> };
-    throw error;
-  });
+  const successions = await loadSkuSuccessions(pool);
+  const identity = (supplier: string, sku: string) => `${supplier.toLowerCase()}:${sku.toUpperCase()}`;
+  const bySku = new Map(result.rows.map(row => [identity(row.supplier, row.sku), row]));
   const fallbacksBySuccessorSku = new Map<string, ImageFallback>();
-  for (const source of fallbackResult.rows) {
+  for (const succession of successions) {
+    const source = bySku.get(identity(succession.supplier, succession.predecessor_sku));
+    if (!source) continue;
     const imageUrl = String(source.image_url || '').trim();
     const sourceThumbnailUrl = thumbnailUrl(source);
     if (!imageUrl && !sourceThumbnailUrl) continue;
-    fallbacksBySuccessorSku.set(source.successor_sku.toUpperCase(), {
-      predecessorSku: source.predecessor_sku,
+    fallbacksBySuccessorSku.set(identity(succession.supplier, succession.successor_sku), {
+      predecessorSku: succession.predecessor_sku,
       imageUrl,
       thumbnailUrl: sourceThumbnailUrl,
     });
   }
-  return result.rows.map((row) => presentProduct(row, discounts, fallbacksBySuccessorSku.get(row.sku.toUpperCase()) || null));
+  const visible = result.rows.filter(row => row.details?.hidden !== true && row.details?.hidden !== 'true');
+  return visible.filter(row => includeSuperseded || !isSupersededForDiscovery(row, visible, successions))
+    .map(row => withSuccessionDetails(presentProduct(row, discounts, fallbacksBySuccessorSku.get(identity(row.supplier, row.sku)) || null), successions));
 }

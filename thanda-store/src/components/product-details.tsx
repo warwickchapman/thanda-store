@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {X} from 'lucide-react';
 import {formatCurrency} from '@/lib/utils';
-type Detail={description:string;specifications:Array<{label:string;value:string}>;links:Array<{kind:string;title:string;url:string}>};
+type Detail={description:string;specifications:Array<{label:string;value:string}>;links:Array<{kind:string;title:string;url:string}>;replaces:string[];replacedBy:string[]};
 type Product={id:number;name:string;sku:string;your_price_ex_vat:number|null};
 export function ProductDetails({product,stock,onClose}:{product:Product;stock:string[];onClose:()=>void}){
   const dialog=useRef<HTMLDialogElement>(null);const [detail,setDetail]=useState<Detail|null>(null);const [error,setError]=useState('');
@@ -12,7 +12,7 @@ export function ProductDetails({product,stock,onClose}:{product:Product;stock:st
     <header className="flex items-start justify-between gap-3 border-b p-5"><div><p className="text-xs font-semibold text-zinc-500">{product.sku}</p><h2 id="product-title" className="mt-2 text-xl font-bold">{product.name}</h2></div><button autoFocus aria-label="Close product details" onClick={onClose} className="rounded p-2 hover:bg-zinc-100"><X/></button></header>
     <div className="space-y-6 overflow-y-auto p-5"><section><p className="text-xs text-zinc-500">Your company price excluding VAT</p><p className="mt-1 text-2xl font-bold text-amber-600">{product.your_price_ex_vat===null?'Price on request':formatCurrency(product.your_price_ex_vat)}</p><div className="mt-3 space-y-1 text-sm text-zinc-600">{stock.map(s=><p key={s}>{s}</p>)}</div></section>
       {error&&<p role="alert">{error}</p>}{!detail&&!error&&<p role="status">Loading product details…</p>}
-      {detail&&<><section><h3 className="font-bold">Description</h3><p className="mt-2 whitespace-pre-line text-sm leading-6">{detail.description}</p></section>
+      {detail&&<>{(detail.replaces.length > 0 || detail.replacedBy.length > 0) && <section className="rounded-lg bg-zinc-50 p-3 text-sm">{detail.replaces.length > 0 && <p className="break-words">Replaces {detail.replaces.join(', ')}</p>}{detail.replacedBy.length > 0 && <p className="break-words">Replaced by {detail.replacedBy.join(', ')}</p>}</section>}<section><h3 className="font-bold">Description</h3><p className="mt-2 whitespace-pre-line text-sm leading-6">{detail.description}</p></section>
         {!!detail.specifications.length&&<section><h3 className="mb-2 font-bold">Specifications</h3><dl className="divide-y">{detail.specifications.map((s,i)=><div key={`${s.label}-${i}`} className="grid grid-cols-2 gap-4 py-2 text-sm"><dt className="text-zinc-500">{s.label}</dt><dd className="break-words">{s.value}</dd></div>)}</dl></section>}
         <section><h3 className="font-bold">Product resources</h3>{detail.links.length?<ul className="mt-2 space-y-3">{detail.links.map(l=><li key={l.url}><a href={l.url} target="_blank" rel="noopener noreferrer" className="text-sm underline"><span className="font-semibold">{l.kind==='product'?'Product page':l.kind==='datasheet'?'Datasheet':'Manual'}:</span> {l.title}</a></li>)}</ul>:<p className="mt-2 text-sm text-zinc-500">No datasheets or manufacturer links are available for this product yet.</p>}</section></>}
     </div></div></dialog>;

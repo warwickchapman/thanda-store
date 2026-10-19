@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AdminMenu } from './admin-menu';
+import { RenogySkuSuccessions } from './renogy-sku-successions';
 
 type XeroItem = {
   itemId: string; sku: string; name: string; description: string; price: string | number;
@@ -173,6 +174,7 @@ export function StoreProductsAdmin() {
         {busy ? <p role="status" className="py-5 text-sm">Loading products…</p> : !error && <ul className="mt-4 space-y-2">{filtered.map(product => <li key={product.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-4"><div><p className="text-xs text-zinc-500">{product.sku} · {product.hidden ? 'Hidden' : 'Visible'}</p><h2 className="font-semibold">{product.name}</h2><p className="mt-1 text-sm text-zinc-500">{new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(Number(product.price))} excl. VAT</p></div><button className={button} onClick={() => { setMessage(''); setDraft(product); }}>Edit product</button></li>)}{!filtered.length && <li className="rounded-lg border border-zinc-200 bg-white p-5 text-sm">{products.length ? 'No matching products.' : 'No products added here yet. Use Add from Xero to get started.'}</li>}</ul>}
       </section>}
       {error && <p role="alert" className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">{error} {tab === 'store' && <button type="button" className="underline" onClick={() => void loadStore()}>Retry</button>}</p>}
+      <RenogySkuSuccessions />
     </>}
   </div></main>;
 }

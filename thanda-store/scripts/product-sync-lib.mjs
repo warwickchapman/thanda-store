@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { catalogueDerivedDetails } from '../src/lib/catalogue-filters.mjs';
+import { ensureRenogySkuSuccessionSchema } from '../src/lib/renogy-sku-successions.mjs';
 
 const { Pool } = pg;
 
@@ -59,6 +60,7 @@ export async function ensureProductSchema(client) {
     )
   `);
   await client.query('CREATE INDEX IF NOT EXISTS victron_sku_successions_successor_idx ON victron_sku_successions (successor_sku)');
+  await ensureRenogySkuSuccessionSchema(client);
 }
 
 export async function upsertProduct(client, product) {

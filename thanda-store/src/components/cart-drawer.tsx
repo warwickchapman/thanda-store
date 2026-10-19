@@ -6,7 +6,7 @@ import { useState } from 'react';
 
 type CartLine = {
   quantity: number;
-  product: { id: number; name: string; sku: string; your_price_ex_vat: number | null };
+  product: { id: number; name: string; sku: string; your_price_ex_vat: number | null; details?: { replacedBy?: string[] } };
 };
 
 type Cart = { lines: CartLine[]; itemCount: number; subtotalExVat: number };
@@ -73,6 +73,7 @@ export function CartDrawer({ cart, open, onClose, onChange, userId }: {
             {cart.lines.map(({ product, quantity }) => <div key={product.id} className="border-b border-zinc-100 pb-4">
               <p className="text-xs font-semibold text-zinc-400">{product.sku}</p>
               <p className="mt-1 text-sm font-semibold">{product.name}</p>
+              {!!product.details?.replacedBy?.length && <p className="mt-1 text-xs text-amber-800">Replaced by {product.details.replacedBy.join(', ')}. Availability and current pricing are checked when you request a quote.</p>}
               <div className="mt-3 flex items-center justify-between gap-3">
                 <div className="flex items-center rounded-md border border-zinc-200">
                   <button onClick={() => quantity === 1 ? update(product.id) : update(product.id, quantity - 1)} className="grid h-8 w-8 place-items-center" aria-label="Decrease quantity"><Minus className="h-3 w-3" /></button>

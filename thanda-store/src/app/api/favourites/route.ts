@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { currentCatalogue, type CatalogueProduct } from '@/lib/catalogue';
+import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
-import { victronSkuFamilyResolver } from '@/lib/victron-sku-family.mjs';
-
-const LIMIT = 20;
+import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
+import { rankedFavouriteProducts } from '@/lib/favourite-products.mjs';
 
 type InvoiceHistoryRow = {
   invoice_id: string;
@@ -13,105 +12,16 @@ type InvoiceHistoryRow = {
   quantity: string | number;
 };
 
-type SkuSuccession = {
-  predecessor_sku: string;
-  successor_sku: string;
-};
-
-function productIsOrderable(product: { stock_on_hand: number | null; details: Record<string, unknown> }) {
-  const localStock = Number(product.details.localStockOnHand ?? 0);
-  return localStock > 0 || Number(product.stock_on_hand) > 0;
-}
-
-function rankedProducts(
-  rows: InvoiceHistoryRow[],
-  products: Map<string, Awaited<ReturnType<typeof currentCatalogue>>[number]>,
-  successions: SkuSuccession[],
-  rankedByFrequency: boolean,
-) {
-  const resolveFamily = victronSkuFamilyResolver(successions);
-  const predecessorSkus = new Set(successions.map((row) => row.predecessor_sku.toUpperCase()));
-  const liveSkusByFamily = new Map<string, Set<string>>();
-  for (const sku of products.keys()) {
-    const family = resolveFamily(sku);
-    const members = liveSkusByFamily.get(family) || new Set<string>();
-    members.add(sku);
-    liveSkusByFamily.set(family, members);
-  }
-  const grouped = new Map<string, {
-    skus: Set<string>;
-    invoiceIds: Set<string>;
-    units: number;
-    lastOrdered: string;
-    recent90: boolean;
-    recent180: boolean;
-  }>();
-
-  for (const row of rows) {
-    const sku = String(row.sku).toUpperCase();
-    const invoiceDate = new Date(row.invoice_date);
-    if (Number.isNaN(invoiceDate.getTime())) continue;
-    const invoiceDateIso = invoiceDate.toISOString().slice(0, 10);
-    const family = resolveFamily(sku);
-    const group = grouped.get(family) || {
-      skus: new Set<string>(), invoiceIds: new Set<string>(), units: 0, lastOrdered: '', recent90: false, recent180: false,
-    };
-    group.skus.add(sku);
-    group.invoiceIds.add(String(row.invoice_id));
-    group.units += Number(row.quantity) || 0;
-    if (invoiceDateIso > group.lastOrdered) group.lastOrdered = invoiceDateIso;
-    const ageDays = (Date.now() - invoiceDate.getTime()) / 86_400_000;
-    if (ageDays <= 90) group.recent90 = true;
-    if (ageDays <= 180) group.recent180 = true;
-    grouped.set(family, group);
-  }
-
-  return [...grouped.values()].flatMap((group) => {
-    const family = resolveFamily([...group.skus][0]);
-    const memberSkus = [...(liveSkusByFamily.get(family) || group.skus)];
-    const expectedSuccessors = successions
-      .filter((row) => resolveFamily(row.predecessor_sku.toUpperCase()) === family)
-      .map((row) => row.successor_sku.toUpperCase());
-    // A SKU which is not itself superseded is the newest member of its family.
-    // Prefer that card for Home, but keep an older SKU eligible if it is the
-    // only orderable product while its successor has no stock.
-    const newestSkus = memberSkus.filter((sku) => !predecessorSkus.has(sku));
-    const preferredSkus = [...newestSkus, ...memberSkus.filter((sku) => !newestSkus.includes(sku))];
-    const familyProducts = preferredSkus.map((sku) => products.get(sku)).filter((product): product is CatalogueProduct => Boolean(product));
-    // A successor discovered in Victron's description may be awaiting its
-    // first supplier sync. Do not offer an unavailable predecessor in Home
-    // while the actual replacement has not yet been imported.
-    if (!familyProducts.some(productIsOrderable) && expectedSuccessors.some((sku) => !products.has(sku))) return [];
-    const product = familyProducts.find(productIsOrderable) || familyProducts[0];
-    if (!product) return [];
-    const score = rankedByFrequency
-      ? group.invoiceIds.size * 100 + (group.recent90 ? 20 : group.recent180 ? 10 : 0)
-      : group.units;
-    return [{ product, score, lastOrdered: group.lastOrdered, units: group.units }];
-  }).sort((left, right) => right.score - left.score || right.lastOrdered.localeCompare(left.lastOrdered) || right.units - left.units)
-    .slice(0, LIMIT)
-    .map((row) => row.product);
-}
-
 export async function GET() {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     const products = await currentCatalogue(user.discounts);
-    const bySku = new Map(products.map((product) => [product.sku.toUpperCase(), product]));
     const cutoff = new Date();
     cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
     const start = cutoff.toISOString().slice(0, 10);
 
-    const successionResult = await pool.query<SkuSuccession>(`
-      SELECT predecessor_sku, successor_sku
-      FROM victron_sku_successions
-    `).catch((error: { code?: string }) => {
-      // The supplier sync creates the table. Retain normal ranking during the
-      // brief interval after an application deploy but before that first sync.
-      if (error.code === '42P01') return { rows: [] as SkuSuccession[] };
-      throw error;
-    });
+    const successions = await loadSkuSuccessions(pool);
     const [mine, thanda] = await Promise.all([
       user.xeroContactId ? pool.query(`
         SELECT invoice_id, sku, invoice_date, quantity
@@ -125,8 +35,8 @@ export async function GET() {
       `, [start]),
     ]);
     return NextResponse.json({
-      mine: rankedProducts(mine.rows, bySku, successionResult.rows, true),
-      thanda: rankedProducts(thanda.rows, bySku, successionResult.rows, false),
+      mine: rankedFavouriteProducts(mine.rows, products, successions, true),
+      thanda: rankedFavouriteProducts(thanda.rows, products, successions, false),
       windowStart: start,
     });
   } catch (error) {

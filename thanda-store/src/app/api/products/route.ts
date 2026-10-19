@@ -3,6 +3,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
+import { catalogueProductMatchesQuery } from '@/lib/catalogue-succession.mjs';
 
 const THUMBNAIL_RETRY_MS = 5 * 60 * 1000;
 const thumbnailQueuedAt = new Map<number, number>();
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
     const query = new URL(request.url).searchParams.get('query')?.trim().toLowerCase() || '';
     const allProducts = await currentCatalogue(user.discounts);
     const products = query
-      ? allProducts.filter((product) => product.sku.toLowerCase().includes(query) || product.name.toLowerCase().includes(query)).slice(0, 12)
+      ? allProducts.filter((product) => catalogueProductMatchesQuery(product, query)).slice(0, 12)
       : allProducts;
     queueMissingThumbnails(products);
     return NextResponse.json(products);

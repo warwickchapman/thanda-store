@@ -2,6 +2,7 @@ import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { catalogueCsv, paginateCatalogue } from './catalogue-export.mjs';
+import { loadSkuSuccessions, replacementContext } from '@/lib/sku-successions.mjs';
 
 export async function catalogueExport(request: Request, contactId: string) {
   // One pricing source for the browser, cart, quotes and API. All reads local.
@@ -9,15 +10,16 @@ export async function catalogueExport(request: Request, contactId: string) {
   const discounts = Object.fromEntries(rates.rows.map(r => [r.supplier, Number(r.discount_percent)]));
   const products = (await currentCatalogue(discounts)).filter(isStorefrontProduct);
   const meta = await pool.query(`SELECT p.id,p.last_updated,p.details->>'supplierObservedAt' AS supplier_updated_at,
-    p.details->>'xeroStockSyncedAt' AS stock_updated_at,p.details->>'currency' AS currency,
-    s.successor_sku FROM products p LEFT JOIN victron_sku_successions s ON p.supplier='victron' AND UPPER(p.sku)=UPPER(s.predecessor_sku)`);
+    p.details->>'xeroStockSyncedAt' AS stock_updated_at,p.details->>'currency' AS currency FROM products p`);
+  const successions = await loadSkuSuccessions(pool);
   const byId = new Map(meta.rows.map(r => [Number(r.id),r]));
   const pricingDates = new Map(rates.rows.map(r => [r.supplier,r.updated_at]));
   const data = products.map(p => {
     const m = byId.get(Number(p.id));
     return { supplier:p.supplier,sku:p.sku,description:p.name,price_ex_vat:p.your_price_ex_vat,
       currency:m.currency || 'ZAR',thanda_stock:p.details.localStockOnHand,
-      supplier_stock:p.supplier === 'lora' || p.stock_on_hand === null ? null : Number(p.stock_on_hand), successor_sku:m.successor_sku || null,
+      supplier_stock:p.supplier === 'lora' || p.stock_on_hand === null ? null : Number(p.stock_on_hand),
+      successor_sku:replacementContext(successions,p.supplier,p.sku).replacedBy[0] || null,
       updated_at:m.last_updated, supplier_updated_at:m.supplier_updated_at || null,thanda_stock_updated_at:m.stock_updated_at || null,
       pricing_updated_at:pricingDates.get(p.supplier) || null };
   }).sort((a,b) => a.supplier.localeCompare(b.supplier) || a.sku.localeCompare(b.sku));
