@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as successions from '../src/lib/sku-successions.mjs';
+import * as quoteLines from '../src/lib/commerce/quote-line.mjs';
 
 const compiled = ts.transpileModule(fs.readFileSync(new URL('../src/app/api/account/quotes/[quoteId]/copy/route.ts', import.meta.url), 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
@@ -35,6 +36,7 @@ async function copy(sku, products, relations = [pair]) {
     },
     '@/lib/xero/oauth': { xeroAccountingFetch: unexpectedExternalCall },
     '@/lib/commerce/quote-requests.mjs': {},
+    '@/lib/commerce/quote-line.mjs': quoteLines,
     '@/lib/quote-settings': {},
   };
   const exports = {};

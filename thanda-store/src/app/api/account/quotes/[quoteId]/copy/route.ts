@@ -8,6 +8,7 @@ import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accoun
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { QuoteRequestLimitError, recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
+import { quoteLineItem } from '@/lib/commerce/quote-line.mjs';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
 
@@ -110,10 +111,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const lineItems = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
       const product = products.get(productId);
       if (!product || product.your_price_ex_vat === null || product.recommended_retail_ex_vat === null) throw new Error('A selected product no longer has a current price.');
-      return {
-        ...(product.details.xeroStockStatus && product.details.xeroStockStatus !== 'missing' ? { ItemCode: product.sku } : {}),
-        Description: product.name, Quantity: quantity, UnitAmount: product.recommended_retail_ex_vat, DiscountRate: product.b2b_discount_percent,
-      };
+      return quoteLineItem(product, quantity);
     });
     const date = new Date().toISOString().slice(0, 10);
     const quoteStatus = await customerQuoteStatus();
