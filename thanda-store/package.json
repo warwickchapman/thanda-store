@@ -12,6 +12,7 @@
     "test:xero-accepted-quotes": "node --test test/xero-accepted-quotes.test.mjs",
     "extract:victron-allowlist": "node scripts/extract-victron-allowlist.mjs",
     "seed:product-overrides": "node scripts/seed-product-overrides.mjs",
+    "seed:enertec": "node scripts/seed-enertec-products.mjs",
     "sync:renogy": "node scripts/sync-renogy-products.mjs",
     "sync:victron": "node scripts/sync-victron-products.mjs",
     "sync:victron-orders": "node scripts/sync-victron-orders.mjs",

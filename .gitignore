@@ -14,3 +14,9 @@ runtime/
 # This is a Next route, not an exported data file.
 !thanda-store/src/app/api/account/catalogue.csv/
 !thanda-store/src/app/api/account/catalogue.csv/route.ts
+
+# Private account configuration and supplier buying-price research.
+.env*.local
+/thanda-store/data/enertec-products.json
+/docs/enertec-catalogue-preparation.md
+/output/enertec-2026-10-22/

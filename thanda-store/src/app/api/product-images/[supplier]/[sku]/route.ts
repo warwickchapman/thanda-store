@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import { currentUser } from '@/lib/auth/server';
+import { isCatalogueRestricted, isProductVisibleTo } from '@/lib/catalogue-access.mjs';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +18,11 @@ export async function GET(
     return new NextResponse(null, { status: 404 });
   }
 
+  const restricted = isCatalogueRestricted({ supplier });
+  if (restricted && !isProductVisibleTo({ supplier }, (await currentUser())?.email)) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   const filePath = path.join(process.cwd(), 'public', 'product-images', supplier, `${sku}.webp`);
 
   try {
@@ -23,7 +30,8 @@ export async function GET(
     return new NextResponse(image, {
       headers: {
         'Content-Type': 'image/webp',
-        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        'Cache-Control': restricted ? 'private, no-store' : 'public, max-age=3600, stale-while-revalidate=86400',
+        ...(restricted ? { Vary: 'Cookie' } : {}),
       },
     });
   } catch {

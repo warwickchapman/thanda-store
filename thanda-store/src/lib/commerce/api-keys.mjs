@@ -38,7 +38,7 @@ export async function issueApiKey(pool, { user, name, sessionToken }) {
 export async function authenticateApiKey(pool, authorization) {
   const token = /^Bearer (ts_[A-Za-z0-9_-]{43})$/.exec(authorization || '')?.[1];
   if (!token) return null;
-  const result = await pool.query(`SELECT k.id,k.user_id,k.contact_id FROM portal_api_keys k
+  const result = await pool.query(`SELECT k.id,k.user_id,k.contact_id,u.email FROM portal_api_keys k
     JOIN portal_users u ON u.id=k.user_id JOIN organisations o ON o.id=u.organisation_id
     WHERE k.token_hash=$1 AND k.revoked_at IS NULL AND u.is_active AND u.archived_at IS NULL
       AND u.api_enabled AND o.xero_contact_id=k.contact_id`, [tokenHash(token)]);

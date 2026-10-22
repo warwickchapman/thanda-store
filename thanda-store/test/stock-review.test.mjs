@@ -6,12 +6,13 @@ import { stockHealthIssues } from '../src/lib/data-health-actions.mjs';
 import { replenishmentFamilyStocks } from '../src/lib/victron-replenishment.mjs';
 
 const observedAt = new Date().toISOString();
-test('acknowledgements silence only missing-item health issues and never fabricate Xero stock', () => {
-  const product = { sku: 'PMP482305010', supplier: 'victron', details: { xeroStockStatus: 'missing', xeroStockSyncedAt: observedAt }, stockReview: { decision: 'do_not_stock' } };
+test('LoRa acknowledgements silence missing-item issues without silencing required Victron inventory', () => {
+  const product = { sku: 'LORA-RS-00120', supplier: 'lora', details: { xeroStockStatus: 'missing', xeroStockSyncedAt: observedAt }, stockReview: { decision: 'do_not_stock' } };
   assert.ok(activeStockReview(product));
   assert.equal(localStockObservation(product).quantity, null);
   const source = DATA_SOURCES.find(item => item.id === 'thanda');
   assert.equal(stockHealthIssues(source, [product]).length, 0);
+  assert.equal(stockHealthIssues(source, [{ ...product, supplier: 'victron', sku: 'PMP482305010' }]).length, 1);
   product.stockReview.decision = null;
   assert.equal(stockHealthIssues(source, [product]).length, 1);
 });

@@ -16,7 +16,7 @@ export async function GET() {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    const products = await currentCatalogue(user.discounts);
+    const products = await currentCatalogue(user.discounts, { userEmail: user.email });
     const cutoff = new Date();
     cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
     const start = cutoff.toISOString().slice(0, 10);

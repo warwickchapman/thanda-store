@@ -18,7 +18,7 @@ function integerQuantity(value: unknown) {
 }
 
 async function currentProducts(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, includeSuperseded = false) {
-  return currentCatalogue(user.discounts, { includeSuperseded });
+  return currentCatalogue(user.discounts, { includeSuperseded, userEmail: user.email });
 }
 
 async function sourceQuote(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, quoteId: string) {
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const productId = Number(line?.productId);
       const quantity = integerQuantity(line?.quantity);
       if (!productId || !quantity || !products.has(productId)) return NextResponse.json({ error: 'One or more selected products is no longer available.' }, { status: 400 });
-      const fulfilment = await resolveFulfilmentProduct(productId);
+      const fulfilment = await resolveFulfilmentProduct(productId, user.email);
       if (!fulfilment || !isSupplierProductAvailable(fulfilment)) return NextResponse.json({ error: 'One or more selected products is not currently available.' }, { status: 409 });
       resolvedQuantities.set(fulfilment.id, (resolvedQuantities.get(fulfilment.id) || 0) + quantity);
     }

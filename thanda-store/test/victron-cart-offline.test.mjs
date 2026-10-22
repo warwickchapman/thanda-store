@@ -8,13 +8,13 @@ import ts from 'typescript';
 const route = readFileSync(new URL('../src/app/api/admin/victron-provisional-cart/route.ts', import.meta.url), 'utf8');
 const parser = readFileSync(new URL('../src/lib/victron-provisional-cart.ts', import.meta.url), 'utf8');
 function evaluate(source, dependencies) {
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   new Function('require', 'module', 'exports', 'fetch', js)(name => {
     assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
     return dependencies[name];
-  }, module, module.exports, () => { throw new Error('Supplier requests are forbidden'); });
-  return module.exports;
+  }, loadedModule, loadedModule.exports, () => { throw new Error('Supplier requests are forbidden'); });
+  return loadedModule.exports;
 }
 test('cart upload saves known and unknown SKUs without contacting a rate-limited supplier', async () => {
   const queries = [];

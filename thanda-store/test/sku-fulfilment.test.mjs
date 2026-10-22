@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as successions from '../src/lib/sku-successions.mjs';
+import * as catalogueAccess from '../src/lib/catalogue-access.mjs';
 
 const compiled = ts.transpileModule(fs.readFileSync(new URL('../src/lib/victron-fulfilment.ts', import.meta.url), 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
@@ -25,7 +26,7 @@ function harness(requested, products, relations) {
     }
     throw new Error(`Unexpected database query: ${sql}`);
   } };
-  const modules = { '@/lib/db': db, '@/lib/sku-successions.mjs': successions };
+  const modules = { '@/lib/db': db, '@/lib/sku-successions.mjs': successions, '@/lib/catalogue-access.mjs': catalogueAccess };
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: (name) => {
     assert.ok(Object.hasOwn(modules, name), `Unexpected I/O dependency: ${name}`);

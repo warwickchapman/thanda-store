@@ -5,6 +5,7 @@ import { catalogueDerivedDetails } from '@/lib/catalogue-filters.mjs';
 import { localStockObservation, supplierStockObservation } from '@/lib/data-freshness.mjs';
 import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
 import { isSupersededForDiscovery, withSuccessionDetails } from '@/lib/catalogue-succession.mjs';
+import { isProductVisibleTo } from '@/lib/catalogue-access.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -52,6 +53,7 @@ function safePathPart(value: unknown) {
 
 function recommendedRetailExVat(product: { supplier?: string; details?: Record<string, unknown> }) {
   const details = product.details || {};
+  if (details.pricingStatus === 'unpriced') return null;
   const explicitExVat = numberOrNull(details.recommendedRetailExVat);
   if (explicitExVat !== null) return explicitExVat;
   const originalPrice = numberOrNull(details.originalPrice);
@@ -92,7 +94,7 @@ function thumbnailUrl(product: { id: number; supplier: string; sku: string }) {
 
 export function presentProduct(row: CatalogueRow, discounts: Record<string, number>, imageFallback: ImageFallback | null = null): CatalogueProduct {
   const retail = recommendedRetailExVat(row);
-  const fixedPrice = row.supplier.toLowerCase() === 'lora' || row.details?.storeManaged === true;
+  const fixedPrice = row.supplier.toLowerCase() === 'lora' || row.details?.storeManaged === true || row.details?.fixedDealerPrice === true;
   const discount = fixedPrice ? 0 : configuredDiscountPercent(row.supplier, discounts);
   const ownThumbnailUrl = row.details?.storeManaged === true ? row.image_url : thumbnailUrl(row);
   const ownImageUrl = row.image_url.trim();
@@ -119,7 +121,7 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   };
 }
 
-export async function currentCatalogue(discounts: Record<string, number>, { includeSuperseded = false } = {}) {
+export async function currentCatalogue(discounts: Record<string, number>, { includeSuperseded = false, userEmail }: { includeSuperseded?: boolean; userEmail?: string } = {}) {
   const result = await pool.query(`
     SELECT id, name, supplier, category, price, sku, image_url, stock_on_hand, details
     FROM products
@@ -141,7 +143,7 @@ export async function currentCatalogue(discounts: Record<string, number>, { incl
       thumbnailUrl: sourceThumbnailUrl,
     });
   }
-  const visible = result.rows.filter(row => row.details?.hidden !== true && row.details?.hidden !== 'true');
+  const visible = result.rows.filter(row => row.details?.hidden !== true && row.details?.hidden !== 'true' && isProductVisibleTo(row, userEmail));
   return visible.filter(row => includeSuperseded || !isSupersededForDiscovery(row, visible, successions))
     .map(row => withSuccessionDetails(presentProduct(row, discounts, fallbacksBySuccessorSku.get(identity(row.supplier, row.sku)) || null), successions));
 }

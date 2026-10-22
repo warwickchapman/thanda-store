@@ -4,6 +4,7 @@ const manufacturerHosts = {
   victron: ['www.victronenergy.com','victronenergy.com'],
   renogy: ['www.renogy.com','renogy.com','uk.renogy.com','au.renogy.com'],
   hubble: ['www.hubbleenergy.com','hubbleenergy.com','www.hubblelithium.co.za','hubblelithium.co.za'],
+  enertec: ['enertec.co.za','ctek.com','forbatt.co.za'],
 };
 export function publicManufacturerUrl(value, supplier) {
   try {

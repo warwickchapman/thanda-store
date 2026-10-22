@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { catalogueProductMatchesQuery } from '@/lib/catalogue-succession.mjs';
+import { isCatalogueRestricted } from '@/lib/catalogue-access.mjs';
 
 const THUMBNAIL_RETRY_MS = 5 * 60 * 1000;
 const thumbnailQueuedAt = new Map<number, number>();
@@ -11,7 +12,8 @@ export const runtime = 'nodejs';
 
 function queueMissingThumbnails(products: Array<{ id: number; image_url?: string; thumbnail_url?: string }>) {
   const now = Date.now();
-  const ids = products.filter((product) => product.image_url && !product.thumbnail_url)
+  // Restricted preview images must never be copied into the public directory.
+  const ids = products.filter((product) => !isCatalogueRestricted(product) && product.image_url && !product.thumbnail_url)
     .filter((product) => now - (thumbnailQueuedAt.get(product.id) || 0) >= THUMBNAIL_RETRY_MS)
     .map((product) => product.id);
   if (!ids.length) return;
@@ -30,12 +32,12 @@ export async function GET(request: Request) {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     const query = new URL(request.url).searchParams.get('query')?.trim().toLowerCase() || '';
-    const allProducts = await currentCatalogue(user.discounts);
+    const allProducts = await currentCatalogue(user.discounts, { userEmail: user.email });
     const products = query
       ? allProducts.filter((product) => catalogueProductMatchesQuery(product, query)).slice(0, 12)
       : allProducts;
     queueMissingThumbnails(products);
-    return NextResponse.json(products);
+    return NextResponse.json(products, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     console.error('Products API error:', error);
     return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 });

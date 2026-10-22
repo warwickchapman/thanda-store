@@ -3,26 +3,36 @@ import sharp from 'sharp';
 import { currentUser } from '@/lib/auth/server';
 import { validCustomerViewOrigin as validAdminOrigin } from '@/lib/auth/impersonation-origin.mjs';
 import pool from '@/lib/db';
+import { isProductVisibleTo } from '@/lib/catalogue-access.mjs';
 import { MAX_PRODUCT_UPLOAD_BYTES, validateDatasheet } from '@/lib/store-product-datasheet.mjs';
-import { ProductInputError, productIndex, saveStoreProduct, searchXeroProducts, storedXeroItems } from '@/lib/admin/store-products.mjs';
+import { existingStoreProduct, ProductInputError, productIndex, saveStoreProduct, searchXeroProducts, storedXeroItems } from '@/lib/admin/store-products.mjs';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
-  if ((await currentUser())?.role !== 'admin') return Response.json({ error: 'Admin access required.' }, { status: 403 });
+  const user = await currentUser();
+  if (user?.role !== 'admin') return Response.json({ error: 'Admin access required.' }, { status: 403 });
   const params = new URL(request.url).searchParams;
   try {
     if (params.get('source') === 'store') {
-      const result = await pool.query(`SELECT id,sku,name,category,image_url,details->>'description' AS description,
+      const result = await pool.query(`SELECT id,sku,name,category,image_url,supplier,details,details->>'description' AS description,
         details->>'recommendedRetailExVat' AS price, details->'storeDatasheet' AS datasheet,
         COALESCE((details->>'hidden')::boolean,false) AS hidden
         FROM products WHERE details->>'storeManaged'='true' ORDER BY name`);
-      return Response.json({ products: result.rows }, { headers: { 'Cache-Control': 'private, no-store' } });
+      const products = result.rows.filter(row => isProductVisibleTo(row, user.email)).map(row => ({
+        id: row.id, sku: row.sku, name: row.name, category: row.category, image_url: row.image_url,
+        description: row.description, price: row.price, datasheet: row.datasheet, hidden: row.hidden,
+      }));
+      return Response.json({ products }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     const query = (params.get('q') || '').trim();
     if (query.length < 2 || query.length > 100) return Response.json({ error: 'Enter 2–100 characters to search.' }, { status: 400 });
     const [snapshot, index] = await Promise.all([storedXeroItems(), productIndex(pool)]);
-    return Response.json({ ...searchXeroProducts(snapshot.items, index.products, index.successions, query), observedAt: snapshot.observedAt },
+    const restricted = index.products.filter((product: { supplier: string; details: Record<string, unknown> }) => !isProductVisibleTo(product, user.email));
+    // Keep restricted matches out of the source results as well. Dropping only
+    // their index entries would incorrectly offer to import them a second time.
+    const visibleItems = snapshot.items.filter((item: { ItemID?: string; Code?: string }) => !existingStoreProduct(item, restricted));
+    return Response.json({ ...searchXeroProducts(visibleItems, index.products, index.successions, query), observedAt: snapshot.observedAt },
       { headers: { 'Cache-Control': 'private, no-store' } });
   } catch {
     return Response.json({ error: 'The saved product listing is unavailable. Try again shortly; no products were changed.' }, { status: 503 });

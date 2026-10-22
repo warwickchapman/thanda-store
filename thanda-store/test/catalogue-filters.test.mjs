@@ -143,6 +143,28 @@ test('mixed supplier categories classify the actual item while retaining equipme
   assert.ok(classify('TMB Series', 'solar_panel').reviewReason);
 });
 
+test('Enertec retains its three list categories while classifying equipment and accessories', () => {
+  const enertec = (name, enertecRange, subcategory) => ({
+    supplier: 'enertec', category: 'Source grouping', name, details: { enertecRange, subcategory },
+  });
+  for (const [range, category] of [['energizer', 'Energizer'], ['marine', 'Marine & Leisure']]) {
+    const derived = deriveCatalogueAttributes(enertec('12V 100Ah battery', range));
+    assert.equal(derived.classification.category, category);
+    assert.deepEqual(derived.attributes, { productType: ['Battery'], batteryVoltage: ['12 V'], capacity: ['100 Ah'] });
+  }
+  const cable = classifyCatalogueProduct(enertec('USB-C Charge Cable 12V Plug', 'ctek', 'CTEK ACCESSORIES - CS RANGE'));
+  assert.equal(cable.category, 'CTEK');
+  assert.equal(cable.kind, 'cable');
+  const charger = classifyCatalogueProduct(enertec('STORM 2 - EV Charger 22kW 2 Cable T2', 'ctek', 'E-MOBILITY CTEK'));
+  assert.equal(charger.category, 'CTEK');
+  assert.equal(charger.typeLabel, 'EV charger');
+  assert.equal(classifyCatalogueProduct(enertec('MXS5.0T - 12V 5A Charger', 'ctek')).typeLabel, 'Battery charger');
+  assert.equal(classifyCatalogueProduct(enertec('Comfort Connect M6', 'ctek', 'CTEK ACCESSORIES - COMFORT CONNECT')).kind, 'accessory');
+  assert.equal(classifyCatalogueProduct(enertec('CTEK Battery Monitor', 'ctek', 'DIAGNOSTIC 12V')).kind, 'other');
+  assert.equal(classifyCatalogueProduct(enertec('VE.Direct Cable 1m', 'unrecognized')).category, 'Cables & connectors');
+  assert.equal(classifyCatalogueProduct({ ...enertec('VE.Direct Cable 1m', 'ctek'), supplier: 'victron' }).category, 'Cables & connectors');
+});
+
 test('numeric measurements normalize decimal commas and units without borrowing dimensions or ratings', () => {
   for (const value of ['0,3m', '0.3 m', '30cm', '300 mm']) assert.equal(cableMeasurement(value, 'length'), 0.3);
   assert.equal(cableMeasurement('1,8 m', 'length'), 1.8);

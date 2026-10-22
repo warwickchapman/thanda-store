@@ -88,6 +88,8 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run sync:xero-webhooks` | Process queued Xero Invoice/Contact webhook events. | VPS runs it every five minutes. It exits without a Xero call when the queue is empty. |
 | `npm run images:thumbnails` | Generate missing WebP product thumbnails. | Exception/recovery use only. Normal thumbnail generation is automatic. |
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
+| `npm run seed:enertec -- --dry-run` | Validate the three restricted Enertec ranges and show counts without a database connection. | Before reviewing or applying the Enertec preview. |
+| `npm run seed:enertec -- --write` | Import/update the restricted Enertec preview from the reviewed October source file. | Only after the catalogue access protections are deployed. Never scheduled automatically. |
 | `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
 | `npm run start` | Start the production Next.js server. | PM2 owns this in production; use `npm run dev` locally instead. |
 | `npm run lint` | Run ESLint. | Before committing frontend or API changes. |
@@ -322,6 +324,61 @@ When Victron ZA stock is zero, the portal displays `Victron Warehouse ZA: Out of
 Supplier-backed items with zero supplier stock and no KZN stock also show a diagonal red `Not available` card ribbon. The ribbon is suppressed when Thanda has KZN stock, because that item remains available immediately.
 
 LoRa products are manufactured by Thanda, so they only display KZN stock. Hubble products currently use a manual availability string until an admin flip-control is added.
+
+## Restricted Enertec preview
+
+Enertec has three catalogue categories: **Energizer**, **Marine & Leisure** and
+**CTEK**. Its products are available only to accounts configured privately in
+`ENERTEC_PREVIEW_EMAILS` (comma-separated email addresses). The server checks the effective signed-in buyer's email
+for catalogue/search, details, carts, favourites, quote creation/copying, CSV
+downloads, API-key exports and media. Another administrator or another person
+at the same company does not inherit access. Administrator **View as** uses
+the target buyer's identity. Missing identity fails closed.
+
+The private source is supplied through `ENERTEC_SOURCE_FILE`, falling back to
+the ignored `thanda-store/data/enertec-products.json`: 155 unique supplier
+SKUs from the three October 2026 PDFs. The import keeps 12 discontinued
+Energizer products hidden and shows 143 active preview items: 35 Energizer,
+51 Marine & Leisure and 57 CTEK. Three TBA items and the unresolved SMARTPASS
+40-289/40-678 article show **price on request**. Neither missing prices nor
+missing stock is advertised as a usable zero. Stock remains unknown and the
+normal availability checks keep the cart controls disabled pending confirmation.
+
+These are provisional fixed dealer prices compared directly with online buying
+alternatives. No margin is reserved for the dealer's subsequent resale and
+company discounts do not reduce the prepared prices again. Per-product margins
+are inputs in the private source file alongside buying prices; neither belongs
+in the public repository. Freight and battery-exchange terms still need review. `products.price` contains the dealer selling price; buying cost stays
+in private metadata excluded from buyer catalogue/detail responses.
+
+Deployment order matters: **deploy the access-protection code first**, then
+configure the private account allowlist and source path, then run the dry-run
+and explicit write command from the production application with its existing
+database environment. An unset account allowlist hides the supplier from everyone
+and prevents import writes. Importing the data into an older
+running build could expose it. A seed run is transactional, updates Enertec
+only, preserves existing stock observations and manual hiding, and never
+changes Xero. Nothing is seeded by starting or building the application.
+
+Six exact previously verified product photos and nine datasheets are linked.
+They use approved Enertec, CTEK and Forbatt hosts. Other products retain the
+normal placeholder until exact assets are reviewed. Restricted products are
+excluded from public thumbnail generation, including manual/batch runs.
+
+API budget: source import, normal catalogue reads and access checks make
+**zero supplier or Xero API calls**, cold or warm, and introduce no retries,
+polling, schedules, OAuth changes or backfill. The seed uses local JSON and
+PostgreSQL. The authorized browser can load the six already-public image URLs
+and users can explicitly open linked public documents; those ordinary media
+requests are separate from supplier APIs. No per-SKU asset scraper is installed.
+Keep source evidence, buying-price comparisons and account configuration outside
+the public repository.
+
+Validation: `node --test test/catalogue-access.test.mjs
+test/enertec-catalogue.test.mjs` exercises real server routes with synthetic
+authentication/database boundaries, identity-specific exports and guessed-ID
+denials, plus synthetic source validation, fixed pricing, unknown stock and atomic
+seed failure handling. No production database is needed for those checks.
 
 ## Product image thumbnails
 

@@ -35,7 +35,7 @@ function text(node) {
   return node && typeof node === 'object' ? text(node.props?.children) : String(node ?? '');
 }
 const brandLabel = node => text(Array.isArray(node.props.children) ? node.props.children[0] : node.props.children);
-function storefront(initialQuery = '') {
+function storefront(initialQuery = '', catalogue = products) {
   let cursor = 0;
   let query = initialQuery;
   const state = [];
@@ -44,8 +44,8 @@ function storefront(initialQuery = '') {
     react: {
       useState(initial) {
         const index = cursor++;
-        if (!(index in state)) state[index] = index === 0 ? products : index === 1 ? false
-          : initial?.mine ? { mine: [products[0]], thanda: [products[1]] } : initial;
+        if (!(index in state)) state[index] = index === 0 ? catalogue : index === 1 ? false
+          : initial?.mine ? { mine: [catalogue[0]], thanda: [catalogue[1]] } : initial;
         return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
       },
       useEffect() {}, useRef: () => ({ current: null }),
@@ -136,4 +136,29 @@ test('Home keeps favourites and searching from Home uses all brands', () => {
   page.search('300ah');
   assert.equal(page.active(), 'All');
   assert.equal(page.names().length, 3);
+});
+
+test('Enertec uses one supplier tab and three list categories without an implied retail list price', () => {
+  const previewProducts = [
+    ['Energizer', 'Energizer 612 battery'], ['Marine & Leisure', 'Discover AGM battery'], ['CTEK', 'CTEK MXS 5.0 charger'],
+  ].map(([category, name], index) => ({
+    ...product(index + 20, 'enertec', name, null), category,
+    details: { supplierStockStatus: 'unknown', supplierStockLabel: 'Enertec' },
+  }));
+  const page = storefront('', [...products, ...previewProducts]);
+  assert.deepEqual(page.brands(), ['Home', 'All', 'Victron', 'Renogy', 'Hubble', 'Enertec']);
+  page.select('Enertec');
+  assert.deepEqual(Array.from(page.sidebar().categories, ({ label }) => label), ['All categories', 'CTEK', 'Energizer', 'Marine & Leisure']);
+  page.sidebar().onCategory('CTEK');
+  assert.deepEqual(page.names(), ['CTEK MXS 5.0 charger']);
+  assert(!page.render().some(node => node.type === 'span' && text(node) === 'List Price Excl. VAT'));
+  const add = page.render().find(node => node.type === 'button' && node.props.title === 'Confirm availability with sales');
+  assert.equal(add.props.disabled, true);
+  assert(page.render().some(node => node.type === 'div' && text(node) === 'Enertec: Stock unknown'));
+});
+
+test('products without a dealer price cannot be added even if stock is known', () => {
+  const page = storefront('', [{ ...product(40, 'enertec', 'CTEK price on request'), your_price_ex_vat: null }]);
+  const add = page.render().find(node => node.type === 'button' && node.props.title === 'Price on request');
+  assert.equal(add.props.disabled, true);
 });

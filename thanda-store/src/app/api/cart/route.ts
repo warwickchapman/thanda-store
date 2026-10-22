@@ -10,7 +10,7 @@ async function cartResponse() {
   const rows = await pool.query('SELECT product_id, quantity FROM portal_cart_lines WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
   // Keep an existing cart's original SKU visible even when discovery now
   // prefers its replacement. Quote confirmation resolves the current family.
-  const products = await currentCatalogue(user.discounts, { includeSuperseded: true });
+  const products = await currentCatalogue(user.discounts, { includeSuperseded: true, userEmail: user.email });
   const byId = new Map(products.map((product) => [product.id, product]));
   const lines = rows.rows.flatMap((row) => {
     const product = byId.get(Number(row.product_id));
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     const id = Number(productId);
     const requested = validQuantity(quantity);
     if (!Number.isInteger(id) || !requested) return NextResponse.json({ error: 'A valid product and quantity are required' }, { status: 400 });
-    const product = await resolveFulfilmentProduct(id);
+    const product = await resolveFulfilmentProduct(id, user.email);
     if (!product) return NextResponse.json({ error: 'Product is no longer available' }, { status: 404 });
     if (!isSupplierProductAvailable(product)) {
       return NextResponse.json({ error: 'This product is currently not available to order' }, { status: 409 });

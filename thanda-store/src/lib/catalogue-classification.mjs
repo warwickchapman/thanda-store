@@ -1,6 +1,7 @@
 // Customer-facing classification only. Never rewrite supplier categories or SKUs.
 const connectionKinds = new Set(['cable', 'adapter', 'connector']);
 const typeLabels = { cable: 'Cable', adapter: 'Adapter', connector: 'Connector', panel: 'Solar panel', battery: 'Battery', inverter: 'Inverter / inverter-charger', charger: 'Solar charger', accessory: 'Other accessory', other: 'Other' };
+const enertecRanges = { energizer: 'Energizer', marine: 'Marine & Leisure', ctek: 'CTEK' };
 
 export function reviewedCatalogueOverride(product) {
   const override = product.details?.catalogueOverride;
@@ -15,9 +16,14 @@ export function classifyCatalogueProduct(product) {
   const broad = category.replace(/_/g, ' ').toLowerCase();
   const specific = subcategory.toLowerCase();
   const context = `${category} ${subcategory}`;
+  const enertecRange = product.supplier?.toLowerCase() === 'enertec'
+    && Object.hasOwn(enertecRanges, product.details?.enertecRange)
+    ? enertecRanges[product.details.enertecRange] : null;
   const result = (kind, source, typeLabel = typeLabels[kind], reviewReason = null) => ({
     kind,
-    category: connectionKinds.has(kind) ? 'Cables & connectors' : kind === 'panel' ? 'Solar panels' : kind === 'accessory' ? 'Other accessories' : category,
+    // Enertec's three supplied lists are the browsing categories. Item types
+    // remain separate facets, so a CTEK cable stays within the CTEK range.
+    category: enertecRange || (connectionKinds.has(kind) ? 'Cables & connectors' : kind === 'panel' ? 'Solar panels' : kind === 'accessory' ? 'Other accessories' : category),
     typeLabel, source, reviewReason,
   });
   const override = reviewedCatalogueOverride(product);
@@ -38,6 +44,15 @@ export function classifyCatalogueProduct(product) {
   ];
   for (const [pattern, label] of accessoryTypes) {
     if (pattern.test(name)) return result('accessory', 'product name', label);
+  }
+
+  // These lists group batteries and chargers by application rather than type.
+  // Recognize the sold equipment before incidental included leads or cables.
+  if (enertecRange) {
+    if (/\bcharger\b/i.test(name) && !/\b(?:for chargers?|bag|bumper|hanger|trolley)\b/i.test(name)) {
+      return result('charger', 'product name', /\bEV\b/i.test(name) ? 'EV charger' : 'Battery charger');
+    }
+    if (/\bbatter(?:y|ies)$/i.test(name)) return result('battery', 'product name');
   }
 
   // Explicit panel subcategories outrank incidental mentions of their leads.
@@ -68,6 +83,7 @@ export function classifyCatalogueProduct(product) {
   if (/\b(?:inverter|multi(?:plus)?|quattro)/i.test(specific || broad)) return result('inverter', `supplier ${subcategory ? 'subcategory' : 'category'}: ${subcategory || category}`);
   if (/solar.*(?:charger|controller)|charge controller|mppt/i.test(specific || broad)) return result('charger', `supplier ${subcategory ? 'subcategory' : 'category'}: ${subcategory || category}`);
   if (/^(?:lithium |smart |deep cycle |agm |gel )?batter(?:y|ies)$/.test(broad)) return result('battery', `supplier category: ${category}`);
+  if (enertecRange && /\baccessories\b/i.test(subcategory)) return result('accessory', `supplier subcategory: ${subcategory}`);
   if (/^accessor/i.test(broad) || /^accessor/i.test(specific) || cablePart) return result('accessory', `supplier grouping: ${subcategory || category}`);
   const uncertain = /miscellaneous|uncategorized|solar panel|^cables$/i.test(broad) || /^cables$/i.test(specific);
   return result('other', `supplier category retained: ${category}`, 'Other', uncertain ? 'No reliable specific product type; category retained and specifications left unset.' : null);

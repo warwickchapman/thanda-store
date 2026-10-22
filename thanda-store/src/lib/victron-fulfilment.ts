@@ -1,5 +1,6 @@
 import pool from '@/lib/db';
 import { chooseFulfilmentProduct, familyMemberSkus, loadSkuSuccessions, normalizeSku, productHasStock } from '@/lib/sku-successions.mjs';
+import { isProductVisibleTo } from '@/lib/catalogue-access.mjs';
 
 type FulfilmentRow = {
   id: number;
@@ -22,14 +23,14 @@ export function isSupplierProductAvailable(product: Pick<FulfilmentProduct, 'sup
 }
 
 /** Resolve only explicit, supplier-scoped relationships using stored data. */
-export async function resolveFulfilmentProduct(productId: number): Promise<FulfilmentProduct | null> {
+export async function resolveFulfilmentProduct(productId: number, userEmail?: string): Promise<FulfilmentProduct | null> {
   const result = await pool.query<FulfilmentRow>(`
     SELECT id, sku, supplier, stock_on_hand, details
     FROM products
     WHERE id = $1 AND COALESCE((details->>'hidden')::boolean, false) = false
   `, [productId]);
   const requested = result.rows[0];
-  if (!requested) return null;
+  if (!requested || !isProductVisibleTo(requested, userEmail)) return null;
   let selected = requested;
   if (['victron', 'renogy'].includes(requested.supplier.toLowerCase())) {
     const successions = await loadSkuSuccessions(pool);
@@ -42,7 +43,7 @@ export async function resolveFulfilmentProduct(productId: number): Promise<Fulfi
         AND CASE WHEN LOWER(supplier) = 'victron' THEN REGEXP_REPLACE(UPPER(TRIM(sku)), 'R$', '') ELSE UPPER(TRIM(sku)) END = ANY($2::text[])
         AND COALESCE((details->>'hidden')::boolean, false) = false
     `, [requested.supplier, members]);
-    selected = chooseFulfilmentProduct(requested, family.rows, successions) || requested;
+    selected = chooseFulfilmentProduct(requested, family.rows.filter(row => isProductVisibleTo(row, userEmail)), successions) || requested;
   }
   return {
     id: Number(selected.id), sku: selected.sku, supplier: selected.supplier,

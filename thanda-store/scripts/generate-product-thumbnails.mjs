@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { createPool, ensureProductSchema } from './product-sync-lib.mjs';
+import { isCatalogueRestricted } from '../src/lib/catalogue-access.mjs';
 
 const THUMBNAIL_SIZE = Number(process.env.PRODUCT_THUMBNAIL_SIZE || 600);
 const IMAGE_BOX_SIZE = Number(process.env.PRODUCT_THUMBNAIL_IMAGE_BOX_SIZE || 520);
@@ -137,7 +138,7 @@ async function loadProducts(client, args) {
   const limitClause = args.limit ? `LIMIT ${args.limit}` : '';
   const result = await client.query(
     `
-      SELECT id, supplier, sku, name, image_url
+      SELECT id, supplier, sku, name, image_url, details
       FROM products
       WHERE ${where.join(' AND ')}
       ORDER BY supplier ASC, sku ASC
@@ -165,6 +166,12 @@ async function main() {
 
     for (const product of products) {
       stats.checked += 1;
+      // public/ is served without authentication. Keep preview assets remote
+      // or in the protected database-backed media routes instead.
+      if (isCatalogueRestricted(product)) {
+        stats.skipped += 1;
+        continue;
+      }
       const relativePath = thumbnailRelativePath(product);
       const outputPath = path.join(process.cwd(), 'public', relativePath.replace(/^\//, ''));
 

@@ -1,5 +1,6 @@
 import pool from '@/lib/db';
 import { currentUser } from '@/lib/auth/server';
+import { isProductVisibleTo } from '@/lib/catalogue-access.mjs';
 
 export const runtime = 'nodejs';
 
@@ -9,15 +10,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const id = Number((await params).id);
   if (!Number.isSafeInteger(id) || id < 1) return new Response(null, { status: 404 });
   try {
-    const result = await pool.query(`SELECT d.document,d.revision FROM store_product_datasheets d
+    const result = await pool.query(`SELECT d.document,d.revision,p.supplier,p.details FROM store_product_datasheets d
       JOIN products p ON p.id=d.product_id WHERE d.product_id=$1 AND p.details->>'storeManaged'='true'
       AND ($2::boolean OR COALESCE((p.details->>'hidden')::boolean,false)=false)`, [id, user.role === 'admin']);
     const row = result.rows[0];
     const requestedRevision = new URL(request.url).searchParams.get('v');
-    if (!row || (requestedRevision && requestedRevision !== row.revision)) return new Response(null, { status: 404 });
+    if (!row || !isProductVisibleTo(row, user.email) || (requestedRevision && requestedRevision !== row.revision)) return new Response(null, { status: 404 });
     const headers = {
       'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="product-${id}-datasheet.pdf"`,
-      'Cache-Control': 'private, no-cache', ETag: `"${row.revision}"`,
+      'Cache-Control': 'private, no-store', Vary: 'Cookie', ETag: `"${row.revision}"`,
       'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'",
     };
     if (request.headers.get('if-none-match') === headers.ETag) return new Response(null, { status: 304, headers });

@@ -49,6 +49,7 @@ function displayLabel(value: string) {
   return label
     .replace(/\bAnd\b/g, '&')
     .replace(/\bDc\b/gi, 'DC')
+    .replace(/\bCtek\b/g, 'CTEK')
     .replace(/\bSmartshunt\b/gi, 'SmartShunt')
     .replace(/\(ev\)/gi, '(EV)');
 }
@@ -607,17 +608,17 @@ export default function Home() {
                           </div>
                           
                           <div className="flex items-center justify-between">
-                            <div className="flex flex-col">
+                            {product.supplier !== 'enertec' ? <div className="flex flex-col">
                               <span className="text-[10px] font-bold text-zinc-400 uppercase">List Price Excl. VAT</span>
                               <div className="text-sm font-bold text-zinc-900">
                                 {priceLabel(product.recommended_retail_ex_vat)}
                               </div>
-                            </div>
+                            </div> : <span />}
                             <button
                               onClick={() => addToCart(product.id)}
-                              aria-label={productAvailability(product).includes('unknown') ? `Confirm availability of ${product.name} with sales` : isUnavailable(product) ? `${product.name} is not available` : `Add ${product.name} to cart`}
-                              disabled={isUnavailable(product) || productAvailability(product).includes('unknown')}
-                              title={productAvailability(product).includes('unknown') ? 'Confirm availability with sales' : isUnavailable(product) ? 'Not available to order' : 'Add to cart'}
+                              aria-label={product.your_price_ex_vat === null ? `Request a price for ${product.name} from sales` : productAvailability(product).includes('unknown') ? `Confirm availability of ${product.name} with sales` : isUnavailable(product) ? `${product.name} is not available` : `Add ${product.name} to cart`}
+                              disabled={product.your_price_ex_vat === null || isUnavailable(product) || productAvailability(product).includes('unknown')}
+                              title={product.your_price_ex_vat === null ? 'Price on request' : productAvailability(product).includes('unknown') ? 'Confirm availability with sales' : isUnavailable(product) ? 'Not available to order' : 'Add to cart'}
                               className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white transition-all hover:bg-amber-600 hover:scale-110 shadow-lg shadow-zinc-900/10 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none disabled:hover:scale-100 disabled:hover:bg-zinc-200"
                             >
                               <ShoppingCart className="h-5 w-5" />
