@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
+import { observeRenogyStock } from '../src/lib/renogy-stock.mjs';
 import { RenogyAuthError, RenogyRateLimitError, ensureSupplierAuthSchema, recordRenogyAuthFailure, resolveRenogyAuthFailure, recordRenogyRateLimit, renogyRetryDeadline } from '../src/lib/supplier-auth-alerts.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -344,11 +345,7 @@ async function buildProduct(row, wrapper, detail, observedAt) {
   const sku = row.SKU;
   const price = numberOrNull(detail.unitPrice) ?? numberOrNull(wrapper.data?.amount) ?? numberOrNull(detail.basic_price) ?? 0;
   const originalPrice = numberOrNull(detail.originalPrice);
-  const liveStock = numberOrNull(detail.inventory) ?? numberOrNull(wrapper.data?.inventory);
-  const stockOnHand = liveStock ?? numberOrNull(row.Stock);
-  // Export stock was observed when the export was downloaded. A local CSV's
-  // age is unknown; reading it again must not make its quantities look fresh.
-  const stockObservedAt = liveStock !== null ? observedAt : row.stockObservedAt || null;
+  const stock = observeRenogyStock(detail, row, observedAt);
   const imageUrl = await firstImageUrl(detail);
 
   return {
@@ -359,11 +356,12 @@ async function buildProduct(row, wrapper, detail, observedAt) {
     category: detail.item_view_type || wrapper.data?.item_view_type || 'uncategorized',
     price,
     image_url: imageUrl,
-    stock_on_hand: stockOnHand ?? 0,
+    stock_on_hand: stock.quantity ?? 0,
     details: {
       originalPrice,
-      supplierObservedAt: stockObservedAt,
-      supplierStockStatus: stockOnHand === null ? 'unknown' : 'known',
+      supplierObservedAt: stock.observedAt,
+      supplierStockStatus: stock.quantity === null ? 'unknown' : 'known',
+      supplierStockSource: stock.source,
       // Renogy's product-detail originalPrice is list price excluding VAT.
       // The partner portal renders the same amount with 15% VAT included.
       recommendedRetailExVat: originalPrice,

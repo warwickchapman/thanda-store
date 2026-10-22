@@ -119,6 +119,31 @@ PRODUCT_THUMBNAIL_QUALITY=80
 
 `DATABASE_URL` is preferred. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are also supported.
 `RENOGY_PRODUCT_SOURCE` defaults to `export`; set it to `csv` only when deliberately testing with a local warehouse CSV.
+Renogy supplier stock uses the product detail's **`availble`** field (the
+provider's spelling), matching the partner portal's displayed **Inventory** and
+quantity check. If that quantity is missing or invalid, use the export's
+**Available** column and the export-download observation time. A real zero wins
+over a positive fallback. Raw `inventory`, safety inventory, overseas totals and
+`safety_remaining` are different fields; none is a substitute for available
+stock. In particular, `safety_remaining` is used by Renogy's separate backorder
+path. Quantities keep `details.supplierStockSource` provenance, and missing
+quantities remain unknown. Reading a local CSV cannot create a fresh supplier
+observation. This was verified against the partner portal's product-detail
+rendering and live G2 response on 22 October 2026.
+
+Stock-field fix API budget: **0 additional calls per run or day**, and no page-load
+or customer-triggered calls. The existing export sync uses `4 + 2N` reads for
+identity, export creation/signing/download, SKU search and detail (`206` for the
+current 101 SKUs), plus unchanged image-URL signing requests. At 288 five-minute
+runs, that baseline is 59,328 reads/day plus image signing; the fix does not
+increase it. Renogy's numeric provider allowance has not been verified; retain
+the existing request timeouts, single authentication renewal, serialized jobs,
+and persistent `429`/`Retry-After` stop deadline. No new retry, backfill, schedule,
+endpoint or Xero reserve use is introduced. Release verification refreshes the
+catalogue through the existing scheduled job, rather than adding a new polling
+path. Regression checks: `node --test test/renogy-stock.test.mjs` and the guarded
+`test/renogy-stock-sync.integration.mjs` against a disposable local database.
+
 Renogy production authentication uses the cached bearer token in `RENOGY_TOKEN_CACHE_FILE`, protected with file mode `0600`. The five-minute Renogy sync acts as the keepalive. Do not configure or store a Renogy username or password on the VPS: portal login requires an email OTP and must remain an intentional operator action. If Renogy rejects the cached token, the sync stops with a clear authentication error until an operator completes the portal login and securely replaces the cached token.
 `VICTRON_EORDER_API_KEY` is required for Victron sync. The Victron API documentation recommends sending the key directly in the `Authorization` header; do not store it in source control.
 `VICTRON_THANDA_DISCOUNT_FACTOR` defaults to `0.525`, meaning the Victron E-Order account price is Thanda's price after a 47.5% distributor discount from retail.
