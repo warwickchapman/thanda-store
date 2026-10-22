@@ -154,7 +154,7 @@ test('Enertec uses one supplier tab and three list categories without an implied
   assert(!page.render().some(node => node.type === 'span' && text(node) === 'List Price Excl. VAT'));
   const add = page.render().find(node => node.type === 'button' && node.props.title === 'Confirm availability with sales');
   assert.equal(add.props.disabled, true);
-  assert(page.render().some(node => node.type === 'div' && text(node) === 'Enertec: Stock unknown'));
+  assert(page.render().some(node => node.type === 'div' && text(node) === 'Stock generally available, confirm on request'));
 });
 
 test('products without a dealer price cannot be added even if stock is known', () => {

@@ -38,6 +38,7 @@ interface SessionUser {
 
 type Cart = { lines: Array<{ quantity: number; product: { id: number; name: string; sku: string; your_price_ex_vat: number | null } }>; itemCount: number; subtotalExVat: number };
 const emptyCart: Cart = { lines: [], itemCount: 0, subtotalExVat: 0 };
+const ENERTEC_AVAILABILITY = 'Stock generally available, confirm on request';
 
 function displayLabel(value: string) {
   const label = value
@@ -98,7 +99,7 @@ function stockLines(product: Product) {
   const supplierLeadTime = supplier === 'renogy' ? '4-7 working days' : supplier === 'victron' ? '3-5 working days' : null;
   const supplierStock = numberDetail(product.stock_on_hand);
   if (supplierStock === null || product.details.supplierStockStatus === 'unknown') {
-    lines.push(`${supplierLabelText || 'Supplier'}: Stock unknown`);
+    lines.push(supplier === 'enertec' ? ENERTEC_AVAILABILITY : `${supplierLabelText || 'Supplier'}: Stock unknown`);
   } else if (supplierLabelText && supplierStock <= 0) {
     if (localStock === null || localStock <= 0) lines.push(`${supplierLabelText}: Out of stock / not available`);
   } else if (supplierLabelText && supplierLeadTime) {
@@ -112,7 +113,7 @@ function stockLines(product: Product) {
 function primaryStockBadge(product: Product) {
   const localStock = numberDetail(product.details.localStockOnHand);
   if (localStock !== null && localStock > 0) return `${localStock} in stock (KZN)`;
-  if (productAvailability(product).includes('unknown')) return 'Stock unknown';
+  if (productAvailability(product).includes('unknown')) return product.supplier.toLowerCase() === 'enertec' ? ENERTEC_AVAILABILITY : 'Stock unknown';
   if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Stock unknown';
   if (product.supplier === 'lora' || product.details.storeManaged === true) return `${localStock} in stock (KZN)`;
   if (productAvailability(product).includes('unavailable')) return 'Out of stock';
@@ -361,6 +362,7 @@ export default function Home() {
   const facets = catalogueFacets(categoryProducts, attributeFilters, availability);
   const stockOptions = availabilityOptions.map((option) => ({
     ...option,
+    label: selectedSupplier === 'enertec' && option.key === 'unknown' ? ENERTEC_AVAILABILITY : option.label,
     count: categoryProducts.filter((product) => matchesCatalogueFilters(product, attributeFilters, [option.key])).length,
   }));
   const chooseCategory = (category: string) => {
@@ -375,7 +377,7 @@ export default function Home() {
     if (supplier === 'home') setQuery('');
   };
   const activeFilterChips = [
-    ...availability.map((key) => ({ key: `stock-${key}`, label: availabilityOptions.find((option) => option.key === key)?.label || key,
+    ...availability.map((key) => ({ key: `stock-${key}`, label: stockOptions.find((option) => option.key === key)?.label || key,
       remove: () => setAvailability(availability.filter((value) => value !== key)) })),
     ...Object.entries(attributeFilters).flatMap(([key, values]) => values.map((value) => ({ key: `${key}-${value}`,
       label: `${filterDefinitions.find((definition) => definition.key === key)?.label || key}: ${value}`,
@@ -565,11 +567,11 @@ export default function Home() {
                         )}
                         
                         {/* Category Badge - Subtle Glassmorphism */}
-                        <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-2">
+                        <div className="absolute left-4 top-4 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-2">
                           <span className="rounded-full bg-white/60 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
                             {displayLabel(product.category)}
                           </span>
-                          <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5">
+                          <span className={`max-w-full rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold text-zinc-700 shadow-sm backdrop-blur-md ring-1 ring-zinc-900/5 ${product.supplier === 'enertec' ? 'leading-snug' : 'uppercase tracking-widest'}`}>
                             {primaryStockBadge(product)}
                           </span>
                           {product.details.is120vAc === true && (

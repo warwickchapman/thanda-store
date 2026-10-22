@@ -341,8 +341,9 @@ SKUs from the three October 2026 PDFs. The import keeps 12 discontinued
 Energizer products hidden and shows 143 active preview items: 35 Energizer,
 51 Marine & Leisure and 57 CTEK. Three TBA items and the unresolved SMARTPASS
 40-289/40-678 article show **price on request**. Neither missing prices nor
-missing stock is advertised as a usable zero. Stock remains unknown and the
-normal availability checks keep the cart controls disabled pending confirmation.
+missing stock is advertised as a usable zero. Enertec availability reads
+**Stock generally available, confirm on request**. Quantities remain unconfirmed,
+and normal availability checks keep cart controls disabled pending confirmation.
 
 These are provisional fixed dealer prices compared directly with online buying
 alternatives. No margin is reserved for the dealer's subsequent resale and

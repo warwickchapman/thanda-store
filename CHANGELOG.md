@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Enertec product cards, details and availability filters now say **Stock generally available, confirm on request**. Stock quantities still await confirmation; pricing, ordering checks and preview-account access are unchanged.
+
 - Added an account-restricted Enertec preview with **Energizer**, **Marine & Leisure** and **CTEK** categories, visible only to the two privately configured preview accounts. The restriction also covers search, direct product links, carts, favourites, quotes, CSV/API exports and media; another administrator or colleague does not inherit access. The reviewed import contains 143 active preview products, keeps 12 discontinued lines hidden and leaves four unresolved prices on request. Provisional dealer prices compare directly with online buying alternatives, receive no additional company discount and keep buying costs private. Stock stays unknown, exact reviewed assets are linked where available, and no supplier/Xero calls or new schedules are added.
 
 - Corrected Renogy supplier stock to use the same available quantity displayed by its partner portal. The 100Ah Core Mini was hidden because an unrelated raw inventory field returned zero even though the portal and export showed 28 available. Fresh export availability remains the fallback; genuine zero stays zero, missing stock remains unknown, and backorder capacity is kept separate. Stock imports now record which field supplied the quantity. This changes no supplier requests or sync schedule.
