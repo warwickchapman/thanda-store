@@ -96,7 +96,8 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const retail = recommendedRetailExVat(row);
   const fixedPrice = row.supplier.toLowerCase() === 'lora' || row.details?.storeManaged === true || row.details?.fixedDealerPrice === true;
   const discount = fixedPrice ? 0 : configuredDiscountPercent(row.supplier, discounts);
-  const ownThumbnailUrl = row.details?.storeManaged === true ? row.image_url : thumbnailUrl(row);
+  const ownThumbnailUrl = row.details?.storeManaged === true || (row.supplier === 'enertec' && row.image_url.startsWith('/api/store-product-images/'))
+    ? row.image_url : thumbnailUrl(row);
   const ownImageUrl = row.image_url.trim();
   const hasOwnImage = Boolean(ownThumbnailUrl || ownImageUrl);
   const useFallback = !hasOwnImage && imageFallback !== null;

@@ -108,6 +108,10 @@ test('preview selling prices are fixed, unpriced products stay unpriced, and pri
   assert.equal(unpriced.recommended_retail_ex_vat, null);
   assert.equal(unpriced.your_price_ex_vat, null);
   assert.equal(catalogue.presentProduct(ordinary, {}).your_price_ex_vat, 140);
+  const cached = catalogue.presentProduct({ ...preview, image_url: `/api/store-product-images/1?v=${'a'.repeat(64)}` }, {});
+  assert.equal(cached.thumbnail_url, cached.image_url);
+  assert.equal(cached.details.storeManaged, false);
+  assert.equal(cached.your_price_ex_vat, 100);
 });
 
 test('product detail returns 404 for other admins and respects the impersonated buyer email', async () => {
@@ -218,13 +222,37 @@ test('protected image and datasheet reads authorize before returning bytes or an
   for (const file of ['store-product-images', 'store-product-datasheets']) {
     for (const email of [undefined, 'other@example.test', 'preview.one@example.test']) {
       const route = evaluate(`app/api/${file}/[id]/route.ts`, {
-        '@/lib/db': { query: async () => ({ rows: [{ ...preview, revision: 'v1', image: Buffer.from('image'), document: Buffer.from('pdf') }] }) },
+        '@/lib/db': { query: async sql => {
+          assert.match(sql, /OR p\.supplier='enertec'/);
+          return { rows: [{ ...preview, revision: 'v1', image: Buffer.from('image'), document: Buffer.from('pdf') }] };
+        } },
         '@/lib/auth/server': { currentUser: async () => email ? { email, role: 'admin' } : null }, '@/lib/catalogue-access.mjs': access,
       });
       const response = await route.GET(new Request(`https://store.example.test/api/${file}/1`, { headers: { 'if-none-match': '"v1"' } }), { params: Promise.resolve({ id: '1' }) });
       assert.equal(response.status, email === 'preview.one@example.test' ? 304 : !email && file === 'store-product-datasheets' ? 401 : 404);
       if (email === 'preview.one@example.test') assert.match(response.headers.get('cache-control'), /private, no-store/);
+      const current = await route.GET(new Request(`https://store.example.test/api/${file}/1?v=v1`), { params: Promise.resolve({ id: '1' }) });
+      assert.equal(current.status, email === 'preview.one@example.test' ? 200 : !email && file === 'store-product-datasheets' ? 401 : 404);
+      if (email === 'preview.one@example.test') {
+        assert.equal(await current.text(), file === 'store-product-images' ? 'image' : 'pdf');
+        const stale = await route.GET(new Request(`https://store.example.test/api/${file}/1?v=old`), { params: Promise.resolve({ id: '1' }) });
+        assert.equal(stale.status, 404);
+      }
     }
+  }
+});
+
+test('cached manuals have a manual filename while existing datasheets retain their filename type', async () => {
+  for (const kind of [undefined, 'datasheet', 'manual']) {
+    const route = evaluate('app/api/store-product-datasheets/[id]/route.ts', {
+      '@/lib/db': { query: async () => ({ rows: [{ ...preview, details: { storeDatasheet: { kind } },
+        revision: 'v1', document: Buffer.from('pdf') }] }) },
+      '@/lib/auth/server': { currentUser: async () => ({ email: 'preview.one@example.test', role: 'admin' }) },
+      '@/lib/catalogue-access.mjs': access,
+    });
+    const response = await route.GET(new Request('https://store.example.test/api/store-product-datasheets/1'), { params: Promise.resolve({ id: '1' }) });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-disposition'), `inline; filename="product-1-${kind || 'datasheet'}.pdf"`);
   }
 });
 

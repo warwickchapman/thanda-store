@@ -5,9 +5,10 @@ export const MAX_PRODUCT_UPLOAD_BYTES = 8 * 1024 * 1024;
 export function datasheetResource(product) {
   const sheet = product.details?.storeDatasheet;
   const id = Number(product.id);
-  if (product.details?.storeManaged !== true || !Number.isSafeInteger(id) || id < 1
+  if ((product.details?.storeManaged !== true && product.supplier !== 'enertec') || !Number.isSafeInteger(id) || id < 1
     || !sheet || typeof sheet.filename !== 'string' || !/^[a-f0-9]{64}$/.test(sheet.revision)) return null;
-  return { kind: 'datasheet', title: sheet.filename, url: `/api/store-product-datasheets/${id}?v=${sheet.revision}` };
+  const kind = sheet.kind === 'manual' ? 'manual' : 'datasheet';
+  return { kind, title: sheet.filename || (kind === 'manual' ? 'Manual' : 'Datasheet'), url: `/api/store-product-datasheets/${id}?v=${sheet.revision}` };
 }
 
 export async function validateDatasheet(bytes, originalFilename) {

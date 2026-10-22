@@ -361,25 +361,49 @@ running build could expose it. A seed run is transactional, updates Enertec
 only, preserves existing stock observations and manual hiding, and never
 changes Xero. Nothing is seeded by starting or building the application.
 
-Six exact previously verified product photos and nine datasheets are linked.
-They use approved Enertec, CTEK and Forbatt hosts. Other products retain the
-normal placeholder until exact assets are reviewed. Restricted products are
-excluded from public thumbnail generation, including manual/batch runs.
+Reviewed photos and primary PDF resources are cached in PostgreSQL and served
+through the existing protected image/document routes. Manuals keep their manual
+label. Other verified resources may link to approved Enertec, CTEK and Forbatt
+hosts. Restricted products are excluded from public thumbnail generation,
+including manual/batch runs. Missing assets retain the normal placeholder.
 
-API budget: source import, normal catalogue reads and access checks make
-**zero supplier or Xero API calls**, cold or warm, and introduce no retries,
-polling, schedules, OAuth changes or backfill. The seed uses local JSON and
-PostgreSQL. The authorized browser can load the six already-public image URLs
-and users can explicitly open linked public documents; those ordinary media
-requests are separate from supplier APIs. No per-SKU asset scraper is installed.
-Keep source evidence, buying-price comparisons and account configuration outside
-the public repository.
+The manual `scripts/mine-enertec-products.py` collection joins the displayed full
+stock code to the private source SKUs. It saves its HTML, media, source hashes,
+errors and progress in a private output directory; it never writes the catalogue.
+Review identities, PDF contents and conflicting specifications before preparing
+a version 1 enrichment manifest. Only verified fields and resources belong in
+that file. Keep source evidence, buying prices, review exceptions and account
+configuration outside the public repository.
+
+Run `ENERTEC_ENRICHMENT_FILE=/private/bundle/approved.json npm run
+import:enertec-enrichment` in the application for validation. Add `-- --write`
+for a transactional import into existing Enertec records after the protected
+media code is deployed. The importer reads local files only, normalizes photos,
+validates PDF contents and checks source hashes. It preserves prices, costs,
+stock, visibility and product identity. Later price imports retain enrichment.
+
+API budget: normal catalogue reads, media reads, source imports and enrichment
+imports make **zero supplier or Xero API calls**, cold or warm. The manually
+started website collection is capped at **900 HTTP requests cumulatively across
+resumes**, including redirects, robots checks and retries. The initial index has
+about 440 pages; documents and primary photos are fetched only for exact source
+SKU matches and reused by URL/content hash. One worker starts at most one request
+per second per host, with a 20-second timeout and one retry for transient errors.
+It honors robots restrictions, stops on 429 with persisted Retry-After, and does
+not retry access-denied responses. HTML, PDF and image downloads are capped at
+5 MB, 15 MB and 10 MB; imported files must also satisfy the existing 8 MB limit.
+There are **zero scheduled requests per day**, no customer-triggered collection,
+and no added polling or OAuth changes. Users may explicitly open additional
+verified public document links. No provider allowance probe is made.
 
 Validation: `node --test test/catalogue-access.test.mjs
 test/enertec-catalogue.test.mjs` exercises real server routes with synthetic
 authentication/database boundaries, identity-specific exports and guessed-ID
 denials, plus synthetic source validation, fixed pricing, unknown stock and atomic
-seed failure handling. No production database is needed for those checks.
+seed failure handling. `test/enertec-enrichment.test.mjs` checks content-only
+updates, protected cached media, PDF validation and rollback. Run
+`python3 -B test/enertec-miner.test.py` for bounded collection and resume checks.
+No production database is needed for those checks.
 
 ## Product image thumbnails
 

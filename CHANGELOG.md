@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added reviewed Enertec website descriptions, specifications, product photos and PDF resources to the private preview. Photos and primary documents are saved locally in PostgreSQL and remain restricted to the preview accounts. Exact stock-code matches and a separate reviewed import file control what is published; conflicting specifications and documents are held for supplier clarification. Later pricelist imports retain the reviewed content. The collection is manual and resumable, with no new scheduled work or supplier/Xero calls during store browsing.
+
 - Enertec product cards, details and availability filters now say **Stock generally available, confirm on request**. Stock quantities still await confirmation; pricing, ordering checks and preview-account access are unchanged.
 
 - Added an account-restricted Enertec preview with **Energizer**, **Marine & Leisure** and **CTEK** categories, visible only to the two privately configured preview accounts. The restriction also covers search, direct product links, carts, favourites, quotes, CSV/API exports and media; another administrator or colleague does not inherit access. The reviewed import contains 143 active preview products, keeps 12 discontinued lines hidden and leaves four unresolved prices on request. Provisional dealer prices compare directly with online buying alternatives, receive no additional company discount and keep buying costs private. Stock stays unknown, exact reviewed assets are linked where available, and no supplier/Xero calls or new schedules are added.

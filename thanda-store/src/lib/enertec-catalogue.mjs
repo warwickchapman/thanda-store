@@ -73,6 +73,18 @@ export async function saveEnertecProducts(client, products) {
   try {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('enertec-catalogue-seed'))");
     for (const product of products) {
+      const found = await client.query("SELECT image_url,details FROM products WHERE supplier='enertec' AND sku=$1", [product.sku]);
+      const existing = found?.rows?.[0];
+      const details = { ...product.details };
+      let imageUrl = product.image_url;
+      // Price-list imports keep reviewed website content and protected media.
+      if (existing?.details?.enertecEnrichment) {
+        for (const key of ['description', 'technicalData', 'publicResources', 'catalogueClassification',
+          'catalogueMeasurements', 'catalogueAttributes', 'catalogueAttributeSources']) {
+          if (Object.hasOwn(existing.details, key)) details[key] = existing.details[key];
+        }
+        if (existing.image_url?.startsWith('/api/store-product-images/')) imageUrl = existing.image_url;
+      }
       await client.query(`INSERT INTO products
         (supplier, supplier_item_id, sku, name, category, price, image_url, stock_on_hand, details, last_updated)
         VALUES ('enertec',$1,$2,$3,$4,$5,$6,0,$7::jsonb,NOW())
@@ -83,7 +95,7 @@ export async function saveEnertecProducts(client, products) {
             - 'supplierStockManaged' - 'xeroStockStatus' - 'hidden')
             || CASE WHEN EXCLUDED.details->>'discontinued'='true' THEN '{"hidden":true}'::jsonb ELSE '{}'::jsonb END,
           last_updated=NOW()`,
-      [product.supplier_item_id, product.sku, product.name, product.category, product.price, product.image_url, JSON.stringify(product.details)]);
+      [product.supplier_item_id, product.sku, product.name, product.category, product.price, imageUrl, JSON.stringify(details)]);
     }
     await client.query('COMMIT');
   } catch (error) {
