@@ -158,7 +158,7 @@ export default function Home() {
   const [favouritesError, setFavouritesError] = useState('');
   const [loadAttempt, setLoadAttempt] = useState(0);
   const { query, setQuery } = useStoreSearch();
-  const [activeSupplier, setActiveSupplier] = useState('home');
+  const [activeSupplier, setActiveSupplier] = useState('all');
   const [activeCategory, setActiveCategory] = useState('');
   const [attributeFilters, setAttributeFilters] = useState<SelectedFilters>({});
   const [availability, setAvailability] = useState<string[]>([]);
@@ -340,13 +340,8 @@ export default function Home() {
     supplier,
     count: supplierProducts[supplier]?.length || 0,
   }));
-  const visibleSuppliers = supplierTabs.filter((tab) => tab.count > 0);
-  const selectedSupplier = query.trim()
-    ? (activeSupplier !== 'home' && supplierProducts[activeSupplier] ? activeSupplier : visibleSuppliers[0]?.supplier || '')
-    : (activeSupplier === 'home' || (activeSupplier && supplierProducts[activeSupplier])
-    ? activeSupplier
-    : visibleSuppliers[0]?.supplier || '');
-  const productsInSupplier = selectedSupplier && selectedSupplier !== 'home' ? supplierProducts[selectedSupplier] || [] : [];
+  const selectedSupplier = activeSupplier === 'home' && query.trim() ? 'all' : activeSupplier;
+  const productsInSupplier = selectedSupplier === 'all' ? filteredProducts : supplierProducts[selectedSupplier] || [];
   const groupedProducts = productsInSupplier.reduce<Record<string, Product[]>>((groups, product) => {
     const category = product.category || 'uncategorized';
     groups[category] = groups[category] || [];
@@ -370,6 +365,13 @@ export default function Home() {
   const chooseCategory = (category: string) => {
     setActiveCategory(category);
     setAttributeFilters({});
+  };
+  const chooseSupplier = (supplier: string) => {
+    setActiveSupplier(supplier);
+    setActiveCategory('');
+    setAttributeFilters({});
+    setAvailability([]);
+    if (supplier === 'home') setQuery('');
   };
   const activeFilterChips = [
     ...availability.map((key) => ({ key: `stock-${key}`, label: availabilityOptions.find((option) => option.key === key)?.label || key,
@@ -445,29 +447,29 @@ export default function Home() {
             <p>{catalogueError}</p>
             <button type="button" onClick={retryCatalogue} className="mt-3 min-h-11 rounded-lg border border-amber-300 bg-white px-4 font-semibold">Retry loading products</button>
           </div>
-        ) : visibleSuppliers.length === 0 ? (
+        ) : visibleProducts.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
-            {products.length ? 'No products match your search.' : 'The catalogue is currently empty.'}
+            The catalogue is currently empty.
           </div>
         ) : (
           <div className="space-y-6">
             <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-              <div className="flex min-w-max gap-2 border-b border-zinc-200">
-                <button type="button" onClick={() => { setActiveSupplier('home'); setActiveCategory(''); setAttributeFilters({}); setAvailability([]); }} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'home' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
+              <nav aria-label="Product brands" className="flex min-w-max gap-2 border-b border-zinc-200">
+                <button type="button" aria-pressed={selectedSupplier === 'home'} onClick={() => chooseSupplier('home')} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'home' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
                   <span>Home</span>
                 </button>
-                {visibleSuppliers.map(({ supplier, count }) => {
+                <button type="button" aria-pressed={selectedSupplier === 'all'} onClick={() => chooseSupplier('all')} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${selectedSupplier === 'all' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-900'}`}>
+                  <span>All</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedSupplier === 'all' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'}`}>{filteredProducts.length}</span>
+                </button>
+                {supplierTabs.map(({ supplier, count }) => {
                   const isActive = supplier === selectedSupplier;
                   return (
                     <button
                       key={supplier}
                       type="button"
-                      onClick={() => {
-                        setActiveSupplier(supplier);
-                        setActiveCategory('');
-                        setAttributeFilters({});
-                        setAvailability([]);
-                      }}
+                      aria-pressed={isActive}
+                      onClick={() => chooseSupplier(supplier)}
                       className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
                         isActive
                           ? 'border-zinc-950 text-zinc-950'
@@ -483,7 +485,7 @@ export default function Home() {
                     </button>
                   );
                 })}
-              </div>
+              </nav>
             </div>
 
             {selectedSupplier === 'home' ? (
@@ -514,7 +516,7 @@ export default function Home() {
             <section className="space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : supplierLabel(selectedSupplier)}</p>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{selectedSupplier === 'home' ? 'Home' : selectedSupplier === 'all' ? 'All brands' : supplierLabel(selectedSupplier)}</p>
                   <h2 className="text-xl font-bold tracking-tight text-zinc-900">{selectedSupplier === 'home' ? (homeTab === 'mine' ? 'My favourites' : 'Popular') : (selectedCategory ? displayLabel(selectedCategory) : 'All categories')}</h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
