@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Standardised CTEK preview selling prices to the requested uniform markup on the supplier buying prices, replacing the previous model-specific exceptions. Products awaiting a confirmed price remain on request; other Enertec ranges retain their existing pricing. This is a catalogue-data update with no new supplier or Xero calls.
+
 - Added reviewed Enertec website descriptions, specifications, product photos and PDF resources to the private preview. Photos and primary documents are saved locally in PostgreSQL and remain restricted to the preview accounts. Exact stock-code matches and a separate reviewed import file control what is published; conflicting specifications and documents are held for supplier clarification. Later pricelist imports retain the reviewed content. The collection is manual and resumable, with no new scheduled work or supplier/Xero calls during store browsing.
 
 - Enertec product cards, details and availability filters now say **Stock generally available, confirm on request**. Stock quantities still await confirmation; pricing, ordering checks and preview-account access are unchanged.

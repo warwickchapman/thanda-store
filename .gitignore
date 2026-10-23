@@ -20,4 +20,4 @@ runtime/
 .env*.local
 /thanda-store/data/enertec-products.json
 /docs/enertec-catalogue-preparation.md
-/output/enertec-2026-10-22/
+/output/enertec-*/
