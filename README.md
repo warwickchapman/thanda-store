@@ -10,15 +10,15 @@ For a developer-focused Xero implementation handoff, see [Xero Integration Hando
 
 - `thanda-store/` - Next.js application for the dealer portal.
 - `thanda-store/scripts/sync-renogy-products.mjs` - warehouse-driven Renogy sync job.
-- `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order sync job filtered to the South Africa ZAR price-list SKUs.
+- `thanda-store/scripts/sync-victron-products.mjs` - Victron E-Order catalogue, supplier stock, price and bounded missing-media sync.
 - `thanda-store/scripts/sync-xero-stock.mjs` - Xero local/KZN stock sync for Victron and selected Thanda-owned products.
 - `thanda-store/scripts/sync-xero-contact-access.mjs` - Reconciles enabled Xero primary/additional people and archives portal access removed in Xero.
 - `thanda-store/scripts/sync-xero-sales-history.mjs` - Caches net Xero customer sales by SKU: eligible sales invoices less eligible customer credit notes.
 - `thanda-store/scripts/process-xero-webhook-events.mjs` - Processes verified Xero Invoice, Credit Note, and Contact webhook events from the durable local queue.
 - `thanda-store/scripts/generate-product-thumbnails.mjs` - batch thumbnail generator for supplier product images.
-- `thanda-store/scripts/extract-victron-allowlist.mjs` - helper to regenerate the Victron South Africa SKU allow-list from a quarterly PDF price list.
+- `thanda-store/scripts/extract-victron-allowlist.mjs` - standalone quarterly PDF SKU extractor for verification only; its output never selects operational products.
 - `thanda-store/scripts/seed-product-overrides.mjs` - manual product metadata and placeholder seed script for hidden categories, voltage notes, and non-API product lines.
-- `thanda-store/data/victron-zar-2026-q3-skus.json` - generated Victron South Africa allow-list from the Q3 2026 ZAR price list.
+- `thanda-store/data/victron-zar-2026-q3-skus.json` - retained Q3 2026 PDF reference data for verification, not an operational allow-list.
 - `db/products.sql` - PostgreSQL table setup for product data.
 - `sync_db.js` - legacy CSV import helper.
 - `sync_renogy_inventory.py` - experimental Renogy enrichment script.
@@ -74,10 +74,10 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | Command | Purpose | When to run it |
 | --- | --- | --- |
 | `npm run sync:renogy` | Refresh Renogy catalogue, supplier stock, price and image metadata. | The VPS runs it every five minutes. |
-| `npm run sync:victron` | Refresh allowed Victron products, supplier stock and prices. | Full paginated read every four hours; persistent schedule and cooldown gates also apply to CLI runs. |
+| `npm run sync:victron` | Refresh existing Victron products, discover eligible tracked Thanda items and repair up to five missing media records. | Full paginated E-Order read every four hours; persistent schedule and cooldown gates also apply to CLI runs. |
 | `npm run sync:victron-orders` | Refresh E-Order shipment invoices and the transient backorder snapshot. | Independent hourly timer; Admin manual attempts have a five-minute interval. |
 | `npm run sync:victron:scheduled` | Legacy sequential wrapper. | Not used by production timers; use the independent services. |
-| `npm run sync:victron:extended` | Refresh Victron product images and documents from the slower extended endpoint. | After a new allow-list or when product media needs refreshing. Do not run every five minutes. |
+| `npm run sync:victron:extended` | Process up to five due Victron image/document records through the extended endpoint. | Intentional bounded maintenance only; `-- --media-sku <SKU>` prioritises one code without bypassing cooldowns, due dates or request caps. |
 | `npm run sync:all` | Run the Renogy and lightweight Victron syncs in sequence. | Manual recovery only. Production uses separate timers to protect Victron's API allowance. |
 | `npm run sync:xero-stock` | Refresh local/KZN stock from Xero Items. | Manual stock correction check only; the VPS runs it every 30 minutes. |
 | `npm run sync:xero-accepted-quotes` | Replace the cached snapshot of current accepted Xero quote reservations. | Manual recovery only; production runs it after the 30-minute stock sync. |
@@ -90,7 +90,7 @@ Run commands from `thanda-store/`. Scheduled commands should not normally be run
 | `npm run seed:product-overrides` | Apply display metadata and create the LoRa/Hubble placeholder products. | After a database rebuild or when intentionally reapplying product display rules. |
 | `npm run seed:enertec -- --dry-run` | Validate the three restricted Enertec ranges and show counts without a database connection. | Before reviewing or applying the Enertec preview. |
 | `npm run seed:enertec -- --write` | Import/update the restricted Enertec preview from the reviewed October source file. | Only after the catalogue access protections are deployed. Never scheduled automatically. |
-| `npm run extract:victron-allowlist -- <pdf> <output>` | Extract the SKU allow-list from a quarterly Victron ZAR PDF. | Once per new South Africa Victron price list. |
+| `npm run extract:victron-allowlist -- <pdf> <output>` | Extract reference SKUs from a quarterly Victron ZAR PDF. | Optional quarterly verification only. The legacy command name does not make the output an operational allow-list. |
 | `npm run start` | Start the production Next.js server. | PM2 owns this in production; use `npm run dev` locally instead. |
 | `npm run lint` | Run ESLint. | Before committing frontend or API changes. |
 | `npm run build` | Produce a production build. | Before deployment; the VPS build is the authoritative check. |
@@ -203,7 +203,7 @@ The Renogy sync stores Renogy's unit price as Thanda's distributor cost. That va
 
 - `recommended_retail_ex_vat` is the internal field name for the supplier list price normalized to excluding VAT. The storefront labels it **List Price Excl. VAT**.
   - Renogy product-detail `originalPrice` is the list price excluding VAT. The partner portal displays that value including VAT. The sync stores this explicitly as `recommendedRetailExVat` with `recommendedRetailPriceVatMode: ex_vat`; `unitPrice` remains Thanda's distributor cost and is never shown to buyers.
-  - Victron South Africa list price is derived from the E-Order account price: `eorder_price / 0.525`. The PDF price list is used as the South Africa SKU allow-list, not as the pricing source. The raw Victron API retail field is kept in product details for comparison only.
+  - Victron South Africa list price is derived from the E-Order account price: `eorder_price / 0.525`. Quarterly PDFs are verification references only; they never control pricing, product selection or synchronization. The raw Victron API retail field is kept in product details for comparison only.
 - `your_price_ex_vat` = the list price less the configured B2B discount.
 - B2B discount is capped server-side at 40%, even if environment configuration or user data asks for more.
 
@@ -515,7 +515,7 @@ Use `--force` only after deliberately changing a source image or thumbnail setti
 
 Home is the first catalogue tab. **My favourites** ranks current visible catalogue SKUs from the linked Xero contact's authorised/paid sales invoices in the last 12 months. Repeat order count dominates, with a small 90/180-day recency boost. **Popular** is a simple global ranking by total units sold, so bulk sales are allowed to influence it.
 
-Victron description markers in the exact form `If 0, order <SKU>` create a local SKU-succession relationship. The old SKU remains its own card while it has stock. The named successor is a deliberate exception to the quarterly PDF allow-list and is synchronised as a current catalogue product. Invoice history for all family members is combined into one Home ranking, which selects the newest orderable SKU.
+Victron description markers in the exact form `If 0, order <SKU>` create a local SKU-succession relationship from the complete E-Order catalogue. The old SKU remains its own card while it has stock. Successor discovery follows the same current E-Order, saved Thanda inventory and eligibility rules as other new products; no quarterly PDF controls the relationship or import. Invoice history for all family members is combined into one Home ranking, which selects the newest orderable SKU.
 
 Renogy replacements use the same stock-aware fulfilment and Home-history rules,
 with explicit administrator-confirmed links in `renogy_sku_successions`. In
@@ -918,12 +918,15 @@ npm run sync:victron
 
 The Victron sync:
 
-1. Reads `data/victron-zar-2026-q3-skus.json`.
-2. Fetches `/api/v1/products/?format=json` from the Victron E-Order API.
-3. Filters the API result to only SKUs present in the South Africa ZAR price list.
+1. Fetches and validates the complete paginated `/api/v1/products/?format=json` catalogue from E-Order. No quarterly PDF, extracted SKU file or `VICTRON_ALLOWLIST_FILE` setting selects products.
+2. Refreshes every existing Store Victron row that E-Order returns, including hidden, regional-review and previously imported items. Eligibility affects discovery of new Store products, not maintenance of existing records. Missing supplier records retain their previous evidence rather than becoming a fabricated fresh zero.
+3. Discovers new Store products by matching current E-Order articles to the complete, successful saved **Thanda** tracked-inventory snapshot, observed within the last 120 minutes. This reads `thanda_inventory_evidence` locally; it does not request Hub or Xero data. South African panel exclusions, regional eligibility and recorded approvals, valid pricing, phase-out and retail-packaging duplicate checks still apply. A cold, stale, failed or incomplete inventory cache defers new discovery with a reported reason while existing Store products continue to refresh.
 4. Uses `all_stock_by_warehouse.af_sa_inzuzo` when available for South Africa warehouse stock. A zero quantity is `Out of stock / not available`; E-Order product responses currently do not supply a reliable inbound-shipment ETA.
 5. Stores the Victron account price as distributor cost and calculates recommended retail excluding VAT as `price / VICTRON_THANDA_DISCOUNT_FACTOR`.
-6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`.
+6. Upserts PostgreSQL records keyed by `(supplier, sku)` with `supplier = 'victron'`, retaining valid saved media and protected manual photographs. It scans all E-Order rows for explicit succession markers into the existing `victron_sku_successions` table; historical family demand uses the same resolver as before.
+7. Processes at most five due missing-photo records per normal run. Persistent per-SKU due dates and backoff prevent one supplier record with no photo from blocking the rest. Products with local stock, then supplier stock, then newly added products receive priority. Media outcomes are recorded separately; an image failure does not mark a successful basic catalogue/stock refresh as failed.
+
+**Victron catalogue review** remains the place to approve new Xero definitions and regional eligibility. A confirmed new tracked Thanda item can enter Store discovery after the existing Xero stock job imports its complete saved Items snapshot. Browsing, catalogue review and cart uploads do not fetch missing photos or supplier data. A supplier-only global catalogue entry does not automatically become a Store listing.
 
 ### Victron shipment and backorder planning
 
@@ -938,12 +941,18 @@ honoured; a 429 without a usable header pauses for one hour. Set
 only if Victron confirms a shared account restriction. Redirects are refused
 rather than forwarding credentials to an unexpected host.
 
-Catalogue: six scheduled runs/day, up to 20 requests/run (safety ceiling 120/day,
-not a provider quota). Actual pagination is now measured, not inferred from
-product counts. Manual catalogue retry is limited to one attempt per 15 minutes,
-uses the same advisory lock/cooldown, and times out after 50 seconds. Extended
-catalogue maintenance is explicit and capped at 100 requests/run; do not schedule
-it routinely. Orders: normally 2 calls/run = 48/day, plus new invoice details and
+Catalogue: six scheduled runs/day. At the current 1,174-product catalogue and
+250 rows/page, the basic fetch uses five requests/run, or 30/day. Missing-media
+maintenance adds zero to five extended requests/run, or zero to 30/day: up to
+60 catalogue/media requests/day at this catalogue size. The shared hard cap is
+20 requests/run (120 scheduled requests/day at six runs, not a provider quota), including basic
+pages and media. Actual pagination is measured in the usage ledger. Starts are
+spaced by at least one second; each request has a 20-second timeout. Manual
+catalogue retry is limited to one attempt per 15 minutes, uses the same advisory
+lock/cooldown, and times out after 50 seconds. Explicit manual attempts are additional
+to the scheduled daily figures and obey the same per-run cap. Extended maintenance also processes
+at most five due media records; it does not walk the entire catalogue. Orders:
+normally 2 calls/run = 48/day, plus new invoice details and
 uncached tracking pages, capped at 80 requests/run including retries. Manual order
 attempts require five minutes between starts. A 5xx order request has one retry;
 429 never retries in-place. Successful EPX resolutions are reused until their
@@ -1010,12 +1019,29 @@ before counting a backorder, preventing the same unit from being counted twice.
 Packing-list PDFs and shipment serials are not used to confirm receipt. RMA
 references are excluded before any expected quantity is imported.
 
-Images and documents come from the heavier `/api/v1/products-extended/<SKU>/` endpoint. Run this intentionally, not every five minutes:
+Images and documents come from the heavier `/api/v1/products-extended/<SKU>/`
+endpoint. The normal four-hour sync repairs up to five due missing photographs.
+For intentional maintenance of up to five due records, including previously
+enriched products, use:
 
 ```bash
 cd thanda-store
 npm run sync:victron:extended
+npm run sync:victron:extended -- --media-sku ORI121221040
 ```
+
+The SKU option changes priority only; it never bypasses due dates, the five-record
+media cap, the shared request cap, schedule gates or supplier cooldown. Successful
+media checks retain a next-check date; failures and a confirmed absence of media
+have a persisted retry date. Existing valid images, documents and descriptions
+survive empty/malformed responses and request failures. Manually managed photos
+are protected. Missing media remains visible as a separate maintenance outcome,
+without converting a successful basic stock/price import into a failure.
+
+There is no new timer, unbounded backfill, in-run retry loop, Xero scope or Xero
+request. A `429` stops work and retains the supplier's `Retry-After` deadline in
+the existing controller. The account's published allowance remains unknown;
+returned limits and cooldowns take precedence over these application ceilings.
 
 For a manual full supplier recovery, use:
 
@@ -1024,14 +1050,17 @@ cd thanda-store
 npm run sync:all
 ```
 
-This runs Renogy and the lightweight Victron sync sequentially. It is not the production schedule. A separate daily timer can run `sync:victron:extended` if product images and documents need routine refreshes.
+This runs Renogy and the lightweight Victron sync sequentially. It is not the production schedule. Do not add a separate media timer; bounded missing-media repair is part of the existing Victron schedule.
 
-### Quarterly Victron PDF update
+### Quarterly Victron PDF verification
 
-Each quarter, replace the Victron South Africa allow-list from the new ZAR PDF price list. The PDF controls which Victron SKUs are listed in the store; live price and stock still come from the E-Order API.
+Use each official quarterly announcement and ZAR PDF to verify E-Order prices,
+new products, phase-outs and article-number changes. Quarterly files never
+control Store selection, stock, media refresh or Xero prices. E-Order remains
+the operational supplier authority and catalogue review owns Xero decisions.
 
 1. Save the new Victron South Africa ZAR price-list PDF somewhere local, for example `~/Downloads/Pricelist_Victron_SAR_2026-Q4_Web.pdf`.
-2. Regenerate the allow-list:
+2. Optionally extract a reference SKU list for comparison; the command retains its legacy name:
 
 ```bash
 cd thanda-store
@@ -1041,10 +1070,9 @@ PYTHON=/Users/warwick/.cache/codex-runtimes/codex-primary-runtime/dependencies/p
   data/victron-zar-2026-q4-skus.json
 ```
 
-3. Review the generated `skuCount` and spot-check a few rows against the PDF.
-4. Update `VICTRON_ALLOWLIST_FILE` in the VPS sync environment if the output filename changed, or overwrite the existing `data/victron-zar-2026-q3-skus.json` if you want the code path to stay fixed.
-5. Run `npm run sync:victron` to import the new active SKU set, then run `npm run sync:victron:extended` only if images/documents need refresh.
-6. Commit the new allow-list and README/changelog note with the quarter and SKU count.
+3. Compare reference SKUs and prices with the complete saved E-Order catalogue, then investigate discrepancies and announced replacements. An announcement alone does not create a succession or prove that stock is zero.
+4. Record the quarter, source, checks and discrepancies under **Quarterly sanity check** in Victron catalogue review. Resolve item decisions through its normal workflow.
+5. Retain reference files when useful for audit. Do not configure `VICTRON_ALLOWLIST_FILE` or run a supplier sync merely to apply a quarterly list: runtime selection does not read those files or that setting.
 
 ## Known limitations and next operational work
 
@@ -1066,4 +1094,4 @@ Below 640 px, the storefront header shows the brand, a labelled hamburger button
 
 ### Daily Victron catalogue and Xero cost review
 
-Admin → Victron catalogue review adds daily comparison for both companies, reviewed cost batches, new-product creation, a manual archive checklist and quarterly sanity-check records. E-Order remains the price authority. See [workflow, API budget and enablement](docs/victron-catalogue-review.md). The Store assortment allowlist remains separate from full-catalogue inventory discovery.
+Admin → Victron catalogue review adds daily comparison for both companies, reviewed cost batches, new-product creation, manual archive candidates and quarterly sanity-check records. E-Order remains the price authority. See [workflow, API budget and enablement](docs/victron-catalogue-review.md). Store discovery uses current E-Order evidence, fresh saved Thanda tracked inventory and eligibility decisions; quarterly lists are verification references only.

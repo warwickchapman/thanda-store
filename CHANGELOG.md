@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Removed quarterly Victron price lists from operational product selection. E-Order now refreshes every existing Store Victron product, including items imported outside the old Q3 list. New Store listings use current E-Order data, fresh complete saved Thanda tracked inventory and the existing eligibility checks; unavailable inventory evidence defers discovery without stopping existing product updates. Quarterly announcements and PDFs remain verification references only.
+
+- Added bounded automatic repair for missing Victron photos during the existing four-hour sync, including the Orion XS 70A import gap. Up to five due products are checked per run, prioritising stocked and newly added products, with persistent retry dates and protected manual photos. Empty or failed media responses preserve valid saved photos, descriptions and documents and are reported separately from successful stock/price updates. Manual extended maintenance uses the same bounds. There are no new timers, Hub/Xero requests or automatic Xero writes; the existing supplier pacing and cooldowns remain in force.
+
 - Standardised CTEK preview selling prices to the requested uniform markup on the supplier buying prices, replacing the previous model-specific exceptions. Products awaiting a confirmed price remain on request; other Enertec ranges retain their existing pricing. This is a catalogue-data update with no new supplier or Xero calls.
 
 - Added reviewed Enertec website descriptions, specifications, product photos and PDF resources to the private preview. Photos and primary documents are saved locally in PostgreSQL and remain restricted to the preview accounts. Exact stock-code matches and a separate reviewed import file control what is published; conflicting specifications and documents are held for supplier clarification. Later pricelist imports retain the reviewed content. The collection is manual and resumable, with no new scheduled work or supplier/Xero calls during store browsing.

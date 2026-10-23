@@ -1,9 +1,40 @@
 # Daily Victron catalogue review
 
 Admin → **Victron catalogue review** compares the complete saved E-Order catalogue
-with complete, tenant-isolated Xero Item snapshots. It is independent of the
-quarterly Store assortment allowlist: new inventory candidates are discovered
-without automatically publishing them to the storefront.
+with complete, tenant-isolated Xero Item snapshots. E-Order is the operational
+catalogue and price authority. Quarterly announcements, PDFs and extracted SKU
+files are verification references only; no quarterly list controls product
+selection, supplier updates or media maintenance. New Xero inventory candidates
+are reviewed here before any Xero write.
+
+## Store discovery and supplier media
+
+The existing four-hour supplier sync refreshes every existing Store Victron row
+that the complete E-Order response contains, including hidden and regional-review
+products. For new Store listings it matches current E-Order articles against the
+complete, successful saved Thanda tracked-inventory snapshot, observed within
+120 minutes. Regional eligibility and recorded approvals, panel exclusions,
+pricing, phase-out and retail-alias duplicate checks still apply. Cold, stale,
+failed or incomplete Items evidence defers new discovery with a reported reason;
+existing Store products continue to refresh. The check uses local
+`thanda_inventory_evidence`, with no extra Hub or Xero request. A newly approved
+tracked Thanda item becomes a discovery candidate after the existing stock import
+saves its complete Items snapshot. Sensible's inventory alone does not establish
+a Thanda Store listing.
+
+Missing photos receive bounded maintenance during the same normal sync: up to
+five due products per run, prioritising local stock, supplier stock and recent
+additions. Persistent per-SKU due dates and backoff keep a product with no supplier
+photo from starving the queue. Manual extended maintenance is also bounded to
+five due records; `--media-sku <SKU>` changes priority without overriding caps or
+cooldowns. Existing valid images, documents and descriptions survive an empty
+or failed response, and protected manual photographs are skipped. Media outcomes
+remain separate from basic catalogue/stock success. The complete E-Order scan
+continues to populate explicit replacements in `victron_sku_successions`, with
+no second map or change to historical family demand.
+
+See [supplier sync and media budget](../README.md#victron-sync) for commands,
+the cache freshness requirement and request ceilings.
 
 ## Data health and catalogue decisions
 
@@ -199,8 +230,8 @@ opening-balance or adjustment history. Setting `IsPurchased`/`IsSold` false is
 also different from archival and clears corresponding details. Actual archival
 therefore remains in Xero's interface; Store only records manual completion.
 
-The official announcement and PDFs are quarterly sanity-check evidence, never a
-replacement price authority. Record the quarter, document reference, checks and
+The official announcement and PDFs are quarterly sanity-check evidence, never
+operational selection or pricing inputs. Record the quarter, document reference, checks and
 discrepancies in the page. Q4 2026 announcement (1 October) highlights immediate
 Venus GX end of life, gradual Lithium Smart phase-out, article-number changes and
 November EV charger launches. These are review prompts, not automatic SKU mappings
@@ -247,6 +278,8 @@ marks requested permissions as granted before Xero actually returns them.
 | Ignore / undo / Keep in Xero | Saved Hub pages only; **0 Xero**, **0 supplier** | 0 additional |
 | Review candidate Add / Update | Existing single-item audited create/update command: 1 filtered Items check + 1 write | Only on the row action |
 | Full catalogue evidence save | 0 additional; uses existing validated catalogue fetch | 0 additional |
+| Store discovery from saved Thanda inventory | 0 supplier, Hub or Xero; local complete Items evidence only | 0 additional |
+| Scheduled missing-media repair | 0–5 extended E-Order requests within the shared 20-request run cap | 0–30 additional at six runs/day; no new timer |
 | Compare saved Items | Up to 50 local Hub pages per company, 1,000 items/page; **0 Xero** | 0 Xero |
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
 | Click Update for one cost change | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
@@ -254,6 +287,17 @@ marks requested permissions as granted before Xero actually returns them.
 | Confirm 1–50 new products | 1 `GET /Items` + 1 create-only `PUT /Items` batch | Only on approval |
 | Archive / quarterly record | 0 | 0 |
 | Operator reconciliation of one uncertain item | 1 filtered `GET /Items`; no write | Only on explicit investigation |
+
+At the current 1,174 E-Order products and 250 rows/page, the complete basic
+catalogue costs five supplier requests/run or 30/day. Including bounded media
+repair gives up to 60/day at that catalogue size; the hard ceiling remains
+20/run, or 120 scheduled requests/day at six runs. Explicit manual attempts are
+additional and use the same per-run cap and existing 15-minute pause. The actual
+account allowance is unverified. The existing
+controller spaces starts by at least one second, times out after 20 seconds and
+persists supplier `429 Retry-After` pauses. Empty or unsuccessful media checks
+get a future retry date rather than an immediate retry. No new timer, automatic
+backfill loop, Hub read, Xero request or OAuth scope is introduced.
 
 The official GET Items operation returns the collection without a pagination
 parameter; the batch preflight uses one GET and indexes the reviewed codes locally.

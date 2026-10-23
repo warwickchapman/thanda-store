@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import { saveCatalogueEvidence } from '../src/lib/victron-catalogue-review.mjs';
+import { saveCatalogueEvidence, ensureReviewSchema, readReviewDecisions } from '../src/lib/victron-catalogue-review.mjs';
+import { loadVictronSyncContext, selectVictronSyncProducts } from '../src/lib/victron-sync-scope.mjs';
+import { ensureVictronMediaSchema, loadVictronMediaState, selectVictronMediaCandidates, recordVictronMediaAttempt, victronMediaFromExtended } from '../src/lib/victron-media.mjs';
 import { recordCatalogueLifecycle } from '../src/lib/victron-catalogue-lifecycle.mjs';
 import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '../src/lib/victron-http.mjs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
+import { inventoryQuantity } from '../src/lib/inventory-scope.mjs';
+import { prices } from '../src/lib/victron-pricing.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -26,15 +30,16 @@ const PAGE_REQUEST_DELAY_MS = Number(process.env.VICTRON_PAGE_REQUEST_DELAY_MS |
 const THANDA_DISCOUNT_FACTOR = Number(process.env.VICTRON_THANDA_DISCOUNT_FACTOR || 0.525);
 const EXTENDED_REQUEST_DELAY_MS = Number(process.env.VICTRON_EXTENDED_REQUEST_DELAY_MS || 500);
 const FETCH_EXTENDED = process.env.VICTRON_SYNC_EXTENDED === '1';
-const ALLOWLIST_FILE = process.env.VICTRON_ALLOWLIST_FILE
-  || path.resolve(__dirname, '../data/victron-zar-2026-q3-skus.json');
+const MEDIA_BATCH_SIZE = Math.floor(Math.max(0, Math.min(5, Number(process.env.VICTRON_MEDIA_BATCH_SIZE ?? 5) || 0)));
+const MEDIA_SKU_INDEX = process.argv.indexOf('--media-sku');
+const PREFERRED_MEDIA_SKU = MEDIA_SKU_INDEX < 0 ? null : process.argv[MEDIA_SKU_INDEX + 1];
 const RATE_LIMIT_CACHE_FILE = process.env.VICTRON_RATE_LIMIT_CACHE_FILE
   || path.resolve(__dirname, '../../.victron-rate-limit.json');
 
 const pool = createPool();
 const http = createVictronHttp({ pool, apiKey: API_KEY || '', apiRoot: API_ROOT,
   component: FETCH_EXTENDED ? 'catalogue-extended' : 'catalogue',
-  trigger: process.argv.includes('--manual') ? 'manual' : 'scheduled', timeoutMs: REQUEST_TIMEOUT_MS, maxRequests: FETCH_EXTENDED ? 100 : 20 });
+  trigger: process.argv.includes('--manual') ? 'manual' : 'scheduled', timeoutMs: REQUEST_TIMEOUT_MS, maxRequests: 20 });
 let runClient;
 let runLocked = false;
 
@@ -44,11 +49,6 @@ function readRateLimitCache() {
   } catch {
     return null;
   }
-}
-
-function loadAllowedSkus() {
-  const data = JSON.parse(fs.readFileSync(ALLOWLIST_FILE, 'utf8'));
-  return new Set((data.skus || []).map((sku) => String(sku).trim().toUpperCase()).filter(Boolean));
 }
 
 async function fetchJson(url) {
@@ -112,9 +112,8 @@ function sleep(ms) {
 }
 
 function selectImageUrl(product) {
-  const productData = product.product_data || {};
-  const mainImage = productData.main_images?.[0]?.url;
-  return normalizeText(mainImage || productData.image || '');
+  const productData = product.product_data && typeof product.product_data === 'object' && !Array.isArray(product.product_data) ? product.product_data : {};
+  return victronMediaFromExtended({ sku: product.sku, product_data: productData }, product.sku).image_url || '';
 }
 
 function successorSkuFromDescription(description) {
@@ -124,10 +123,10 @@ function successorSkuFromDescription(description) {
   return match ? match[1].toUpperCase() : null;
 }
 
-function buildProduct(product, extendedProduct, observedAt) {
-  const richProduct = extendedProduct || product;
-  const productData = richProduct.product_data || {};
-  const accountPrice = numberOrNull(product.price) ?? 0;
+function buildProduct(product, existing, observedAt, inventoryItem, inventoryObservedAt) {
+  const productData = product.product_data || {};
+  const verifiedPrice = prices(product);
+  const accountPrice = verifiedPrice.error ? numberOrNull(existing?.price) ?? 0 : verifiedPrice.cost;
   const apiRecommendedRetailExVat = numberOrNull(product.enduser_price_zar?.price);
   const recommendedRetailExVat = THANDA_DISCOUNT_FACTOR > 0
     ? Math.round((accountPrice / THANDA_DISCOUNT_FACTOR) * 100) / 100
@@ -135,9 +134,9 @@ function buildProduct(product, extendedProduct, observedAt) {
   const category = normalizeText(product.category || product.subcategory || productData.category, 'uncategorized');
   const name = normalizeText(product.description || productData.name, product.sku);
   const successorSku = successorSkuFromDescription(name);
-  const imageUrl = selectImageUrl(richProduct);
+  const imageUrl = selectImageUrl(product);
   const is120vAc = /(^|[^0-9])120V([^0-9]|$)/i.test(name);
-  const hidden = category.toLowerCase() === 'solar home system';
+  const hidden = existing?.details?.hidden === true || existing?.details?.hidden === 'true';
   const stock = observeVictronSupplierStock(product, observedAt);
   const supplierStock = stock.quantity;
   const details = {
@@ -172,13 +171,28 @@ function buildProduct(product, extendedProduct, observedAt) {
     // reliable inbound shipment/ETA field in the product response. Never
     // promise the normal lead time when South African stock is zero.
     supplierAvailability: supplierStock === null ? 'Availability unknown' : supplierStock > 0 ? 'Availability: 3-5 working days' : 'Out of stock / not available',
+    supplierPriceStatus: verifiedPrice.error ? 'unknown' : 'known',
   };
+  if (verifiedPrice.error) {
+    for (const key of ['originalPrice', 'recommendedRetailExVat', 'recommendedRetailPriceVatMode', 'recommendedRetailSource', 'apiRecommendedRetailExVat',
+      'thandaDiscountFactor', 'thandaDiscountPercent', 'distributorPriceExVat', 'currency']) delete details[key];
+  }
 
-  if (extendedProduct) {
-    details.imageSource = imageUrl ? 'victron-products-extended' : null;
-    if (typeof productData.description === 'string' && productData.description.trim()) details.description = productData.description;
-    details.documents = productData.documents || [];
-    details.technicalData = productData.pms_technical_data || [];
+  const protectedImage = existing?.details?.storeManaged === true
+    || String(existing?.image_url || '').startsWith('/api/store-product-images/')
+    || /upload|editorial|manual|store-managed/i.test(String(existing?.details?.imageSource || ''));
+  if (!existing && inventoryItem?.IsTrackedAsInventory === true) {
+    details.localStockOnHand = inventoryQuantity(inventoryItem.QuantityOnHand);
+    details.xeroStockSyncedAt = new Date(inventoryObservedAt).toISOString();
+    details.xeroStockStatus = 'tracked';
+  }
+  // Custom Store content and prices belong to the editor, while supplier
+  // observations continue updating on the same schedule.
+  if (existing?.details?.storeManaged === true) {
+    return { ...existing, stock_on_hand: supplierStock ?? existing.stock_on_hand,
+      details: { supplierObservedAt: stock.observedAt, supplierStockStatus: stock.status,
+        allStockByWarehouse: product.all_stock_by_warehouse || null,
+        supplierAvailability: details.supplierAvailability, supplierStockLabel: details.supplierStockLabel } };
   }
 
   return {
@@ -188,7 +202,7 @@ function buildProduct(product, extendedProduct, observedAt) {
     name,
     category,
     price: accountPrice,
-    image_url: imageUrl,
+    image_url: protectedImage ? '' : imageUrl,
     stock_on_hand: supplierStock ?? 0,
     details,
   };
@@ -209,6 +223,47 @@ async function upsertSkuSuccession(client, product) {
       last_seen_at = NOW()
   `, [predecessorSku, successorSku, sourceDescription]);
   return true;
+}
+
+async function refreshMissingMedia(stats, catalogue) {
+  await ensureVictronMediaSchema(pool);
+  const present = new Set(catalogue.map(row => String(row.sku).toUpperCase()));
+  const stored = (await pool.query("SELECT id,supplier,sku,image_url,stock_on_hand,details FROM products WHERE supplier='victron'")).rows.filter(row => present.has(row.sku));
+  const states = await loadVictronMediaState(pool, stored.map(row => row.sku));
+  const candidates = selectVictronMediaCandidates(stored, states, {
+    limit: MEDIA_BATCH_SIZE, refreshExisting: FETCH_EXTENDED, preferredSku: PREFERRED_MEDIA_SKU,
+  });
+  stats.media = { selected: candidates.length, attempted: 0, updated: 0, missing: [], failed: [], deferred: 0 };
+  for (const candidate of candidates) {
+    if (http.calls >= 20) { stats.media.deferred++; continue; }
+    try {
+      stats.media.attempted++;
+      const patch = victronMediaFromExtended(await fetchExtendedProduct(candidate.sku), candidate.sku);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const current = (await client.query("SELECT id,supplier,sku,image_url,stock_on_hand,details FROM products WHERE supplier='victron' AND sku=$1 FOR UPDATE", [candidate.sku])).rows[0];
+        // Recheck after downloading: an editor may have supplied a photo while
+        // the request was in flight. Never replace that protected content.
+        if (current && selectVictronMediaCandidates([current], new Map(), { limit: 1, refreshExisting: FETCH_EXTENDED }).length) {
+          await client.query(`UPDATE products SET image_url=COALESCE(NULLIF($2,''),image_url),
+            details=details || $3::jsonb,last_updated=NOW() WHERE supplier='victron' AND sku=$1`,
+          [candidate.sku, patch.image_url || '', JSON.stringify(patch.details)]);
+          if (patch.image_url) stats.media.updated++;
+        }
+        await recordVictronMediaAttempt(client, candidate.sku, { outcome: patch.image_url ? 'success' : 'missing' });
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+      if (!patch.image_url) stats.media.missing.push(candidate.sku);
+    } catch (error) {
+      const retryAt = error.retryAt;
+      await recordVictronMediaAttempt(pool, candidate.sku, { outcome: retryAt ? 'rate-limited' : 'failed', retryAt });
+      stats.media.failed.push({ sku: candidate.sku, reason: retryAt ? 'Supplier cooldown' : 'Photo update failed; retained media preserved.' });
+      if (retryAt) break;
+    }
+    if (EXTENDED_REQUEST_DELAY_MS > 0) await sleep(EXTENDED_REQUEST_DELAY_MS);
+  }
 }
 
 async function main() {
@@ -235,95 +290,65 @@ async function main() {
   await pool.query("DELETE FROM victron_http_usage WHERE requested_at<NOW()-INTERVAL '30 days'");
   await startDataSync(pool, 'victron');
 
-  const allowedSkus = loadAllowedSkus();
   const products = await fetchPagedProducts('products');
   const observedAt = new Date().toISOString();
-  const priceListProducts = products.filter((product) => allowedSkus.has(String(product.sku || '').toUpperCase()));
-  // Successions are supplier catalogue data, not an assortment decision. Scan
-  // the complete E-Order response so a replacement relationship is retained
-  // even when the retired product is outside the storefront price-list scope.
   const explicitSuccessionProducts = products.filter((product) =>
     Boolean(successorSkuFromDescription(product.description || product.product_data?.name)),
   );
-  // The quarterly price list remains the normal catalogue authority. An
-  // explicit Victron "If 0, order <SKU>" marker is the narrow exception: the
-  // named successor must be available so a retired predecessor can transition
-  // cleanly without manually editing each quarter's allow-list.
-  const successorSkus = new Set(priceListProducts.map((product) => successorSkuFromDescription(product.description || product.product_data?.name)).filter(Boolean));
-  const allowedProducts = products.filter((product) => {
-    const sku = String(product.sku || '').toUpperCase();
-    return allowedSkus.has(sku) || successorSkus.has(sku);
-  });
-  const extendedBySku = new Map();
-  const extendedFailures = [];
-
-  if (FETCH_EXTENDED) {
-    for (const product of allowedProducts) {
-      const sku = String(product.sku || '').toUpperCase();
-      try {
-        extendedBySku.set(sku, await fetchExtendedProduct(sku));
-      } catch (error) {
-        extendedFailures.push({ sku, error: error.message });
-        if (String(error.message).includes('Victron HTTP 429')) break;
-      }
-      if (EXTENDED_REQUEST_DELAY_MS > 0) await sleep(EXTENDED_REQUEST_DELAY_MS);
-    }
-  }
-
   const client = await pool.connect();
   const stats = {
-    allowed: allowedSkus.size,
-    explicitSuccessors: successorSkus.size,
     explicitSuccessions: explicitSuccessionProducts.length,
     apiProducts: products.length,
-    matched: allowedProducts.length,
+    matched: 0,
+    added: [],
+    discoveryDeferred: null,
     synced: 0,
     skuSuccessions: 0,
     missingFromApi: [],
-    missingImagesAfterExtended: [],
-    failed: [],
-    extendedFailures,
+    unverifiedPrices: [],
     extended: FETCH_EXTENDED,
   };
 
   try {
     await ensureProductSchema(client);
-    const matchedSkus = new Set(allowedProducts.map((product) => String(product.sku || '').toUpperCase()));
-    stats.missingFromApi = [...allowedSkus].filter((sku) => !matchedSkus.has(sku)).sort();
-
-    for (const product of allowedProducts) {
-      const sku = String(product.sku || '').toUpperCase();
-      try {
-        const normalized = buildProduct(product, extendedBySku.get(sku), observedAt);
-        await upsertProduct(client, normalized);
-        stats.synced += 1;
-        if (FETCH_EXTENDED && !normalized.image_url) stats.missingImagesAfterExtended.push(sku);
-      } catch (error) {
-        stats.failed.push({ sku, error: error.message });
-      }
+    await ensureReviewSchema(client);
+    await client.query('BEGIN');
+    const context = await loadVictronSyncContext(client);
+    const selection = selectVictronSyncProducts(products, { ...context, decisions: await readReviewDecisions(client) });
+    const existing = new Map(context.existing.map(row => [row.sku, row]));
+    const inventoryItems = new Map((selection.inventoryReady ? context.inventory.items : []).map(row => [row.Code, row]));
+    stats.matched = selection.products.length;
+    stats.added = selection.added;
+    stats.discoveryDeferred = selection.discoveryDeferred;
+    stats.missingFromApi = selection.absentExisting;
+    for (const product of selection.products) {
+      const normalized = buildProduct(product, existing.get(product.sku), observedAt, inventoryItems.get(product.sku), context.inventory?.observed_at);
+      await upsertProduct(client, normalized);
+      if (normalized.details.supplierPriceStatus === 'unknown') stats.unverifiedPrices.push(product.sku);
+      stats.synced++;
     }
-    // Only explicit Victron "If 0, order <SKU>" annotations qualify. Do not
-    // infer replacements from similarly named article codes.
     for (const product of explicitSuccessionProducts) {
       if (await upsertSkuSuccession(client, product)) stats.skuSuccessions += 1;
     }
-    if (!stats.failed.length) {
-      await client.query('BEGIN');
-      try { await recordCatalogueLifecycle(client, products, observedAt); await saveCatalogueEvidence(client, products, observedAt); await client.query('COMMIT'); }
-      catch (error) { await client.query('ROLLBACK'); throw error; }
-    }
-  } finally {
+    await recordCatalogueLifecycle(client, products, observedAt);
+    await saveCatalogueEvidence(client, products, observedAt);
+    // An absent/discontinued article is not an upstream failure and does not
+    // mean stock zero. Its lifecycle and prior observations remain available.
+    await finishDataSync(client, 'victron', { observedAt, status: stats.unverifiedPrices.length ? 'partial' : 'success',
+      error: stats.unverifiedPrices.length ? 'Incomplete supplier prices; retained saved prices.' : null,
+      counts: { synced: stats.synced, missing: stats.missingFromApi.length, added: stats.added.length, unverifiedPrices: stats.unverifiedPrices.length } });
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally {
     client.release();
   }
 
-  await finishDataSync(pool, 'victron', {
-    status: stats.failed.length || stats.missingFromApi.length || extendedFailures.length ? 'partial' : 'success',
-    observedAt,
-    error: stats.failed.length || stats.missingFromApi.length || extendedFailures.length ? 'Incomplete catalogue update' : null,
-    counts: { synced: stats.synced, failed: stats.failed.length, missing: stats.missingFromApi.length, extendedFailed: extendedFailures.length },
-  });
+  // Media failures have their own durable retry state. They must not relabel
+  // a complete, successfully published stock catalogue as a failed import.
+  try { await refreshMissingMedia(stats, products); }
+  catch { stats.mediaError = 'Photo maintenance did not complete; the saved stock catalogue remains available.'; }
+  stats.requests = http.calls;
   console.log(JSON.stringify(stats, null, 2));
-  if (stats.failed.length > 0) process.exitCode = 1;
 }
 
 main().catch(async (error) => {
