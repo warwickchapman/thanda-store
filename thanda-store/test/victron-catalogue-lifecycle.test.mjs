@@ -10,8 +10,8 @@ test('succession and end-of-life require confirmed zero or complete-scan absence
   assert.match(retirementReason(old, { stock_quantity: 0 }, 'SPM040203603'), /Superseded/);
   const ending = { name: 'Cable *Available until stock 0*' };
   assert.match(retirementReason(ending, { stock_quantity: 0 }, null), /now zero/);
-  assert.match(retirementReason(ending, null, null), /absent/);
-  assert.equal(retirementReason({ name: 'ordinary' }, null, null), null);
+  assert.match(retirementReason(ending, null, null), /Removed.*review remaining stock/i);
+  assert.match(retirementReason({ name: 'ordinary' }, null, null), /Removed.*review remaining stock/i);
 });
 
 test('complete supplier observations retain directed succession evidence without manufacturing stock', async () => {
@@ -39,4 +39,26 @@ test('complete supplier observations retain directed succession evidence without
     assert.ok(!Object.hasOwn(write.details, 'xeroStockStatus'));
   }
   await assert.rejects(recordCatalogueLifecycle(db, [], observedAt), /Empty catalogue/);
+});
+
+test('product-name advice to CERBO does not become a false replacement in retained lifecycle evidence', async () => {
+  const writes = [];
+  const db = { query: async (sql, args) => {
+    if (sql.startsWith('SELECT sku,name,details')) return { rows: [
+      { sku: 'BPP900400100', name: 'Venus GX *If 0, order Cerbo GX MK2*', details: {} },
+      { sku: 'BPP900450100', name: 'GX product *If 0, order Cerbo GX MK2*', details: {} },
+    ] };
+    if (sql.startsWith('SELECT predecessor_sku')) return { rows: [
+      { predecessor_sku: 'BPP900400100', successor_sku: 'CERBO' },
+      { predecessor_sku: 'BPP900450100', successor_sku: 'CERBO' },
+    ] };
+    writes.push(JSON.parse(args[1]));
+    return { rows: [] };
+  } };
+  await recordCatalogueLifecycle(db, [{ sku: 'PMP482305012', description: 'Current product' }], '2026-10-23T10:00:00Z');
+  assert.equal(writes.length, 2);
+  for (const details of writes) {
+    assert.match(details.purchasingRetiredReason, /Removed.*review remaining stock/i);
+    assert.doesNotMatch(details.purchasingRetiredReason, /Superseded|CERBO/);
+  }
 });

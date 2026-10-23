@@ -3,9 +3,10 @@ import path from 'node:path';
 import pool from '@/lib/db';
 import { catalogueDerivedDetails } from '@/lib/catalogue-filters.mjs';
 import { localStockObservation, supplierStockObservation } from '@/lib/data-freshness.mjs';
-import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
+import { loadSkuSuccessions, skuFamilyResolver } from '@/lib/sku-successions.mjs';
 import { isSupersededForDiscovery, withSuccessionDetails } from '@/lib/catalogue-succession.mjs';
 import { isProductVisibleTo } from '@/lib/catalogue-access.mjs';
+import { catalogueStockFamilies, withCatalogueFamilyStock } from '@/lib/catalogue-stock-families.mjs';
 
 const VAT_RATE = 0.15;
 const MAX_B2B_DISCOUNT_PERCENT = 40;
@@ -71,7 +72,7 @@ function configuredDiscountPercent(supplier: string, userDiscounts: Record<strin
 function displayDetails(details: Record<string, unknown>, price: unknown, imageFallbackFromSku: string | null = null) {
   return {
     localStockOnHand: localStockObservation({ details }).quantity,
-    supplierStockStatus: details.supplierStockStatus === 'unknown' ? 'unknown' : null,
+    supplierStockStatus: details.cataloguePresent === false || details.supplierStockStatus === 'unknown' ? 'unknown' : null,
     supplierStockLabel: typeof details.supplierStockLabel === 'string' ? details.supplierStockLabel : null,
     supplierAvailability: typeof details.supplierAvailability === 'string' ? details.supplierAvailability : null,
     manualAvailability: typeof details.manualAvailability === 'string' ? details.manualAvailability : null,
@@ -106,7 +107,7 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   const classification = derived.catalogueClassification as { category: string };
   return {
     ...row,
-    stock_on_hand: supplierStockObservation(row).quantity,
+    stock_on_hand: row.details?.cataloguePresent === false ? null : supplierStockObservation(row).quantity,
     id: Number(row.id),
     category: classification.category,
     supplier_category: row.category,
@@ -122,15 +123,16 @@ export function presentProduct(row: CatalogueRow, discounts: Record<string, numb
   };
 }
 
-export async function currentCatalogue(discounts: Record<string, number>, { includeSuperseded = false, userEmail }: { includeSuperseded?: boolean; userEmail?: string } = {}) {
+export async function currentCatalogue(discounts: Record<string, number>, { includeSuperseded = false, includeHiddenFamilyStock = false, userEmail }: { includeSuperseded?: boolean; includeHiddenFamilyStock?: boolean; userEmail?: string } = {}) {
   const result = await pool.query(`
     SELECT id, name, supplier, category, price, sku, image_url, stock_on_hand, details
     FROM products
     ORDER BY category ASC, name DESC
   `);
   const successions = await loadSkuSuccessions(pool);
+  const accessible = result.rows.filter(row => isProductVisibleTo(row, userEmail));
   const identity = (supplier: string, sku: string) => `${supplier.toLowerCase()}:${sku.toUpperCase()}`;
-  const bySku = new Map(result.rows.map(row => [identity(row.supplier, row.sku), row]));
+  const bySku = new Map(accessible.map(row => [identity(row.supplier, row.sku), row]));
   const fallbacksBySuccessorSku = new Map<string, ImageFallback>();
   for (const succession of successions) {
     const source = bySku.get(identity(succession.supplier, succession.predecessor_sku));
@@ -144,7 +146,18 @@ export async function currentCatalogue(discounts: Record<string, number>, { incl
       thumbnailUrl: sourceThumbnailUrl,
     });
   }
-  const visible = result.rows.filter(row => row.details?.hidden !== true && row.details?.hidden !== 'true' && isProductVisibleTo(row, userEmail));
-  return visible.filter(row => includeSuperseded || !isSupersededForDiscovery(row, visible, successions))
-    .map(row => withSuccessionDetails(presentProduct(row, discounts, fallbacksBySuccessorSku.get(identity(row.supplier, row.sku)) || null), successions));
+  const visible = accessible.filter(row => row.details?.hidden !== true && row.details?.hidden !== 'true');
+  const familyFor = skuFamilyResolver(successions);
+  const visibleFamilies = new Set(visible.filter(row => row.supplier.toLowerCase() === 'victron').map(row => familyFor(row.supplier, row.sku)));
+  const confirmedFamilies = new Set(successions.filter(row => row.supplier === 'victron').map(row => familyFor('victron', row.predecessor_sku)));
+  // Only commerce's literal resolution requests can see a hidden member of an
+  // otherwise published family. A wholly hidden family remains inaccessible.
+  const literalRows = includeSuperseded && includeHiddenFamilyStock ? accessible.filter(row =>
+    row.details?.hidden !== true && row.details?.hidden !== 'true'
+    || row.supplier.toLowerCase() === 'victron' && visibleFamilies.has(familyFor(row.supplier, row.sku))
+      && confirmedFamilies.has(familyFor(row.supplier, row.sku))) : visible;
+  const listings = includeSuperseded ? literalRows.map(row => ({ row, stock: null }))
+    : catalogueStockFamilies(accessible, successions).filter(({ row }) => !isSupersededForDiscovery(row, visible, successions));
+  return listings.map(({ row, stock }) => withCatalogueFamilyStock(
+    withSuccessionDetails(presentProduct(row, discounts, fallbacksBySuccessorSku.get(identity(row.supplier, row.sku)) || null), successions), stock));
 }

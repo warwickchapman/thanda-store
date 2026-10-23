@@ -27,10 +27,12 @@ export async function resolveFulfilmentProduct(productId: number, userEmail?: st
   const result = await pool.query<FulfilmentRow>(`
     SELECT id, sku, supplier, stock_on_hand, details
     FROM products
-    WHERE id = $1 AND COALESCE((details->>'hidden')::boolean, false) = false
+    WHERE id = $1
   `, [productId]);
   const requested = result.rows[0];
   if (!requested || !isProductVisibleTo(requested, userEmail)) return null;
+  const allowHiddenFamilyStock = requested.supplier.toLowerCase() === 'victron';
+  if (!allowHiddenFamilyStock && (requested.details?.hidden === true || requested.details?.hidden === 'true')) return null;
   let selected = requested;
   if (['victron', 'renogy'].includes(requested.supplier.toLowerCase())) {
     const successions = await loadSkuSuccessions(pool);
@@ -41,9 +43,11 @@ export async function resolveFulfilmentProduct(productId: number, userEmail?: st
       FROM products
       WHERE LOWER(supplier) = LOWER($1)
         AND CASE WHEN LOWER(supplier) = 'victron' THEN REGEXP_REPLACE(UPPER(TRIM(sku)), 'R$', '') ELSE UPPER(TRIM(sku)) END = ANY($2::text[])
-        AND COALESCE((details->>'hidden')::boolean, false) = false
-    `, [requested.supplier, members]);
-    selected = chooseFulfilmentProduct(requested, family.rows.filter(row => isProductVisibleTo(row, userEmail)), successions) || requested;
+        AND ($3::boolean OR COALESCE((details->>'hidden')::boolean, false) = false)
+    `, [requested.supplier, members, allowHiddenFamilyStock]);
+    const choice = chooseFulfilmentProduct(requested, family.rows.filter(row => isProductVisibleTo(row, userEmail)), successions, { allowHiddenFamilyStock });
+    if (!choice) return null;
+    selected = choice;
   }
   return {
     id: Number(selected.id), sku: selected.sku, supplier: selected.supplier,

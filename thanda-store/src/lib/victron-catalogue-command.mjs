@@ -62,7 +62,8 @@ export async function submitCatalogueCommand(pool, { actor, rows, batch = false 
   const action = `${batch ? 'batch-' : ''}${succeeded ? 'applied' : outcome.body.code === 'UNKNOWN_OUTCOME' ? 'unknown' : 'rejected'}`;
   try {
     await pool.query('UPDATE victron_catalogue_events SET action=$2,details=$3 WHERE id=$1',
-      [attemptId, action, JSON.stringify({ ...details, result: succeeded ? result : { error: outcome.body.error, code: outcome.body.code, status: response?.status ?? null } })]);
+      [attemptId, action, JSON.stringify({ ...details, ...(succeeded ? { confirmedAt: new Date().toISOString() } : {}),
+        result: succeeded ? result : { error: outcome.body.error, code: outcome.body.code, status: response?.status ?? null } })]);
   } catch {
     // The durable pending record survives; do not misreport a confirmed write.
     if (succeeded) outcome.body.message += ' The audit outcome could not be saved; the original attempt is recorded. Do not repeat the update.';

@@ -69,3 +69,29 @@ test('actual fulfiller preserves a separate Renogy R article and never traverses
   assert.equal(selected.sku, `${oldSku}R`);
   assert.equal(selected.substituted, false);
 });
+
+test('actual fulfiller allocates hidden predecessor stock only through an accessible visible Victron family', async () => {
+  const old = { id: 1, supplier: 'victron', sku: 'PMP482305010', stock_on_hand: 0,
+    details: { ...observation, hidden: true, cataloguePresent: false, localStockOnHand: 3,
+      xeroStockStatus: 'tracked', xeroStockSyncedAt: observation.supplierObservedAt } };
+  const current = { id: 2, supplier: 'victron', sku: 'PMP482305012', stock_on_hand: 0, details: observation };
+  const relations = [{ supplier: 'victron', predecessor_sku: old.sku, successor_sku: current.sku }];
+  for (const requested of [old, current]) {
+    const h = harness(requested, [old, current], relations);
+    const selected = await h.resolveFulfilmentProduct(requested.id);
+    assert.equal(selected.id, old.id);
+    assert.equal(selected.sku, old.sku);
+    assert.equal(selected.hasStock, true);
+  }
+  const hiddenOnly = harness(old, [old, { ...current, details: { ...observation, hidden: true } }], relations);
+  assert.equal(await hiddenOnly.resolveFulfilmentProduct(old.id), null);
+  const unrelated = harness(old, [old, { ...current, sku: 'BPP900400100' }], relations);
+  assert.equal(await unrelated.resolveFulfilmentProduct(old.id), null);
+});
+
+test('an arbitrary hidden Renogy product remains unavailable even if its successor is visible', async () => {
+  const old = { id: 1, supplier: 'renogy', sku: oldSku, stock_on_hand: 3, details: { ...observation, hidden: true } };
+  const current = { id: 2, supplier: 'renogy', sku: newSku, stock_on_hand: 0, details: observation };
+  const h = harness(old, [old, current], [{ supplier: 'renogy', predecessor_sku: oldSku, successor_sku: newSku }]);
+  assert.equal(await h.resolveFulfilmentProduct(old.id), null);
+});

@@ -215,8 +215,13 @@ export function deriveCatalogueAttributes(product) {
 export function productAvailability(product) {
   const result = [];
   const quantity = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
-  const local = ['missing', 'untracked'].includes(product.details?.xeroStockStatus) ? null : quantity(product.details?.localStockOnHand);
-  const stock = product.details?.supplierStockStatus === 'unknown' ? null : quantity(product.stock_on_hand);
+  const familyLocalStatus = product.supplier?.toLowerCase() === 'victron' ? product.details?.stockFamilyLocalStatus : null;
+  const familySupplierStatus = product.supplier?.toLowerCase() === 'victron' ? product.details?.stockFamilySupplierStatus : null;
+  const familyKnown = status => status === 'known' || status === 'partial';
+  const local = familyLocalStatus === 'unknown' || (!familyKnown(familyLocalStatus) && ['missing', 'untracked'].includes(product.details?.xeroStockStatus))
+    ? null : quantity(product.details?.localStockOnHand);
+  const stock = familySupplierStatus === 'unknown' || (!familyKnown(familySupplierStatus) && product.details?.supplierStockStatus === 'unknown')
+    ? null : quantity(product.stock_on_hand);
   if (local > 0) result.push('thanda');
   // Hubble currently has an explicit manually maintained availability statement.
   const manual = String(product.details?.manualAvailability || '');

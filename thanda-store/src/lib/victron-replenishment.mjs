@@ -1,5 +1,5 @@
 import { localStockObservation } from './data-freshness.mjs';
-import { victronSkuFamilyResolver } from './victron-sku-family.mjs';
+import { stockSku, victronSkuFamilyResolver } from './victron-sku-family.mjs';
 
 export const REPLENISHMENT_POLICY = {
   salesWindows: { recent: 30, baseline: 90 },
@@ -7,8 +7,6 @@ export const REPLENISHMENT_POLICY = {
   safetyStockDays: 2,
   targetCoverDays: 14,
 };
-
-const stockSku = (value) => String(value || '').trim().toUpperCase().replace(/R$/, '');
 
 export function replenishmentSourceKnown(source) {
   return Boolean(source?.observedAt && source.totalCount > 0 && source.missingCount === 0);

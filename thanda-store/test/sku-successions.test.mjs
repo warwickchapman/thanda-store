@@ -79,7 +79,7 @@ test('a missing supplier table does not discard the other canonical relationship
     const rows = await loadSkuSuccessions({ query: async (sql) => {
       calls.push(sql);
       if (sql.includes(`FROM ${missing}_sku_successions`)) throw Object.assign(new Error('not yet provisioned'), { code: '42P01' });
-      return { rows: [{ predecessor_sku: 'OLD', successor_sku: 'NEW' }] };
+      return { rows: [{ predecessor_sku: 'PMP482305010', successor_sku: 'PMP482305012' }] };
     } });
     assert.equal(calls.length, 2);
     assert.equal(rows.length, 1);
@@ -132,6 +132,38 @@ test('hidden rows are excluded consistently whether the stored JSON value is boo
     assert.equal(chooseFulfilmentProduct(current, [hiddenOld, current], successions), current);
     assert.equal(chooseFulfilmentProduct(hiddenOld, [hiddenOld, current], successions), null);
   }
+});
+
+test('hidden Victron predecessors can fulfil a visible confirmed family without exposing hidden-only or other supplier products', () => {
+  const old = product(1, 'victron', 'PMP482305010', 3, { hidden: true });
+  const current = product(2, 'victron', 'PMP482305012', 0);
+  const options = { allowHiddenFamilyStock: true };
+  assert.equal(chooseFulfilmentProduct(current, [old, current], successions), current);
+  assert.equal(chooseFulfilmentProduct(current, [old, current], successions, options), old);
+  assert.equal(chooseFulfilmentProduct(old, [old, current], successions, options), old);
+  assert.equal(chooseFulfilmentProduct(old, [old], successions, options), null);
+  assert.equal(chooseFulfilmentProduct(old, [old, { ...current, details: { hidden: 'true' } }], successions, options), null);
+  const unrelated = product(3, 'victron', 'BPP900400100', 4);
+  assert.equal(chooseFulfilmentProduct(old, [old, unrelated], successions, options), null);
+  const hiddenAlias = product(6, 'victron', 'ORI121221040', 3, { hidden: true });
+  const visibleAlias = product(7, 'victron', 'ORI121221040R', 0);
+  assert.equal(chooseFulfilmentProduct(visibleAlias, [hiddenAlias, visibleAlias], [], options), visibleAlias,
+    'A retail alias without a confirmed replacement does not expose an arbitrary hidden row.');
+  const oldRenogyRow = product(4, 'renogy', oldRenogy, 3, { hidden: true });
+  const currentRenogyRow = product(5, 'renogy', newRenogy, 0);
+  assert.equal(chooseFulfilmentProduct(oldRenogyRow, [oldRenogyRow, currentRenogyRow], successions, options), null);
+});
+
+test('removed supplier article availability requires owned stock and never resurrects old supplier quantities', () => {
+  const old = product(1, 'victron', 'PMP482305010', 99, { cataloguePresent: false });
+  const current = product(2, 'victron', 'PMP482305012', 0);
+  assert.equal(productHasStock(old), false);
+  assert.equal(chooseFulfilmentProduct(current, [old, current], successions), current);
+  old.details.localStockOnHand = 2;
+  old.details.xeroStockStatus = 'tracked';
+  old.details.xeroStockSyncedAt = observedAt;
+  assert.equal(productHasStock(old), true);
+  assert.equal(chooseFulfilmentProduct(current, [old, current], successions), old);
 });
 
 test('Home never merges an unrelated Renogy R article or attributes an ambiguous cross-brand invoice', () => {

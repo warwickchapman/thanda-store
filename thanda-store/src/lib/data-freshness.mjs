@@ -1,11 +1,11 @@
 // Freshness is based on source observations, never a product's last_updated or
 // the time a cached Hub snapshot was imported. No network or database access.
-// Allow several scheduled runs before warning: Renogy 5m, Victron/orders 1h,
+// Allow missed scheduled runs before warning: Renogy 5m, Victron 4h, orders 1h,
 // Thanda/accepted quotes 30m, sales history daily. These are warning thresholds,
 // not promises that the source was contacted on that schedule.
 export const DATA_SOURCES = [
-  { id: 'thanda', label: 'Thanda stock', supplier: null, mode: 'scheduled', staleAfterMinutes: 120 },
-  { id: 'victron', label: 'Victron supplier stock', supplier: 'victron', mode: 'scheduled', staleAfterMinutes: 300 },
+  { id: 'thanda', label: 'Thanda owned stock · Xero', supplier: null, mode: 'scheduled', staleAfterMinutes: 120 },
+  { id: 'victron', label: 'Victron ZA warehouse stock', supplier: 'victron', mode: 'scheduled', staleAfterMinutes: 300 },
   { id: 'renogy', label: 'Renogy supplier stock', supplier: 'renogy', mode: 'scheduled', staleAfterMinutes: 20 },
   { id: 'hubble', label: 'Hubble availability', supplier: 'hubble', mode: 'manual', staleAfterMinutes: null },
   { id: 'lora', label: 'LoRa supplier stock', supplier: 'lora', mode: 'manual', staleAfterMinutes: null },
@@ -73,8 +73,24 @@ export function summarizeSource(source, observations = [], run = {}, now = new D
     error: run.last_status === 'partial' ? 'The latest update was incomplete; some retained data may be older.' : 'The latest update failed; retained data is shown.',
     manual: source.id === 'lora' ? 'No supplier feed; Thanda stock is shown separately.' : 'Availability is maintained manually.',
   };
+  // Import health and individual article completeness are different facts. A
+  // successful catalogue can remove an article without failing its stock feed.
+  // Legacy sources without run metadata retain their actual observations.
+  const feedObservedAt = observationTime(run.source_observed_at) || latestObservedAt;
+  const itemStockSource = ['thanda', 'victron', 'renogy', 'hubble', 'lora'].includes(source.id);
+  const feedStatus = !itemStockSource ? status : source.mode === 'manual' ? 'manual' : failure ? 'error'
+    : !feedObservedAt || Date.parse(feedObservedAt) > nowMs + 300_000 ? 'missing'
+      : thresholdMs !== null && nowMs - Date.parse(feedObservedAt) > thresholdMs ? 'stale' : 'current';
+  const feedMessages = {
+    current: 'The latest saved update is current.',
+    stale: 'The source update is overdue. Ask the Store maintainer to check the scheduled import.',
+    missing: 'No reliable source update is saved. Ask the Store maintainer to check the import.',
+    error: run.last_status === 'partial' ? 'The latest source update was incomplete.' : 'The latest source update failed.',
+    manual: messages.manual,
+  };
   return {
     ...source, status, observedAt, latestObservedAt,
+    feedStatus, feedMessage: feedMessages[feedStatus],
     totalCount: observations.length,
     missingCount: source.mode === 'manual' ? 0 : missingCount,
     staleCount,

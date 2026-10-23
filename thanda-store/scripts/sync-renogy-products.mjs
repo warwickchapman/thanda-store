@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeRenogyStock } from '../src/lib/renogy-stock.mjs';
+import { parseRenogyCatalogueExport, recordRenogyCatalogueMembership, renogyCatalogueMembershipDetails } from '../src/lib/renogy-catalogue-lifecycle.mjs';
 import { RenogyAuthError, RenogyRateLimitError, ensureSupplierAuthSchema, recordRenogyAuthFailure, resolveRenogyAuthFailure, recordRenogyRateLimit, renogyRetryDeadline } from '../src/lib/supplier-auth-alerts.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -238,7 +239,7 @@ async function fetchProductExportRows() {
     headers: { Accept: 'text/csv, application/octet-stream, */*' },
   });
   const stockObservedAt = new Date().toISOString();
-  return parseProductCsv(csv).map(row => ({ ...row, stockObservedAt }));
+  return parseRenogyCatalogueExport(csv, stockObservedAt);
 }
 
 async function loadProductRows() {
@@ -358,6 +359,7 @@ async function buildProduct(row, wrapper, detail, observedAt) {
     image_url: imageUrl,
     stock_on_hand: stock.quantity ?? 0,
     details: {
+      ...renogyCatalogueMembershipDetails(row),
       originalPrice,
       supplierObservedAt: stock.observedAt,
       supplierStockStatus: stock.quantity === null ? 'unknown' : 'known',
@@ -406,10 +408,14 @@ async function main() {
     notFound: [],
     failed: [],
     missingImages: [],
+    catalogue: null,
   };
 
   try {
     await ensureProductSchema(client);
+    if (PRODUCT_SOURCE === 'export') {
+      stats.catalogue = await recordRenogyCatalogueMembership(client, rows, rows[0].stockObservedAt);
+    }
     for (const row of rows) {
       const sku = row.SKU;
       try {
@@ -439,7 +445,8 @@ async function main() {
     // Per-product observations remain the stock freshness authority.
     observedAt: new Date().toISOString(),
     error: stats.failed.length || stats.notFound.length ? 'Incomplete catalogue update' : null,
-    counts: { synced: stats.synced, failed: stats.failed.length, missing: stats.notFound.length },
+    counts: { synced: stats.synced, failed: stats.failed.length, missing: stats.notFound.length,
+      ...(stats.catalogue ? { catalogueListed: stats.catalogue.listed, catalogueAbsent: stats.catalogue.absent } : {}) },
   });
   console.log(JSON.stringify(stats, null, 2));
   if (stats.failed.length > 0) process.exitCode = 1;

@@ -127,6 +127,31 @@ parallel Victron creation preview, and existing audits are retained.
 
 ## Daily work indicator and archive candidates
 
+Store browsing and inventory planning use one item per confirmed Victron
+replacement family. The current visible article represents that family; observed
+owned stock from predecessors remains available without any Xero stock transfer.
+Retail aliases are counted once per stock article. Search also matches the older
+codes, and the listing explains the combined stock. If a member's quantity is
+unknown, a positive observed subtotal is shown as **at least** that amount;
+Replenishment still withholds an exact recommendation for genuinely unknown
+required balances. Carts and quotes resolve the actual original article and
+price. Hidden predecessor stock is accessible only through an otherwise visible,
+authorised confirmed family. Accounting exports keep literal article balances.
+
+An explicit article-code marker is required for a replacement. Free-form advice
+such as “If 0, order Cerbo GX MK2” is not an article-code relationship. Existing
+word-only entries are ignored by the canonical readers and no new ones are
+imported. Venus GX is a separate product, with no automatic Cerbo substitution.
+Complete E-Order absence retires its purchasing/listing status; observed positive
+Thanda stock can still be sold under the Venus GX code. Xero archival remains a
+separate reviewed action.
+
+After a confirmed Thanda addition or recorded archive, the existing stock
+importer is queued. Data health recognises recent additions from their confirmed
+audit outcome, shows them as waiting for an older saved stock snapshot, and does
+not tell staff to create them again. Stock stays unknown until imported. The
+queue survives older Hub snapshots and changes made during an active import.
+
 The daily timer runs at 07:00 Africa/Johannesburg. The Admin menu orange dot is
 an outstanding-work indicator: it appears only when either company's **Cost
 changes**, **New products** or counted **Needs review** queue has entries. Archive

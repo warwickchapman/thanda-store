@@ -21,7 +21,7 @@ const batch = { action: 'apply-batch', fingerprints: [product.fingerprint] };
 
 function harness(options = {}) {
   const rows = options.rows || [product];
-  const audit = [], calls = [];
+  const audit = [], calls = [], stockRequests = [];
   let refreshes = 0, schemaCalls = 0;
   const pool = { query: async (sql, args) => {
     if (sql.startsWith('SELECT * FROM victron_catalogue_review')) return { rows: [{
@@ -64,13 +64,19 @@ function harness(options = {}) {
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
     '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention, catalogueCounts, recordReviewDecision },
     '@/lib/victron-sku-family.mjs': { stockSku },
+    '@/lib/local-stock-refresh.mjs': { requestLocalStockRefresh: async (db, settings) => {
+      assert.equal(db, pool);
+      stockRequests.push(settings);
+      if (options.failStockQueue) throw new Error('Synthetic queue failure');
+      return { pending: true, requestedAt: new Date().toISOString() };
+    } },
   };
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: name => {
     assert.ok(name in modules, `Unexpected import ${name}`);
     return modules[name];
   }, process: { env: { NODE_ENV: 'production' } }, Request, Response, Date, Set, JSON, Error, URL });
-  return { audit, calls, schemaCalls: () => schemaCalls, get: async (summary = false) => {
+  return { audit, calls, stockRequests, schemaCalls: () => schemaCalls, get: async (summary = false) => {
     const response = await exports.GET(new Request(`https://store.thanda.solar/api/admin/victron-catalogue${summary ? '?summary=1' : ''}`));
     return { status: response.status, body: await response.json() };
   }, post: async (body = single) => {
@@ -266,7 +272,9 @@ for (const company of ['thanda-solar', 'sensible-solar']) {
     const h = harness({ rows });
     const result = await h.post(createBatch(rows));
     assert.equal(result.status, 200);
-    assert.equal(result.body.message, 'Xero confirmed 50 new products added.');
+    assert.ok(result.body.message.startsWith('Xero confirmed 50 new products added.'));
+    assert.equal(h.stockRequests.length, company === 'thanda-solar' ? 1 : 0);
+    if (company === 'thanda-solar') assert.equal(h.stockRequests[0].afterChange, true);
     assert.equal(h.calls.length, 1);
     assert.equal(h.calls[0].company, company);
     assert.equal(h.calls[0].path, 'commands/victron-create');
@@ -292,9 +300,47 @@ test('Add to Xero submits one new product through the existing single-item comma
   const h = harness({ rows });
   const result = await h.post({ action: 'apply', fingerprint: rows[0].fingerprint });
   assert.equal(result.status, 200);
-  assert.equal(result.body.message, 'Xero confirmed 1 new product added.');
+  assert.ok(result.body.message.startsWith('Xero confirmed 1 new product added.'));
+  assert.equal(h.stockRequests.length, 1);
   assert.equal(h.calls[0].path, 'commands/victron-items');
   assert.equal(h.calls[0].payload.action, 'new');
+});
+
+test('only confirmed Thanda creations queue stock import; audit records confirmation time separately', async () => {
+  const createdBefore = Date.now();
+  const rows = newProducts(1);
+  const created = harness({ rows });
+  assert.equal((await created.post({ action: 'apply', fingerprint: rows[0].fingerprint })).status, 200);
+  assert.equal(created.stockRequests.length, 1);
+  assert.ok(Date.parse(created.audit[1].details.confirmedAt) >= createdBefore);
+  assert.equal(created.audit[0].details.confirmedAt, undefined, 'a pending attempt does not claim a confirmed write');
+  const cost = harness();
+  assert.equal((await cost.post()).status, 200);
+  assert.equal(cost.stockRequests.length, 0);
+  for (const [respond, code] of [
+    [() => Response.json({ detail: 'Rejected' }, { status: 409 }), 'COMMAND_REJECTED'],
+    [() => new Response('Synthetic unavailable', { status: 500 }), 'UNKNOWN_OUTCOME'],
+  ]) {
+    const h = harness({ rows, respond });
+    const response = await h.post({ action: 'apply', fingerprint: rows[0].fingerprint });
+    assert.equal(response.body.code, code);
+    assert.equal(h.stockRequests.length, 0);
+    assert.equal(h.audit.at(-1).details.confirmedAt, undefined);
+  }
+});
+
+test('stock queue failure cannot turn confirmed Xero creation into a failed or retryable write', async () => {
+  const rows = newProducts(1);
+  const h = harness({ rows, failStockQueue: true });
+  const result = await h.post({ action: 'apply', fingerprint: rows[0].fingerprint });
+  assert.equal(result.status, 200);
+  assert.match(result.body.message, /Xero confirmed/);
+  assert.match(result.body.message, /stock update could not be queued/);
+  assert.match(result.body.message, /do not add the products again/);
+  assert.equal(result.body.code, undefined);
+  assert.equal(h.stockRequests.length, 1);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.audit[1].action, 'applied');
 });
 
 test('creation batch cannot add both retail and standard packaging for one stock item', async () => {

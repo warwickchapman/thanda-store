@@ -184,7 +184,10 @@ async function main() {
       console.log('Another Xero local-stock sync is already running.');
       return;
     }
-    const state = await client.query('SELECT refresh_requested_at FROM xero_stock_sync_state WHERE id = true');
+    // Keep PostgreSQL precision for compare-and-clear; a newer catalogue action
+    // must not be lost while this import is reading its saved Hub snapshot.
+    const state = await client.query('SELECT refresh_requested_at::text AS refresh_requested_at FROM xero_stock_sync_state WHERE id = true');
+    const requestedAt = state.rows[0]?.refresh_requested_at || null;
     if (requestedOnly && !state.rows[0]?.refresh_requested_at) {
       console.log('No invoice-triggered local-stock refresh is pending.');
       return;
@@ -232,7 +235,11 @@ async function main() {
       await updateLocalStock(client, product, quantityOnHand(xeroItem), xeroItem, fetched.observedAt);
       stats.updated += 1;
     }
-    await client.query('UPDATE xero_stock_sync_state SET refresh_requested_at = NULL, last_completed_at = NOW(), updated_at = NOW() WHERE id = true');
+    await client.query(`UPDATE xero_stock_sync_state SET refresh_requested_at = CASE
+      WHEN refresh_requested_at IS NOT DISTINCT FROM $1::timestamptz
+        AND ($1::timestamptz IS NULL OR $2::timestamptz >= $1::timestamptz)
+      THEN NULL ELSE refresh_requested_at END,
+      last_completed_at = NOW(), updated_at = NOW() WHERE id = true`, [requestedAt, fetched.observedAt]);
     await finishDataSync(client, 'thanda', { observedAt: fetched.observedAt, counts: stats });
     await client.query('COMMIT');
     transaction = false;

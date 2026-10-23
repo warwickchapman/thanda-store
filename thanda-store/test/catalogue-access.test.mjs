@@ -5,6 +5,8 @@ import ts from 'typescript';
 import * as access from '../src/lib/catalogue-access.mjs';
 import * as exportTools from '../src/lib/commerce/catalogue-export.mjs';
 import * as storeProductTools from '../src/lib/admin/store-products.mjs';
+import * as stockFamilies from '../src/lib/catalogue-stock-families.mjs';
+import { skuFamilyResolver } from '../src/lib/sku-successions.mjs';
 
 const originalPreviewEmails = process.env.ENERTEC_PREVIEW_EMAILS;
 process.env.ENERTEC_PREVIEW_EMAILS = 'preview.one@example.test,preview.two@example.test';
@@ -32,7 +34,7 @@ const preview = { id: 1, sku: '612-ENG', name: 'Enertec preview battery', suppli
   category: 'Batteries', price: 100, image_url: '', stock_on_hand: null,
   details: { fixedDealerPrice: true, recommendedRetailExVat: 100, distributorCostExVat: 80 } };
 const ordinary = { ...preview, id: 2, sku: 'EXISTING', supplier: 'renogy', details: { recommendedRetailExVat: 200 } };
-const relations = { loadSkuSuccessions: async () => [], replacementContext: () => ({ replacedBy: [] }) };
+const relations = { loadSkuSuccessions: async () => [], replacementContext: () => ({ replacedBy: [] }), skuFamilyResolver };
 
 test('server allowlist normalizes and deduplicates valid emails, and missing configuration fails closed', () => {
   const configured = process.env.ENERTEC_PREVIEW_EMAILS;
@@ -50,7 +52,7 @@ test('server allowlist normalizes and deduplicates valid emails, and missing con
   }
 });
 
-function catalogueHarness(rows = [preview, ordinary]) {
+function catalogueHarness(rows = [preview, ordinary], successions = []) {
   const queries = [];
   const pool = { query: async (sql, params) => {
     queries.push({ sql, params });
@@ -64,7 +66,8 @@ function catalogueHarness(rows = [preview, ordinary]) {
     '@/lib/db': pool, '@/lib/catalogue-access.mjs': access,
     '@/lib/catalogue-filters.mjs': { catalogueDerivedDetails: row => ({ catalogueClassification: { category: row.category }, catalogueAttributes: {} }) },
     '@/lib/data-freshness.mjs': { localStockObservation: () => ({ quantity: null }), supplierStockObservation: () => ({ quantity: null }) },
-    '@/lib/sku-successions.mjs': relations,
+    '@/lib/sku-successions.mjs': { ...relations, loadSkuSuccessions: async () => successions },
+    '@/lib/catalogue-stock-families.mjs': stockFamilies,
     '@/lib/catalogue-succession.mjs': { isSupersededForDiscovery: () => false, withSuccessionDetails: row => row },
   });
   return { catalogue, pool, queries };
@@ -96,6 +99,22 @@ test('the actual catalogue excludes preview products before presentation, includ
     assert.deepEqual((await catalogue.currentCatalogue({}, { userEmail, includeSuperseded: true })).map(row => row.id), [2]);
   }
   assert.deepEqual((await catalogue.currentCatalogue({}, { userEmail: 'preview.one@example.test' })).map(row => row.id), [1, 2]);
+});
+
+test('a replacement cannot inherit a restricted predecessor photo or stock', async () => {
+  const previous = { ...ordinary, id: 5, supplier: 'victron', sku: 'PMP482305010',
+    image_url: '/api/store-product-images/private', stock_on_hand: 20,
+    details: { catalogueVisibility: { allowedEmails: ['owner@example.test'] },
+      supplierObservedAt: new Date().toISOString(), supplierStockStatus: 'known' } };
+  const current = { ...ordinary, id: 6, supplier: 'victron', sku: 'PMP482305012', details: {} };
+  const { catalogue } = catalogueHarness([previous, current], [
+    { supplier: 'victron', predecessor_sku: previous.sku, successor_sku: current.sku },
+  ]);
+  const listed = await catalogue.currentCatalogue({}, { userEmail: 'other@example.test' });
+  assert.deepEqual(listed.map(row => row.id), [6]);
+  assert.equal(listed[0].image_url, '');
+  assert.equal(listed[0].thumbnail_url, '');
+  assert.equal(listed[0].stock_on_hand, null);
 });
 
 test('preview selling prices are fixed, unpriced products stay unpriced, and private cost metadata is omitted', () => {

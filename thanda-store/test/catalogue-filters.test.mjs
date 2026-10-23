@@ -88,6 +88,20 @@ test('availability can match both warehouses; manual Hubble and local-only LoRa 
   assert.deepEqual(productAvailability({ ...p, stock_on_hand: null, details: { localStockOnHand: 0 } }), ['unknown']);
 });
 
+test('confirmed Victron family projections drive warehouse filters independently of literal item statuses', () => {
+  for (const status of ['known', 'partial']) {
+    const p = { ...product('Victron replacement', 'Inverters'), stock_on_hand: 7,
+      details: { localStockOnHand: 3, xeroStockStatus: 'missing', supplierStockStatus: 'unknown',
+        stockFamilyLocalStatus: status, stockFamilySupplierStatus: status } };
+    assert.deepEqual(productAvailability(p), ['thanda', 'supplier']);
+    assert.equal(matchesCatalogueFilters(p, {}, ['thanda']), true);
+    assert.equal(matchesCatalogueFilters(p, {}, ['supplier']), true);
+    assert.deepEqual(productAvailability({ ...p, details: { ...p.details,
+      stockFamilyLocalStatus: 'unknown', stockFamilySupplierStatus: 'unknown' } }), ['unknown']);
+    assert.deepEqual(productAvailability({ ...p, supplier: 'renogy' }), ['unknown'], 'Victron family metadata cannot infer another brand\'s aliases');
+  }
+});
+
 test('filters OR within a group and AND across groups; facet counts exclude their own selection', () => {
   const products = [
     { ...product('A', 'Inverters', { localStockOnHand: 1 }), catalogue_attributes: { batteryVoltage: ['48 V'], power: ['3000 VA'] } },
@@ -114,9 +128,8 @@ test('lightweight supplier upsert retains cached specifications and persists att
   assert.equal(saved.localStockOnHand, undefined, 'sync must not overwrite a concurrent Xero stock update');
 });
 
-test('discovery keeps successor and predecessor specifications and stock on their own saleable rows', () => {
-  // Succession grouping is for fulfilment/planning. These literal catalogue
-  // records must not borrow stock or product specifications from each other.
+test('raw article records retain literal availability until a confirmed family projection is supplied', () => {
+  // Similar names and article codes alone never establish a stock pool.
   const old = { ...product('MultiPlus-II 48/3000/35-32 230V', 'Inverters', { localStockOnHand: 0 }), sku: 'PMP482305010' };
   const current = { ...old, sku: 'PMP482305012', stock_on_hand: 2 };
   assert.deepEqual(productAvailability(old), ['unavailable']);

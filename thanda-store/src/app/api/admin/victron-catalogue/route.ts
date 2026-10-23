@@ -6,12 +6,19 @@ import { refreshReview } from '@/lib/victron-catalogue-service.mjs';
 import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
 import { ensureReviewSchema, needsAttention, catalogueCounts, recordReviewDecision } from '@/lib/victron-catalogue-review.mjs';
 import { stockSku } from '@/lib/victron-sku-family.mjs';
+import { requestLocalStockRefresh } from '@/lib/local-stock-refresh.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 async function admin() { const user = await currentUser(); return user?.role === 'admin' && !user.impersonatedBy ? user : null; }
 async function applyCommand(actor: string, rows: unknown[], batch = false, approvedReview?: Parameters<typeof recordReviewDecision>[2]) {
   const outcome = await submitCatalogueCommand(pool, { actor, rows, batch });
   if (outcome.status === 200) {
+    if (rows.some(row => (row as { company?: string; kind?: string }).company === 'thanda-solar'
+      && (row as { kind?: string }).kind === 'new')) {
+      try { await requestLocalStockRefresh(pool, { afterChange: true });
+        outcome.body.message += ' The Store stock update is queued; you do not need to add these products again.';
+      } catch { outcome.body.message += ' The stock update could not be queued. The scheduled import will pick it up; do not add the products again.'; }
+    }
     if (approvedReview) {
       try { await recordReviewDecision(pool, actor, approvedReview, 'review-approved'); }
       catch { outcome.body.message += ' The eligibility decision could not be saved. Do not repeat the Xero action; compare saved records before resolving the remaining review.'; }
@@ -93,6 +100,7 @@ export async function POST(request: Request) {
     if (body.action === 'archive-reviewed') {
       if (row.kind !== 'archive' || !row.eligibleForArchiveReview || row.stock !== 0 || body.confirmed !== true) return NextResponse.json({ error: 'Archive checklist requires confirmed supplier retirement evidence, known zero stock, and your confirmation that open orders were checked and archival completed in Xero.' }, { status: 409 });
       await pool.query("INSERT INTO victron_catalogue_events(actor,action,company,sku,details) VALUES($1,'archive-reviewed',$2,$3,$4)", [String(user.id), row.company, row.sku, JSON.stringify(row)]);
+      if (row.company === 'thanda-solar') await requestLocalStockRefresh(pool, { afterChange: true }).catch(() => {});
       await refreshReview(pool).catch(() => {});
       return NextResponse.json({ message: 'Manual Xero archive completion recorded.' });
     }

@@ -9,6 +9,7 @@ import { createVictronHttp, ensureVictronHttpSchema, nextCatalogueRun } from '..
 import { startDataSync, finishDataSync } from '../src/lib/data-sync-state.mjs';
 import { observeVictronSupplierStock } from '../src/lib/data-freshness.mjs';
 import { inventoryQuantity } from '../src/lib/inventory-scope.mjs';
+import { successorSkuFromDescription } from '../src/lib/victron-sku-family.mjs';
 import { prices } from '../src/lib/victron-pricing.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,13 +115,6 @@ function sleep(ms) {
 function selectImageUrl(product) {
   const productData = product.product_data && typeof product.product_data === 'object' && !Array.isArray(product.product_data) ? product.product_data : {};
   return victronMediaFromExtended({ sku: product.sku, product_data: productData }, product.sku).image_url || '';
-}
-
-function successorSkuFromDescription(description) {
-  // Victron marks a replacement explicitly as: "If 0, order <SKU>". Do not
-  // infer a succession from any other free-form product-description wording.
-  const match = String(description || '').match(/\bif\s+0\s*,?\s*order\s+([A-Z0-9-]+)\b/i);
-  return match ? match[1].toUpperCase() : null;
 }
 
 function buildProduct(product, existing, observedAt, inventoryItem, inventoryObservedAt) {

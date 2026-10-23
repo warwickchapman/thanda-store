@@ -1,9 +1,10 @@
 import { observeVictronSupplierStock } from './data-freshness.mjs';
+import { victronArticleSuccessions } from './victron-sku-family.mjs';
 
 export function retirementReason(product, source, successor) {
   const ending = /available\s+until\s+stock\s+0/i.test(source?.description || product.name || '');
   if (!source) return successor ? `Superseded by ${successor}; absent from the complete E-Order catalogue.`
-    : ending ? 'Discontinued: absent from the complete E-Order catalogue.' : null;
+    : 'Removed from the complete E-Order catalogue; review remaining stock before archiving.';
   const zero = observeVictronSupplierStock(source, new Date().toISOString()).quantity === 0;
   return zero && successor ? `Superseded by ${successor}; E-Order stock is zero.`
     : zero && ending ? 'Available until stock 0: E-Order stock is now zero.' : null;
@@ -17,7 +18,7 @@ export async function recordCatalogueLifecycle(db, catalogue, observedAt) {
     db.query("SELECT sku,name,details FROM products WHERE supplier='victron'"),
     db.query('SELECT predecessor_sku,successor_sku FROM victron_sku_successions'),
   ]);
-  const successors = new Map(relationships.rows.map(row => [row.predecessor_sku, row.successor_sku]));
+  const successors = new Map(victronArticleSuccessions(relationships.rows).map(row => [row.predecessor_sku, row.successor_sku]));
   for (const product of products.rows) {
     const row = source.get(product.sku);
     const reason = retirementReason(product, row, successors.get(product.sku));

@@ -1,9 +1,11 @@
 import { localStockObservation, supplierStockObservation } from './data-freshness.mjs';
-import { stockSku, victronSkuFamilyResolver } from './victron-sku-family.mjs';
+import { stockSku, victronSkuFamilyResolver, victronArticleSuccessions } from './victron-sku-family.mjs';
 
 const supplierName = (value) => String(value || '').trim().toLowerCase();
 const literalSku = (value) => String(value || '').trim().toUpperCase();
 const hidden = (product) => product.details?.hidden === true || product.details?.hidden === 'true';
+const usableSuccessions = rows => rows.filter(row => supplierName(row.supplier) !== 'victron'
+  || victronArticleSuccessions([row]).length);
 
 // Retail packaging is an alias only for Victron. Other brands retain the
 // complete article code, including any final R.
@@ -15,7 +17,7 @@ export async function loadSkuSuccessions(db) {
   const groups = await Promise.all(['victron', 'renogy'].map(async (supplier) => {
     try {
       const result = await db.query(`SELECT predecessor_sku, successor_sku FROM ${supplier}_sku_successions`);
-      return result.rows.map((row) => ({ ...row, supplier }));
+      return usableSuccessions(result.rows.map((row) => ({ ...row, supplier })));
     } catch (error) {
       // Each supplier is independent during its first deployment/import.
       if (error.code === '42P01') return [];
@@ -47,6 +49,7 @@ export function skuFamilyResolver(successions) {
 }
 
 export function familyMemberSkus(successions, supplier, sku) {
+  successions = usableSuccessions(successions);
   const familyFor = skuFamilyResolver(successions);
   const family = familyFor(supplier, sku);
   return [...new Set([
@@ -58,6 +61,7 @@ export function familyMemberSkus(successions, supplier, sku) {
 }
 
 export function replacementContext(successions, supplier, sku) {
+  successions = usableSuccessions(successions);
   const article = normalizeSku(supplier, sku);
   const rows = successions.filter((row) => supplierName(row.supplier) === supplierName(supplier));
   return {
@@ -71,6 +75,7 @@ export function replacementContext(successions, supplier, sku) {
 // Directed traversal, newest first. Existing intermediate codes remain useful
 // when a newer successor has not yet reached the stored catalogue.
 export function successorSkus(successions, supplier, sku) {
+  successions = usableSuccessions(successions);
   const rows = successions.filter((row) => supplierName(row.supplier) === supplierName(supplier));
   const start = normalizeSku(supplier, sku);
   const depths = new Map([[start, 0]]);
@@ -92,18 +97,29 @@ export function successorSkus(successions, supplier, sku) {
 }
 
 export function productHasStock(product) {
-  return Number(localStockObservation(product).quantity) > 0 || Number(supplierStockObservation(product).quantity) > 0;
+  // A removed supplier article can still be sold from real owned stock, but
+  // its retained historical supplier balance is not current availability.
+  return Number(localStockObservation(product).quantity) > 0
+    || (product.details?.cataloguePresent !== false && Number(supplierStockObservation(product).quantity) > 0);
 }
 
 /** Select an original row; stock, prices and specifications never move SKUs. */
-export function chooseFulfilmentProduct(requested, products, successions) {
-  if (!requested || hidden(requested)) return null;
+export function chooseFulfilmentProduct(requested, products, successions, { allowHiddenFamilyStock = false } = {}) {
+  successions = usableSuccessions(successions);
+  if (!requested) return null;
   const supplier = supplierName(requested.supplier);
-  if (!['victron', 'renogy'].includes(supplier)) return requested;
   const familyFor = skuFamilyResolver(successions);
   const family = familyFor(supplier, requested.sku);
+  const includeHidden = allowHiddenFamilyStock && supplier === 'victron'
+    && successions.some(row => supplierName(row.supplier) === supplier
+      && familyFor(supplier, row.predecessor_sku) === family);
+  if (hidden(requested) && !includeHidden) return null;
+  if (!['victron', 'renogy'].includes(supplier)) return requested;
   const rows = products.filter((row) => supplierName(row.supplier) === supplier
-    && !hidden(row) && familyFor(supplier, row.sku) === family);
+    && (includeHidden || !hidden(row)) && familyFor(supplier, row.sku) === family);
+  // Hidden stock is available only through a real visible member of its
+  // confirmed family. This does not make hidden products independently public.
+  if (includeHidden && !rows.some(row => !hidden(row))) return null;
   const edges = successions.filter((row) => supplierName(row.supplier) === supplier);
   const depths = new Map([[normalizeSku(supplier, requested.sku), 0]]);
   const queue = [...depths.keys()];

@@ -49,6 +49,28 @@ test('a recent partial update does not mask older observations or missing stock'
   assert.equal(row.latestObservedAt, recent);
   assert.equal(row.missingCount, 1);
   assert.equal(row.staleCount, 1);
+  assert.equal(row.feedStatus, 'error');
+});
+
+test('a successful feed and an individual missing stock record remain separate states', () => {
+  const row = summarizeSource(source('victron'), [{ quantity: null, observedAt: null }], {
+    source_observed_at: recent, last_successful_at: recent, last_status: 'success',
+  }, now);
+  assert.equal(row.status, 'missing');
+  assert.equal(row.missingCount, 1);
+  assert.equal(row.feedStatus, 'current');
+  assert.equal(row.lastSuccessAt, recent);
+  assert.equal(summarizeSource(source('victron'), [], { source_observed_at: old, last_status: 'success' }, now).feedStatus, 'stale');
+  assert.equal(summarizeSource(source('victron'), [], {}, now).feedStatus, 'missing');
+});
+
+test('a missing or overdue credit collection keeps sales feed incomplete even when invoices are current', () => {
+  for (const [credit, expected] of [[{ quantity: null, observedAt: null }, 'missing'], [{ quantity: 1, observedAt: '2026-09-20T12:00:00Z' }, 'stale']]) {
+    const result = summarizeSource(source('sales'), [{ quantity: 1, observedAt: recent }, credit], {
+      last_status: 'success', source_observed_at: recent,
+    }, now);
+    assert.equal(result.feedStatus, expected);
+  }
 });
 
 test('import time does not make stale source evidence fresh', () => {

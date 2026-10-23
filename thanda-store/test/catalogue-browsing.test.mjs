@@ -162,3 +162,41 @@ test('products without a dealer price cannot be added even if stock is known', (
   const add = page.render().find(node => node.type === 'button' && node.props.title === 'Price on request');
   assert.equal(add.props.disabled, true);
 });
+
+test('combined replacement stock is explained in the listing and its product drawer', () => {
+  const codes = ['PMP482305010', 'PMP482305012'];
+  const family = { ...product(70, 'victron', 'Current MultiPlus'), sku: codes[1], stock_on_hand: 9,
+    details: { localStockOnHand: 5, xeroStockStatus: 'tracked', stockFamilySkus: codes } };
+  const page = storefront('', [family]);
+  const explanation = `Stock includes replacement codes: ${codes.join(', ')}.`;
+  assert(page.render().some(node => node.type === 'div' && text(node) === explanation));
+  assert(page.render().some(node => node.type === 'span' && text(node) === '5 in stock (KZN)'));
+  page.render().find(node => node.type === 'button' && text(node) === 'View details').props.onClick();
+  const drawer = page.render().find(node => node.props?.stock && node.props.product === family);
+  assert(drawer);
+  assert(Array.from(drawer.props.stock).includes(explanation));
+});
+
+test('an unknown replacement family remains unknown even if an old quantity is retained', () => {
+  const family = { ...product(71, 'victron', 'Incomplete MultiPlus stock', 9),
+    details: { localStockOnHand: 3, xeroStockStatus: 'tracked',
+      stockFamilyLocalStatus: 'unknown', stockFamilySupplierStatus: 'unknown',
+      stockFamilySkus: ['PMP482305010', 'PMP482305012'] } };
+  const page = storefront('', [family]);
+  assert(page.render().some(node => node.type === 'div' && text(node) === 'Thanda stock unknown'));
+  assert(!page.render().some(node => node.type === 'div' && text(node).startsWith('Available now:')));
+  assert(page.render().some(node => node.type === 'button' && node.props.title === 'Confirm availability with sales' && node.props.disabled));
+});
+
+test('partially known replacement stock is a labelled lower bound in badges, stock lines and filters', () => {
+  const family = { ...product(72, 'victron', 'Partially known MultiPlus stock', 9),
+    details: { localStockOnHand: 3, xeroStockStatus: 'missing', supplierStockStatus: 'unknown',
+      stockFamilyLocalStatus: 'partial', stockFamilySupplierStatus: 'partial',
+      stockFamilySkus: ['PMP482305010', 'PMP482305012'] } };
+  const page = storefront('', [family]);
+  assert(page.render().some(node => node.type === 'span' && text(node) === 'At least 3 in stock (KZN)'));
+  assert(page.render().some(node => node.type === 'div' && text(node) === 'Available now: at least 3 in stock (KZN)'));
+  assert(page.render().some(node => node.type === 'div' && text(node) === 'Victron Warehouse ZA: at least 9 in stock (3-5 working days)'));
+  assert.equal(page.sidebar().availabilityOptions.find(option => option.key === 'thanda').count, 1);
+  assert.equal(page.sidebar().availabilityOptions.find(option => option.key === 'supplier').count, 1);
+});

@@ -1,5 +1,5 @@
 import { assertHubSnapshot } from './xero/hub.mjs';
-import { companies, ensureReviewSchema, reviewCatalogue, advanceHistory, changeSignature, readReviewDecisions } from './victron-catalogue-review.mjs';
+import { archiveCompletionRecorded, companies, ensureReviewSchema, reviewCatalogue, advanceHistory, changeSignature, readReviewDecisions } from './victron-catalogue-review.mjs';
 
 export async function catalogueHub(company, path, init = {}) {
   if (!companies.includes(company)) throw new Error('Unknown Xero company');
@@ -50,7 +50,7 @@ export async function refreshReview(pool, request = catalogueHub) {
     const history = advanceHistory(prior, evidence.products, day, successions, observedAt);
     let rows = reviewCatalogue({ catalogue: evidence.products, items, successions, history, decisions, observedAt });
     const completed = (await db.query("SELECT company,sku,max(created_at) AS completed_at FROM victron_catalogue_events WHERE action='archive-reviewed' GROUP BY company,sku")).rows;
-    rows = rows.filter(row => row.kind !== 'archive' || !completed.some(event => event.company === row.company && event.sku === row.sku && (history[row.sku]?.absentSince || history[row.sku]?.retiredSince) && new Date(event.completed_at).getTime() >= Date.parse(history[row.sku].absentSince || history[row.sku].retiredSince)));
+    rows = rows.filter(row => !archiveCompletionRecorded(row, history, completed));
     const signature = changeSignature(rows);
     // Acknowledgement belongs to an uninterrupted change set. In particular, a
     // review SKU returning to stock must alert again after its silenced period.

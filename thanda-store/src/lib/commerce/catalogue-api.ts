@@ -8,7 +8,9 @@ export async function catalogueExport(request: Request, contactId: string, userE
   // One pricing source for the browser, cart, quotes and API. All reads local.
   const rates = await pool.query('SELECT supplier,discount_percent,updated_at FROM contact_supplier_discounts WHERE contact_id=$1 ORDER BY supplier', [contactId]);
   const discounts = Object.fromEntries(rates.rows.map(r => [r.supplier, Number(r.discount_percent)]));
-  const products = (await currentCatalogue(discounts, { userEmail })).filter(isStorefrontProduct);
+  // The accounting/export contract reports literal article balances. Customer
+  // browsing combines replacement families separately, with explicit labels.
+  const products = (await currentCatalogue(discounts, { includeSuperseded: true, userEmail })).filter(isStorefrontProduct);
   const meta = await pool.query(`SELECT p.id,p.last_updated,p.details->>'supplierObservedAt' AS supplier_updated_at,
     p.details->>'xeroStockSyncedAt' AS stock_updated_at,p.details->>'currency' AS currency FROM products p`);
   const successions = await loadSkuSuccessions(pool);

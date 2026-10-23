@@ -18,7 +18,7 @@ function integerQuantity(value: unknown) {
 }
 
 async function currentProducts(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, includeSuperseded = false) {
-  return currentCatalogue(user.discounts, { includeSuperseded, userEmail: user.email });
+  return currentCatalogue(user.discounts, { includeSuperseded, includeHiddenFamilyStock: includeSuperseded, userEmail: user.email });
 }
 
 async function sourceQuote(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>, quoteId: string) {

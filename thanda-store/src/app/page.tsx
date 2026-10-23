@@ -82,8 +82,13 @@ function supplierStockLabel(product: Product) {
 
 function stockLines(product: Product) {
   const supplier = product.supplier.toLowerCase();
-  const localStock = numberDetail(product.details.localStockOnHand);
+  const localStock = supplier === 'victron' && product.details.stockFamilyLocalStatus === 'unknown'
+    ? null : numberDetail(product.details.localStockOnHand);
   const supplierLabelText = supplierStockLabel(product);
+  const localPrefix = supplier === 'victron' && product.details.stockFamilyLocalStatus === 'partial' ? 'at least ' : '';
+  const supplierFamilyStatus = supplier === 'victron' ? product.details.stockFamilySupplierStatus : null;
+  const supplierFamilyKnown = supplierFamilyStatus === 'known' || supplierFamilyStatus === 'partial';
+  const supplierPrefix = supplierFamilyStatus === 'partial' ? 'at least ' : '';
 
   if (supplier === 'lora' || product.details.storeManaged === true) {
     return [localStock === null ? 'Thanda stock unknown' : `${localStock} in stock (KZN)`];
@@ -95,24 +100,31 @@ function stockLines(product: Product) {
 
   const lines: string[] = [];
   if (supplier === 'victron' && localStock === null) lines.push('Thanda stock unknown');
-  if (localStock !== null && localStock > 0) lines.push(`Available now: ${localStock} in stock (KZN)`);
+  if (localStock !== null && localStock > 0) lines.push(`Available now: ${localPrefix}${localStock} in stock (KZN)`);
   const supplierLeadTime = supplier === 'renogy' ? '4-7 working days' : supplier === 'victron' ? '3-5 working days' : null;
-  const supplierStock = numberDetail(product.stock_on_hand);
-  if (supplierStock === null || product.details.supplierStockStatus === 'unknown') {
+  const supplierStock = supplierFamilyStatus === 'unknown' ? null : numberDetail(product.stock_on_hand);
+  if (supplierStock === null || (!supplierFamilyKnown && product.details.supplierStockStatus === 'unknown')) {
     lines.push(supplier === 'enertec' ? ENERTEC_AVAILABILITY : `${supplierLabelText || 'Supplier'}: Stock unknown`);
   } else if (supplierLabelText && supplierStock <= 0) {
     if (localStock === null || localStock <= 0) lines.push(`${supplierLabelText}: Out of stock / not available`);
   } else if (supplierLabelText && supplierLeadTime) {
-    lines.push(`${supplierLabelText}: ${product.stock_on_hand} in stock (${supplierLeadTime})`);
+    lines.push(`${supplierLabelText}: ${supplierPrefix}${product.stock_on_hand} in stock (${supplierLeadTime})`);
   } else if (supplierLabelText) {
-    lines.push(`${supplierLabelText}: ${product.stock_on_hand} in stock`);
+    lines.push(`${supplierLabelText}: ${supplierPrefix}${product.stock_on_hand} in stock`);
+  }
+  const familySkus = Array.isArray(product.details.stockFamilySkus)
+    ? [...new Set(product.details.stockFamilySkus.filter((sku): sku is string => typeof sku === 'string' && sku.trim() !== ''))] : [];
+  if (supplier === 'victron' && familySkus.length > 1) {
+    lines.push(`Stock includes replacement codes: ${familySkus.join(', ')}.`);
   }
   return lines;
 }
 
 function primaryStockBadge(product: Product) {
-  const localStock = numberDetail(product.details.localStockOnHand);
-  if (localStock !== null && localStock > 0) return `${localStock} in stock (KZN)`;
+  const localStock = product.supplier.toLowerCase() === 'victron' && product.details.stockFamilyLocalStatus === 'unknown'
+    ? null : numberDetail(product.details.localStockOnHand);
+  const prefix = product.supplier.toLowerCase() === 'victron' && product.details.stockFamilyLocalStatus === 'partial' ? 'At least ' : '';
+  if (localStock !== null && localStock > 0) return `${prefix}${localStock} in stock (KZN)`;
   if (productAvailability(product).includes('unknown')) return product.supplier.toLowerCase() === 'enertec' ? ENERTEC_AVAILABILITY : 'Stock unknown';
   if (product.supplier === 'hubble') return typeof product.details.manualAvailability === 'string' ? product.details.manualAvailability : 'Stock unknown';
   if (product.supplier === 'lora' || product.details.storeManaged === true) return `${localStock} in stock (KZN)`;

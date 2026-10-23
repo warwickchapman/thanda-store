@@ -55,6 +55,15 @@ export function catalogueCounts(rows) {
   }
   return counts;
 }
+
+// An archive completion applies only to the same company/article and the
+// current absence/retirement episode. Reappearance must permit a new review.
+export function archiveCompletionRecorded(row, history = {}, completed = []) {
+  if (row.kind !== 'archive') return false;
+  const episode = history[row.sku]?.absentSince || history[row.sku]?.retiredSince;
+  return Boolean(episode && completed.some(event => event.company === row.company && event.sku === row.sku
+    && new Date(event.completed_at).getTime() >= Date.parse(episode)));
+}
 /** @returns {{reviewAction: 'new'|'price'|'keep'|null, approvalReason: string|null, reviewBlocker: string|null, ignoredUntil: string|null}} */
 function reviewFields() {
   return { reviewAction: null, approvalReason: null, reviewBlocker: null, ignoredUntil: null };

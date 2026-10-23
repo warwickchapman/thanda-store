@@ -37,6 +37,7 @@ async function harness(options = {}) {
     queries.push(sql);
     if (sql.includes('FROM products')) return { rows: products };
     if (sql.includes('FROM xero_sales_invoice_lines')) return { rows: options.sales || [] };
+    if (sql.includes('FROM supplier_inbound_orders inbound')) return { rows: [] };
     if (sql.includes('FROM supplier_inbound_order_lines')) return { rows: options.inbound || [] };
     if (sql.includes('FROM victron_provisional_backorder_order_lines')) {
       assert.match(sql, /ignored\.sku IS NULL/, 'ignored backorders remain excluded from purchase planning');
@@ -48,7 +49,6 @@ async function harness(options = {}) {
     if (sql.includes('FROM xero_accepted_quote_lines')) return { rows: options.quotes || [] };
     if (sql.includes('FROM xero_accepted_quote_sync_state')) return { rows: [{ last_successful_sync_at: observedAt, last_error: null, last_stats: {} }] };
     if (sql.includes('FROM victron_sku_successions')) return { rows: options.successions || successions };
-    if (sql.includes('FROM supplier_inbound_orders inbound')) return { rows: [] };
     throw new Error(`Unexpected SQL: ${sql}`);
   } };
   const dataHealth = { checkedAt, sources: DATA_SOURCES.map(source => ({ ...source, status: 'current',
@@ -112,6 +112,48 @@ test('report preserves partial stock and withholds orders for active missing pre
   assert.equal(item.suggestedOrder, null);
   assert.equal(item.confidence, 'unavailable');
   assert.match(item.itemReviewReasons.join(' '), /PMP482305010/);
+});
+
+test('one planning item combines distinct predecessor and successor stock, demand and commitments across a replacement chain', async () => {
+  const chain = [...successions, { predecessor_sku: 'PMP482305012', successor_sku: 'PMP482305014' }];
+  const current = supplierProduct('PMP482305014');
+  const h = await harness({
+    successions: chain,
+    products: [current, supplierProduct('PMP482305014R')],
+    stockProducts: [
+      { ...supplierProduct('PMP482305010'), details: { hidden: true } },
+      { ...supplierProduct('PMP482305012'), details: { hidden: true } },
+      current, supplierProduct('PMP482305014R'),
+    ],
+    items: [tracked('PMP482305010', 2), tracked('PMP482305012', 3),
+      tracked('PMP482305014', 4), tracked('PMP482305014R', 4)],
+    sales: [
+      { sku: 'PMP482305010', sales_30: 30, sales_90: 45, last_sold_at: '2026-10-10' },
+      { sku: 'PMP482305012', sales_30: 15, sales_90: 30, last_sold_at: '2026-10-13' },
+    ],
+    inbound: [{ sku: 'PMP482305010', quantity: 1, order_number: 'SO-1' }],
+    cart: [{ sku: 'PMP482305012R', quantity: 2, uploaded_at: observedAt }],
+    quotes: [{ sku: 'PMP482305012', quantity: 2, quote_id: 'quote-1',
+      quote_number: 'QU-1', description: 'Victron MultiPlus' }],
+    minimums: [{ sku: 'PMP482305010', minimum_stock: 5 }, { sku: 'PMP482305014', minimum_stock: 7 }],
+  });
+  const result = await h.get();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.items.length, 1, 'one operational item represents the full replacement family');
+  const item = result.body.items[0];
+  assert.equal(item.sku, 'PMP482305014');
+  assert.equal(item.localStock, 9, 'distinct Xero article balances add once; retail packaging is not another stock balance');
+  assert.equal(item.knownLocalStock, 9);
+  assert.equal(item.sales30, 45);
+  assert.equal(item.sales90, 75);
+  assert.equal(item.inbound, 1);
+  assert.equal(item.provisional, 2);
+  assert.equal(item.reserved, 2);
+  assert.equal(item.minimumStock, 7, 'a family has one stocking floor');
+  assert.equal(item.supplierStock, 8, 'supplier availability remains the selected ordering SKU quantity');
+  assert.equal(item.suggestedOrder, 11);
+  assert.equal(item.confidence, 'current', item.reviewReasons.join('; '));
+  assert.deepEqual(item.predecessorSkus, ['PMP482305010', 'PMP482305012']);
 });
 
 test('open inbound and unignored backorder-only families remain visible without inventing demand', async () => {

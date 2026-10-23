@@ -1,4 +1,4 @@
-import { stockSku } from './victron-sku-family.mjs';
+import { stockSku, victronArticleSuccessions } from './victron-sku-family.mjs';
 
 const COMPANY = 'thanda-solar';
 const FUTURE_ALLOWANCE_MS = 300_000;
@@ -137,6 +137,7 @@ function sourceProblem(runs, now) {
  * @returns {Promise<{articles: Map<string, {kind: 'required' | 'catalogue' | 'unknown', reasons: string[]}>, stockProducts: Array<{sku: string, supplier: 'victron', name: string, details: {xeroStockStatus: string, localStockOnHand: number | null, xeroStockSyncedAt: string | null, inventoryScope: 'required' | 'catalogue' | 'unknown', inventoryRequirementReasons: string[]}}>, catalogueOnly: Array<{sku: string, reason: string}>, complete: boolean, reason: string | null, observedAt: string | null}>}
  */
 export async function loadInventoryScope(db, { products = [], successions = [], runs = [], now = Date.now() } = {}) {
+  successions = victronArticleSuccessions(successions);
   const nowMs = Number(new Date(now));
   if (!Number.isFinite(nowMs)) throw new Error('A reliable inventory assessment time is required.');
   const results = await Promise.allSettled([
