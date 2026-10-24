@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
-import { rankedFavouriteProducts } from '@/lib/favourite-products.mjs';
+import { favouritesWindowStart, rankedFavouriteProducts } from '@/lib/favourite-products.mjs';
 
 type InvoiceHistoryRow = {
   invoice_id: string;
@@ -17,9 +17,7 @@ export async function GET() {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     const products = await currentCatalogue(user.discounts, { userEmail: user.email });
-    const cutoff = new Date();
-    cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
-    const start = cutoff.toISOString().slice(0, 10);
+    const start = favouritesWindowStart();
 
     const successions = await loadSkuSuccessions(pool);
     const [mine, thanda] = await Promise.all([
