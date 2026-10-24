@@ -39,6 +39,11 @@ export function StoreHeader() {
 
   if (isAuthPage) return null;
 
+  if (pathname === '/request-quote') return <header className="border-b border-zinc-200 bg-white"><div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+    <a href="https://thanda.solar" aria-label="Thanda Solar website" className="flex items-center gap-3"><img src="/logos/logo_icon_color.png" alt="" className="h-10 w-10 object-contain" /><span className="text-lg font-bold tracking-tight">THANDA SOLAR</span></a>
+    <Link href="/login" className="text-sm font-semibold text-zinc-600 underline underline-offset-4">Trade sign in</Link>
+  </div></header>;
+
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/95 backdrop-blur-md">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:min-h-16 sm:flex-row sm:items-center sm:gap-6 sm:px-6 sm:py-2">

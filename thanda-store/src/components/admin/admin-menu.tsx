@@ -10,6 +10,7 @@ const groups = [
     { href: '/admin/companies', label: 'Companies' },
     { href: '/admin/users', label: 'Users' },
     { href: '/admin/quote-requests', label: 'Quote requests' },
+    { href: '/admin/guest-quote-requests', label: 'Website enquiries' },
   ] },
   { label: 'Stock & planning', destinations: [
     { href: '/admin/products', label: 'Products' },

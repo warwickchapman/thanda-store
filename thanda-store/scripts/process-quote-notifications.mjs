@@ -1,5 +1,7 @@
 import { createPool } from './product-sync-lib.mjs';
-import { runNotifications } from '../src/lib/commerce/notifications.mjs';
+import { runNotificationQueues } from '../src/lib/commerce/notifications.mjs';
 const pool=createPool();
-try { console.log(JSON.stringify(await runNotifications(pool))); }
+try {
+  console.log(JSON.stringify(await runNotificationQueues(pool)));
+}
 finally { await pool.end(); }

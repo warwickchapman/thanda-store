@@ -5,7 +5,7 @@ export default function middleware(request: Request) {
   const cookie = request.headers.get('cookie') || '';
   const hasSession = /(?:^|;\s*)thanda_session=/.test(cookie);
 
-  if (url.pathname === '/login' || url.pathname === '/forgot-password' || url.pathname === '/set-password') {
+  if (url.pathname === '/login' || url.pathname === '/forgot-password' || url.pathname === '/set-password' || url.pathname === '/request-quote') {
     return NextResponse.next();
   }
 

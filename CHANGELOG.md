@@ -4,6 +4,12 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Added a small public **Featured products** feed for the new Thanda Solar website, using seven reviewed Victron products and the Thanda LoRa Relay Switcher. Products remain owned by Store; recorded replacement codes resolve through the existing SKU rules. The feed exposes no supplier costs, trade discounts, retail prices, exact stock counts or customer history. Local availability requires a current tracked KZN observation.
+
+- Visitors can request a quote at **/request-quote** without signing in, selecting quantities or describing a solution in a message. Enquiries are saved locally with a durable reference and a queued staff notification; retries do not create duplicates. No account, Xero record, order, stock reservation or marketing subscription is created. Sales can review and manage them under **Admin → Website enquiries**, including notes, status and notification state. The existing trade Store and private previews keep their access rules.
+
+- Extended the existing notification worker to process website enquiries within its shared 20-call and 45-second limits, reserving four calls per run for the new staff outbox. Delivery, retry expiry and provider cooldown remain visible, with no new timer or credential. Public browsing and enquiries make no supplier, Hub or Xero calls.
+
 - Enertec product badges, stock text, product details and availability filters now say **Generally available in 1–2 days**, giving a compact expected lead time. This wording update retains existing stock quantities, prices, ordering checks and private preview access.
 
 - Data health now puts management actions ahead of technical diagnostics. It distinguishes imports that need attention, stock records for the bookkeeper, confirmed product additions waiting for their stock import, and products removed from a supplier catalogue. Thanda's own Xero stock and supplier ZA stock are explained separately; Sensible's balances are not added to Thanda's. Removed supplier articles no longer create permanent stock-update failure warnings. Waiting, pause deadlines and genuine missing/unknown balances remain visible.
