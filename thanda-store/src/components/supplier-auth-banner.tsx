@@ -8,7 +8,7 @@ type Alert = { source_id: string; opened_at: string; email_failed: number; email
 
 export function SupplierAuthBanner() {
   const pathname = usePathname();
-  const isLogin = ['/login', '/forgot-password', '/set-password'].includes(pathname);
+  const isLogin = ['/login', '/forgot-password', '/set-password', '/request-quote'].includes(pathname);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {

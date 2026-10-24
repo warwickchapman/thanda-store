@@ -3,7 +3,29 @@ export function deliveryState(event) {
   if (['bounced','failed','complained','suppressed'].includes(event)) return 'failed';
   return 'accepted';
 }
-export async function runNotifications(pool, { fetcher = fetch, pause = ms => new Promise(r => setTimeout(r,ms)), now = () => Date.now() } = {}) {
+
+// Alternate queues early in a run so slow quote-mail responses cannot consume
+// the whole deadline before a website enquiry gets a turn. No new timer.
+export async function runNotificationQueues(pool, { runner = runNotifications, now = () => Date.now() } = {}) {
+  const deadlineAt = now() + 45000;
+  const exists = await pool.query("SELECT to_regclass('guest_quote_notifications') IS NOT NULL AS ready");
+  const idle = new Set(exists.rows[0].ready ? [] : ['guest']);
+  const result = { quote: { calls: 0 }, guest: { calls: 0 } };
+  const schedule = [...Array.from({ length: 4 }, () => ['quote', 'guest']).flat(), ...Array(12).fill('quote')];
+  for (const queue of schedule) {
+    if (now() >= deadlineAt) break;
+    if (idle.has(queue)) continue;
+    const work = await runner(pool, { queue, maxCalls: 1, deadlineAt, now });
+    result[queue].calls += work.calls;
+    if (!work.calls) idle.add(queue);
+  }
+  return result;
+}
+
+export async function runNotifications(pool, { fetcher = fetch, pause = ms => new Promise(r => setTimeout(r,ms)), now = () => Date.now(), queue = 'quote', maxCalls = 20, deadlineAt } = {}) {
+  if (!['quote','guest'].includes(queue)) throw new Error('Unknown notification queue.');
+  const table = queue === 'guest' ? 'guest_quote_notifications' : 'portal_quote_notifications';
+  const budget = Math.max(0, Math.min(20, Number(maxCalls) || 0));
   const db = await pool.connect();
   let calls = 0;
   let acquired = false;
@@ -13,30 +35,30 @@ export async function runNotifications(pool, { fetcher = fetch, pause = ms => ne
     if (!acquired) return { calls:0 };
     const key = process.env.RESEND_API_KEY;
     if (!key) throw new Error('Resend is not configured for the notification worker.');
-    const deadline = now()+45000;
-    while (calls < 20 && now() < deadline) {
+    const deadline = deadlineAt ?? now()+45000;
+    while (calls < budget && now() < deadline) {
       const state = await db.query('SELECT next_allowed_at FROM portal_notification_state WHERE id=true');
       if (state.rows[0]?.next_allowed_at && new Date(state.rows[0].next_allowed_at).getTime()>now()) break;
-      const result = await db.query(`SELECT * FROM portal_quote_notifications WHERE state IN ('pending','accepted')
+      const result = await db.query(`SELECT * FROM ${table} WHERE state IN ('pending','accepted')
         AND next_attempt_at<=now() ORDER BY next_attempt_at,id LIMIT 1`);
       const job = result.rows[0];
       if (!job) break;
       const sending = job.state === 'pending';
       if (sending && (job.attempts>=5 || (job.first_attempt_at && now()-new Date(job.first_attempt_at).getTime()>23*3600000))) {
-        await db.query("UPDATE portal_quote_notifications SET state='unconfirmed',last_error='Automatic retry window ended. Review the provider record before resending.',updated_at=now() WHERE id=$1",[job.id]);
+        await db.query(`UPDATE ${table} SET state='unconfirmed',last_error='Automatic retry window ended. Review the provider record before resending.',updated_at=now() WHERE id=$1`,[job.id]);
         continue;
       }
       if (!sending && job.status_checks>=3) {
-        await db.query("UPDATE portal_quote_notifications SET state='unconfirmed',last_error='Email accepted; delivery could not be confirmed.',updated_at=now() WHERE id=$1",[job.id]);
+        await db.query(`UPDATE ${table} SET state='unconfirmed',last_error='Email accepted; delivery could not be confirmed.',updated_at=now() WHERE id=$1`,[job.id]);
         continue;
       }
-      await db.query(`UPDATE portal_quote_notifications SET attempts=attempts+$2,status_checks=status_checks+$3,
+      await db.query(`UPDATE ${table} SET attempts=attempts+$2,status_checks=status_checks+$3,
         first_attempt_at=COALESCE(first_attempt_at,now()),next_attempt_at=now()+interval '2 minutes' WHERE id=$1`,[job.id,sending?1:0,sending?0:1]);
       calls++;
       try {
         const response=await fetcher(`https://api.resend.com/emails${sending?'':`/${encodeURIComponent(job.provider_id)}`}`,{
           method:sending?'POST':'GET',signal:AbortSignal.timeout(15000),
-          headers:{Authorization:`Bearer ${key}`,...(sending?{'Content-Type':'application/json','Idempotency-Key':`quote-${job.request_id}-${job.audience}`}:{})},
+          headers:{Authorization:`Bearer ${key}`,...(sending?{'Content-Type':'application/json','Idempotency-Key':`${queue === 'guest' ? 'guest-rfq' : 'quote'}-${job.request_id}-${job.audience}`}:{})},
           ...(sending?{body:JSON.stringify(job.email_payload)}:{}),
         });
         const payload=await response.json().catch(()=>({}));
@@ -47,7 +69,7 @@ export async function runNotifications(pool, { fetcher = fetch, pause = ms => ne
           // message payloads or full arbitrary upstream response bodies.
           const errorName=String(payload.name || 'provider_error').replace(/[^a-z0-9_-]/gi,'').slice(0,80);
           const permanent=[400,401,403,422].includes(response.status) || (response.status===409 && errorName==='invalid_idempotent_request');
-          await db.query('UPDATE portal_quote_notifications SET state=$2,last_error=$3,next_attempt_at=now()+($4 * interval \'1 second\'),updated_at=now() WHERE id=$1',
+          await db.query(`UPDATE ${table} SET state=$2,last_error=$3,next_attempt_at=now()+($4 * interval '1 second'),updated_at=now() WHERE id=$1`,
             [job.id,permanent?(sending?'failed':'unconfirmed'):job.state,`Resend ${response.status}: ${errorName}`,Math.min(3600,60*2**(job.attempts+job.status_checks+1))]);
           if ([429,401,403].includes(response.status)) {
             const quota=/quota/.test(errorName);
@@ -60,13 +82,13 @@ export async function runNotifications(pool, { fetcher = fetch, pause = ms => ne
           }
         } else if (sending) {
           if (typeof payload.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(payload.id)) throw new Error('Unconfirmed provider response');
-          await db.query("UPDATE portal_quote_notifications SET state='accepted',provider_id=$2,last_error=NULL,next_attempt_at=now()+interval '1 minute',updated_at=now() WHERE id=$1",[job.id,payload.id]);
+          await db.query(`UPDATE ${table} SET state='accepted',provider_id=$2,last_error=NULL,next_attempt_at=now()+interval '1 minute',updated_at=now() WHERE id=$1`,[job.id,payload.id]);
         } else {
           const status=deliveryState(payload.last_event);
-          await db.query("UPDATE portal_quote_notifications SET state=$2,last_error=$3,next_attempt_at=now()+interval '15 minutes',updated_at=now() WHERE id=$1",[job.id,status,status==='failed'?`Delivery ${String(payload.last_event).slice(0,40)}`:null]);
+          await db.query(`UPDATE ${table} SET state=$2,last_error=$3,next_attempt_at=now()+interval '15 minutes',updated_at=now() WHERE id=$1`,[job.id,status,status==='failed'?`Delivery ${String(payload.last_event).slice(0,40)}`:null]);
         }
       } catch {
-        await db.query("UPDATE portal_quote_notifications SET last_error='Provider request did not return a confirmed result; retry scheduled.',next_attempt_at=now()+interval '5 minutes',updated_at=now() WHERE id=$1",[job.id]);
+        await db.query(`UPDATE ${table} SET last_error='Provider request did not return a confirmed result; retry scheduled.',next_attempt_at=now()+interval '5 minutes',updated_at=now() WHERE id=$1`,[job.id]);
       }
       await pause(1000);
     }
