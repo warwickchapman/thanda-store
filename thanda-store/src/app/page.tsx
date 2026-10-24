@@ -38,7 +38,7 @@ interface SessionUser {
 
 type Cart = { lines: Array<{ quantity: number; product: { id: number; name: string; sku: string; your_price_ex_vat: number | null } }>; itemCount: number; subtotalExVat: number };
 const emptyCart: Cart = { lines: [], itemCount: 0, subtotalExVat: 0 };
-const ENERTEC_AVAILABILITY = 'Stock generally available, confirm on request';
+const ENERTEC_AVAILABILITY = 'Generally available in 1–2 days';
 
 function displayLabel(value: string) {
   const label = value

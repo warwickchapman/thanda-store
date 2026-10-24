@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Enertec product badges, stock text, product details and availability filters now say **Generally available in 1–2 days**, giving a compact expected lead time. This wording update retains existing stock quantities, prices, ordering checks and private preview access.
+
 - Data health now puts management actions ahead of technical diagnostics. It distinguishes imports that need attention, stock records for the bookkeeper, confirmed product additions waiting for their stock import, and products removed from a supplier catalogue. Thanda's own Xero stock and supplier ZA stock are explained separately; Sensible's balances are not added to Thanda's. Removed supplier articles no longer create permanent stock-update failure warnings. Waiting, pause deadlines and genuine missing/unknown balances remain visible.
 
 - Successful Thanda catalogue additions and recorded archives now queue the existing background stock import. Opening Data health also queues an overdue local stock import, with requests coalesced and at most three local progress checks. Successful additions are recognised immediately from their confirmation records without inventing stock quantities or inviting a second creation. An older Hub snapshot cannot clear the request, and a new action arriving during an import is preserved for the following run. Page loads and queued imports add no supplier or Xero calls.
