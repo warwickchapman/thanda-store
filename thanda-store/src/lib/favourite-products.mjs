@@ -4,11 +4,20 @@ const literalSku = (value) => String(value || '').trim().toUpperCase();
 const supplierName = (value) => String(value || '').trim().toLowerCase();
 const orderable = (product) => Number(product.details?.localStockOnHand) > 0 || Number(product.stock_on_hand) > 0;
 
+// The public range and authenticated Home use the same rolling calendar year.
+export function favouritesWindowStart(now = Date.now()) {
+  const cutoff = new Date(now);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
+  return cutoff.toISOString().slice(0, 10);
+}
+
 // Invoice history has an ItemCode but no supplier. Ambiguous cross-brand codes
 // cannot safely be attributed to a replacement family, so they are omitted.
-export function rankedFavouriteProducts(history, products, successions, rankedByFrequency, now = Date.now(), limit = 20) {
+export function rankedFavouriteProducts(history, products, successions, rankedByFrequency, now = Date.now(), limit = 20, identityProducts = products) {
   const familyFor = skuFamilyResolver(successions);
-  const candidates = [...products.map((product) => ({ supplier: supplierName(product.supplier), sku: product.sku })),
+  // Public eligibility can narrow representatives without erasing a known
+  // cross-brand ItemCode collision from the source catalogue.
+  const candidates = [...identityProducts.map((product) => ({ supplier: supplierName(product.supplier), sku: product.sku })),
     ...successions.flatMap((row) => [row.predecessor_sku, row.successor_sku].map((sku) => ({ supplier: supplierName(row.supplier), sku })))];
   const suppliersBySku = new Map();
   const victronArticles = new Set();

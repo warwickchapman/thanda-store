@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Public website products now reuse the Store’s **Popular** sales calculation and rolling one-year period, replacing the manually chosen eight-product range. Authorised/paid customer sales less credits determine the order, using the existing SKU replacement families and Victron packaging aliases. Private, hidden and out-of-range products are excluded before choosing up to eight cards. Public cards retain accurate local stock states and expose no prices, sales quantities or customer details; browsing adds no supplier, Hub or Xero requests.
+
 - Added a small public **Featured products** feed for the new Thanda Solar website, using seven reviewed Victron products and the Thanda LoRa Relay Switcher. Products remain owned by Store; recorded replacement codes resolve through the existing SKU rules. The feed exposes no supplier costs, trade discounts, retail prices, exact stock counts or customer history. Local availability requires a current tracked KZN observation.
 
 - Visitors can request a quote at **/request-quote** without signing in, selecting quantities or describing a solution in a message. Enquiries are saved locally with a durable reference and a queued staff notification; retries do not create duplicates. No account, Xero record, order, stock reservation or marketing subscription is created. Sales can review and manage them under **Admin → Website enquiries**, including notes, status and notification state. The existing trade Store and private previews keep their access rules.

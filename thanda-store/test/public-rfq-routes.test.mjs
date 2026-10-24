@@ -3,6 +3,8 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import * as rfq from '../src/lib/commerce/public-rfq.mjs';
+import { favouritesWindowStart } from '../src/lib/favourite-products.mjs';
+import { selectPublicProducts } from '../src/lib/commerce/public-storefront.mjs';
 
 const origin = 'https://store.thanda.solar';
 const id = '4fd831c6-ec92-41ea-86b1-015af613b02c';
@@ -81,7 +83,7 @@ test('featured products are readable without account dependencies and a failed r
   const route = evaluate('app/api/public/featured-products/route.ts', publicCatalogue);
   const response = await route.GET();
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).selection, 'curated');
+  assert.equal((await response.json()).selection, 'popular');
   assert.match(response.headers.get('cache-control'), /^public,/);
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   const failed = evaluate('app/api/public/featured-products/route.ts', {
@@ -91,6 +93,36 @@ test('featured products are readable without account dependencies and a failed r
   assert.equal(failure.status, 503);
   assert.equal(failure.headers.get('cache-control'), 'no-store');
   assert.doesNotMatch(await failure.text(), /PRIVATE-DATABASE-DETAIL/);
+});
+
+test('the public range reads local sales in the shared Popular period without provider calls or schema writes', async () => {
+  const queries = [];
+  const catalogue = evaluate('lib/commerce/public-storefront.ts', {
+    'node:fs': { existsSync: () => false }, 'node:path': { join: (...parts) => parts.join('/') },
+    '@/lib/db': { query: async (sql, parameters) => {
+      assert.match(sql, /^SELECT /, 'The public range must only read existing local data.');
+      queries.push({ sql, parameters });
+      if (sql.includes('FROM products')) return { rows: [
+        { id: 1, supplier: 'victron', sku: 'FIRST', name: 'First', details: {} },
+        { id: 2, supplier: 'victron', sku: 'SECOND', name: 'Second', details: {} },
+      ] };
+      assert.match(sql, /FROM xero_sales_invoice_lines\s+WHERE invoice_date >= \$1::date/);
+      return { rows: [
+        { invoice_id: 'PRIVATE-INVOICE', invoice_date: new Date(), sku: 'FIRST', quantity: 2 },
+        { invoice_id: 'PRIVATE-CUSTOMER-INVOICE', invoice_date: new Date(), sku: 'SECOND', quantity: 5 },
+      ] };
+    } },
+    '../../../data/public-product-summaries.json': [{ supplier: 'victron', sku: 'FIRST', position: 1, summary: 'Reviewed copy.' }],
+    '@/lib/sku-successions.mjs': { loadSkuSuccessions: async () => [] },
+    '@/lib/favourite-products.mjs': { favouritesWindowStart },
+    './public-storefront.mjs': { selectPublicProducts },
+  });
+  const result = await catalogue.publicFeaturedProducts();
+  assert.deepEqual(result.map(row => row.id), [2, 1]);
+  assert.equal(queries.length, 2);
+  assert.deepEqual(queries[1].parameters, [favouritesWindowStart()]);
+  assert.doesNotMatch(queries[0].sql, /\bprice\b|description|contact_id/);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-|invoice_id|quantity|contact_id/);
 });
 
 test('featured feed CORS permits only the four configured marketing origins without credentials', async () => {

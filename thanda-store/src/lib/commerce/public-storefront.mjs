@@ -1,7 +1,10 @@
 import { isCatalogueRestricted } from '../catalogue-access.mjs';
 import { isStorefrontProduct } from '../catalogue-classification.mjs';
-import { localStockObservation } from '../data-freshness.mjs';
-import { normalizeSku, skuFamilyResolver, successorSkus } from '../sku-successions.mjs';
+import { localStockObservation, supplierStockObservation } from '../data-freshness.mjs';
+import { catalogueStockFamilies, withCatalogueFamilyStock } from '../catalogue-stock-families.mjs';
+import { isSupersededForDiscovery } from '../catalogue-succession.mjs';
+import { rankedFavouriteProducts } from '../favourite-products.mjs';
+import { skuFamilyResolver } from '../sku-successions.mjs';
 
 const supplierName = value => String(value || '').trim().toLowerCase();
 const hidden = row => row.details?.hidden === true || row.details?.hidden === 'true';
@@ -22,35 +25,37 @@ function imageUrl(row, hasThumbnail) {
 }
 
 /** Deliberately independent of the cost-bearing authenticated catalogue object. */
-export function selectPublicProducts(rows, successions, config, { now = Date.now(), hasThumbnail = noThumbnail } = {}) {
+export function selectPublicProducts(rows, successions, history, summaries = [], { now = Date.now(), hasThumbnail = noThumbnail } = {}) {
   const familyFor = skuFamilyResolver(successions);
-  const visible = rows.filter(row => !hidden(row) && !isCatalogueRestricted(row) && isStorefrontProduct(row));
-  const result = [];
-  const emitted = new Set();
-  for (const selected of [...config].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).slice(0, 8)) {
-    // Publishing a brand alone never publishes its catalogue: this exact
-    // reviewed selection (and its explicit canonical replacements) is required.
-    const supplier = supplierName(selected.supplier);
-    if (!['victron', 'lora'].includes(supplier) || !safePart(selected.sku)) continue;
-    const family = familyFor(supplier, selected.sku);
-    if (emitted.has(family)) continue;
-    const members = visible.filter(row => supplierName(row.supplier) === supplier && familyFor(supplier, row.sku) === family);
-    const preferred = [...successorSkus(successions, supplier, selected.sku), selected.sku].map(sku => normalizeSku(supplier, sku));
-    const row = preferred.map(sku => members.filter(item => normalizeSku(supplier, item.sku) === sku)
-      .sort((a, b) => Number(String(a.sku).endsWith('R')) - Number(String(b.sku).endsWith('R')))[0]).find(Boolean);
-    if (!row || !Number.isSafeInteger(Number(row.id)) || Number(row.id) < 1) continue;
+  const visible = rows.filter(row => !hidden(row) && !isCatalogueRestricted(row) && isStorefrontProduct(row)
+    && safePart(row.supplier) && safePart(row.sku) && Number.isSafeInteger(Number(row.id)) && Number(row.id) > 0);
+  const listings = catalogueStockFamilies(visible, successions)
+    .filter(({ row }) => !isSupersededForDiscovery(row, visible, successions))
+    .map(({ row, stock }) => withCatalogueFamilyStock({
+      ...row,
+      stock_on_hand: row.details?.cataloguePresent === false ? null : supplierStockObservation(row).quantity,
+      details: { ...row.details, localStockOnHand: localStockObservation(row).quantity },
+    }, stock));
+  const originalById = new Map(visible.map(row => [row.id, row]));
+  // Use Home's existing Popular calculation, including credits, replacement
+  // families and stock-based representative choice. Editorial metadata never
+  // decides eligibility, score or order. Unavailable products retain their rank.
+  return rankedFavouriteProducts(history, listings, successions, false, now, 8, rows).map(ranked => {
+    // Family stock is ranking input only. Public availability must use the
+    // representative article's own observation, never an aggregated balance.
+    const row = originalById.get(ranked.id);
+    const supplier = supplierName(row.supplier);
+    const summary = summaries.find(item => familyFor(item.supplier, item.sku) === familyFor(supplier, row.sku))?.summary;
     const observation = localStockObservation(row);
     const observedMs = Date.parse(observation.observedAt || '');
     const current = observation.quantity !== null && Number.isFinite(observedMs)
       && observedMs <= now + 300_000 && now - observedMs <= 120 * 60_000;
     // Construct every key. Never spread rows, details, history or prices.
-    result.push({
+    return {
       id: Number(row.id), supplier, sku: String(row.sku), name: String(row.name), category: String(row.category || ''),
-      summary: String(selected.summary || '').slice(0, 300), imageUrl: imageUrl(row, hasThumbnail),
+      summary: String(summary || 'Ask the Thanda team for product advice, availability and a quote.').slice(0, 300), imageUrl: imageUrl(row, hasThumbnail),
       requestQuoteUrl: `https://store.thanda.solar/request-quote?product=${Number(row.id)}`,
       availability: { local: !current ? 'unknown' : observation.quantity > 0 ? 'in_stock' : 'out_of_stock', observedAt: observation.observedAt },
-    });
-    emitted.add(family);
-  }
-  return result;
+    };
+  });
 }

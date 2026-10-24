@@ -10,7 +10,7 @@ function cors(request?: Request) {
 
 export async function GET(request?: Request) {
   try {
-    return Response.json({ selection: 'curated', products: await publicFeaturedProducts() }, {
+    return Response.json({ selection: 'popular', products: await publicFeaturedProducts() }, {
       headers: { ...cors(request), 'Cache-Control': 'public, max-age=60, s-maxage=60', 'X-Content-Type-Options': 'nosniff' },
     });
   } catch {

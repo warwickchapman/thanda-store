@@ -2,7 +2,7 @@
 
 Dealer inventory portal for Thanda Store. The repository contains a Next.js B2B storefront, PostgreSQL-backed catalogue, supplier/Xero synchronization jobs, and a small internal user administration area.
 
-The public marketing integration exposes a reviewed product selection and a guest quote-enquiry form without opening the full trade catalogue or its prices. See [Public product selection and website enquiries](docs/public-storefront.md) for the API contract, sales workflow, abuse controls, mail budget and rollout.
+The public marketing integration exposes up to eight public-eligible products from the existing sales-based Popular ranking and a guest quote-enquiry form without opening the full trade catalogue or its prices. See [Public product selection and website enquiries](docs/public-storefront.md) for the API contract, sales workflow, abuse controls, mail budget and rollout.
 
 The root README is the operational source of truth. [`thanda-store/README.md`](thanda-store/README.md) is intentionally brief and points here.
 
