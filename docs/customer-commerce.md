@@ -10,6 +10,69 @@ Quote notifications use a PostgreSQL outbox. The worker makes at most 20 Resend 
 
 Resend's [idempotency keys](https://resend.com/changelog/idempotency-keys) expire after 24 hours. [Retrieve email](https://resend.com/docs/api-reference/emails/retrieve-email) supplies `last_event`; acceptance is not delivery. The documented default [rate limit](https://resend.com/docs/api-reference/rate-limit) is 10 requests/second per team; this worker reserves headroom for authentication mail by running at one/second. Returned `Retry-After`, rate-limit and quota observations are retained locally. A 429 pauses the whole worker, not just one job; quota exhaustion/credentials failures stop sending until corrected. Unconfirmed outcomes after the retry window are flagged for sales instead of blindly resent.
 
+## Quote availability and lead times
+
+New cart quotes and copied quotes append an availability note after a blank line
+in each item's existing description. The note is calculated after replacement
+resolution and quantity merging, using the actual article being quoted. Copies
+use today's saved evidence; retries of an existing request retain the original
+description and stock assessment with the rest of its frozen request body.
+
+- Enough observed Thanda stock for the full line: **Stock available. Subject to prior sale.**
+- Partial Thanda stock: state the quantity available, subject to prior sale, then describe availability for the balance.
+- Enough Renogy supplier stock for the balance: **Estimated lead time: 2-4 working days, subject to confirmation.**
+- Enough Victron ZA warehouse stock for the balance: **Estimated lead time: 5-7 working days, subject to confirmation.**
+- Later Victron supply: use a future planned date from the saved E-Order backorders only where the available dated quantity supports the balance. State the date as an estimate, allow a further 5-7 working days, and explicitly say supplier confirmation is required and timing may change.
+- Otherwise: **Stock availability on enquiry.** The balance gets the same qualification when only part of the requested quantity is available locally.
+
+Freshness uses the existing source windows: Thanda 120 minutes, Renogy 20
+minutes, Victron ZA 300 minutes and Victron orders 180 minutes. Missing,
+invalid, overdue or implausibly future observations cannot establish stock.
+Other brands get the local-stock statement only when supported by counted
+Thanda inventory; manually maintained marketing wording does not establish a
+supplier quantity or lead time. Removed catalogue articles may still have
+real Thanda stock, but retained supplier balances do not establish availability.
+
+Later estimates require current successful backorder and accepted-quote
+observations. Ignored/RMA backorders and stock already represented as inbound
+are excluded. Any accepted reservation in the same confirmed replacement
+family withholds a later estimate, and any inbound overlap excludes that
+order's family balance. This conservative rule avoids inventing an allocation;
+uncertain or committed supply falls back to an enquiry. A date under another
+successor article never becomes the quoted article's supply. Retail `R`
+packaging aliases remain the same Victron stock article. Shipment dates,
+overseas quantities and additional-stock totals never become promised arrivals.
+These notes do not reserve stock or change the existing ordering eligibility.
+
+API budget review (26 October 2026): **zero additional supplier, Xero or Hub
+requests per quote/run/day**, including a cold cache. Stock, backorders,
+reservations and canonical SKU relationships are batched local PostgreSQL
+reads; no new provider path, polling, backfill or cache refresh is introduced.
+Scheduled imports remain the invalidation source. The existing Hub `/Quotes`
+command sends `Quotes[].LineItems[].Description`, as supported by the
+[official Xero OpenAPI specification](https://github.com/XeroAPI/Xero-OpenAPI/blob/master/xero_accounting.yaml).
+Its durable operation ID, response allowance ledger, reserve and cooldown
+handling remain in force. Existing limits of 200 new requests per Store and
+50 per contact per rolling 24 hours remain unchanged; reaching these limits or
+the Hub's reserve/cooldown stops new writes while the existing operation can
+still be reconciled. Xero's published limits are 60 calls/minute and five
+concurrent calls per organisation, with a daily allowance of 1,000 on Starter
+or 5,000 on higher tiers; the Hub's actual returned allowance and configured
+reserve remain authoritative. See [Xero's rate limits](https://developer.xero.com/documentation/guides/oauth2/limits/).
+
+Validation from `thanda-store/`:
+
+```bash
+node --test --test-isolation=none test/quote-availability.test.mjs \
+  test/quote-backorders.test.mjs test/quote-vat.test.mjs \
+  test/sku-quote-copy.test.mjs test/catalogue-stock-families.test.mjs
+RUN_QUOTE_AVAILABILITY_DB_TESTS=1 node test/quote-availability.integration.mjs
+```
+
+The integration command requires `DATABASE_URL` pointing to a disposable local
+`quote_availability_test` database. It creates and removes a unique synthetic
+schema. Tests create no real quote or email and contact no provider.
+
 ## Contact pricing
 
 `contact_supplier_discounts` is keyed by Xero contact ID and supplier. All users on the contact, storefront pricing, carts, quote creation and API exports read this source. Legacy user discounts are retained only as migration evidence. The one-time transaction checks explicit rates and implicit defaults across all contact users and aborts on a conflict; it never silently picks a price. Creating another user does not overwrite existing contact prices. Explicitly moving a person to another company selects the destination contact's pricing; the company identity is never repointed and old rates are not copied.

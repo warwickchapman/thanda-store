@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Store-generated quotes now include stock availability and estimated lead times inside each product description, including partial-stock quantities. Available Thanda stock is subject to prior sale; supplier estimates use 2-4 working days for Renogy and 5-7 for Victron ZA stock. Later Victron dates use current saved E-Order evidence with explicit confirmation and timing caveats. Unknown or unsupported availability remains on enquiry. Copied quotes reassess current evidence, while retries preserve the original request. The change adds no supplier or Xero calls.
+
 - Public website products now reuse the Store’s **Popular** sales calculation and rolling one-year period, replacing the manually chosen eight-product range. Authorised/paid customer sales less credits determine the order, using the existing SKU replacement families and Victron packaging aliases. Private, hidden and out-of-range products are excluded before choosing up to eight cards. Public cards retain accurate local stock states and expose no prices, sales quantities or customer details; browsing adds no supplier, Hub or Xero requests.
 
 - Added a small public **Featured products** feed for the new Thanda Solar website, using seven reviewed Victron products and the Thanda LoRa Relay Switcher. Products remain owned by Store; recorded replacement codes resolve through the existing SKU rules. The feed exposes no supplier costs, trade discounts, retail prices, exact stock counts or customer history. Local availability requires a current tracked KZN observation.

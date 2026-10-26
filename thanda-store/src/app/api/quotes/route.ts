@@ -6,7 +6,7 @@ import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { isSupplierProductAvailable, resolveFulfilmentProduct } from '@/lib/victron-fulfilment';
 import { QuoteRequestLimitError, recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
-import { quoteLineItem } from '@/lib/commerce/quote-line.mjs';
+import { quoteLineItems } from '@/lib/commerce/quote-line.mjs';
 
 function currentQuoteDate() {
   return new Date().toISOString().slice(0, 10);
@@ -39,13 +39,14 @@ export async function POST(request: Request) {
       }
       resolvedQuantities.set(fulfilment.id, (resolvedQuantities.get(fulfilment.id) || 0) + Number(line.quantity));
     }
-    const lineItems = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
+    const selections = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
       const product = products.get(productId);
       if (!product || product.your_price_ex_vat === null || product.recommended_retail_ex_vat === null) {
         throw new Error('A cart item no longer has a current price. Remove it or contact sales.');
       }
-      return quoteLineItem(product, quantity);
+      return { product, quantity };
     });
+    const lineItems = await quoteLineItems(pool, selections);
     const quoteDate = currentQuoteDate();
     const quoteStatus = await customerQuoteStatus();
     await recordQuoteRequest(pool,user,requestId,{ Quotes: [{
