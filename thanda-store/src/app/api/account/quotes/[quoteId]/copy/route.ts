@@ -8,7 +8,7 @@ import { auditAccountAction, customerDocument } from '@/lib/xero/customer-accoun
 import { xeroAccountingFetch } from '@/lib/xero/oauth';
 import { QuoteRequestLimitError, recordQuoteRequest, resumeQuoteRequest, validRequestId } from '@/lib/commerce/quote-requests.mjs';
 import { customerQuoteStatus } from '@/lib/quote-settings';
-import { quoteLineItem } from '@/lib/commerce/quote-line.mjs';
+import { quoteLineItems } from '@/lib/commerce/quote-line.mjs';
 
 type ProductLine = { productId: number; sku: string; name: string; quantity: number; unitPrice: number; discount: number };
 
@@ -108,11 +108,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (!fulfilment || !isSupplierProductAvailable(fulfilment)) return NextResponse.json({ error: 'One or more selected products is not currently available.' }, { status: 409 });
       resolvedQuantities.set(fulfilment.id, (resolvedQuantities.get(fulfilment.id) || 0) + quantity);
     }
-    const lineItems = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
+    const selections = Array.from(resolvedQuantities.entries()).map(([productId, quantity]) => {
       const product = products.get(productId);
       if (!product || product.your_price_ex_vat === null || product.recommended_retail_ex_vat === null) throw new Error('A selected product no longer has a current price.');
-      return quoteLineItem(product, quantity);
+      return { product, quantity };
     });
+    const lineItems = await quoteLineItems(pool, selections);
     const date = new Date().toISOString().slice(0, 10);
     const quoteStatus = await customerQuoteStatus();
     await recordQuoteRequest(pool,user,requestId,{ Quotes:[{

@@ -1094,6 +1094,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the production-facing change history.
 
 See [Customer commerce](docs/customer-commerce.md) for the local quote ledger and notification worker, contact pricing migration, product resources, API access and deployment checks.
 
+Generated cart and copied quotes include availability in each item's description:
+Thanda stock is subject to prior sale, Renogy supplier stock has an estimated
+2-4-working-day lead time, and Victron ZA stock an estimated 5-7 working days.
+Partial stock is stated separately from the balance. Reliable later E-Order
+backorder dates remain qualified estimates; insufficient or overdue evidence
+uses availability on enquiry. See [quote availability rules and API budget](docs/customer-commerce.md#quote-availability-and-lead-times).
+
 ### Mobile navigation
 
 Below 640 px, the storefront header shows the brand, a labelled hamburger button and product search. The expandable navigation contains the same company, account, API, admin, cart and logout controls as desktop, with the same permission checks. Selecting an action, focusing search, clicking outside or pressing Escape closes it; Escape returns focus to the trigger. Opening the menu performs no additional API requests.

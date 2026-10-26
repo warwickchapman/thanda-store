@@ -3,18 +3,18 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import test from 'node:test';
-import { quoteLineItem } from '../src/lib/commerce/quote-line.mjs';
+import { quoteLineItem, quoteLineItems } from '../src/lib/commerce/quote-line.mjs';
 import { QuoteRequestLimitError, validRequestId } from '../src/lib/commerce/quote-requests.mjs';
 
 const product = {
-  sku: 'BPC120533034R', name: 'Blue Smart IP65s Charger 12/5',
+  sku: 'BPC120533034R', supplier: 'victron', name: 'Blue Smart IP65s Charger 12/5',
   recommended_retail_ex_vat: 1664, b2b_discount_percent: 40,
   details: { xeroStockStatus: 'tracked' },
 };
 
 test('quote lines explicitly request standard sales VAT without changing ex-VAT prices or discounts', () => {
   assert.deepEqual(quoteLineItem(product, 1), {
-    ItemCode: product.sku, Description: product.name, Quantity: 1,
+    ItemCode: product.sku, Description: `${product.name}\n\nStock availability on enquiry.`, Quantity: 1,
     UnitAmount: 1664, DiscountRate: 40, TaxType: 'OUTPUT3',
   });
   assert.equal(product.details.xeroStockStatus, 'tracked');
@@ -29,6 +29,24 @@ test('non-Xero catalogue lines still carry VAT and do not invent an ItemCode', (
   assert.equal('TaxAmount' in line, false);
 });
 
+test('quotes supported by local or ZA stock never depend on optional backorder caches', async () => {
+  const now = new Date('2026-10-26T10:00:00Z');
+  const raw = [
+    { ...product, id: 7, details: { ...product.details, localStockOnHand: 2, xeroStockSyncedAt: now.toISOString() } },
+    { ...product, id: 8, sku: 'OTHER', stock_on_hand: 2, details: {
+      ...product.details, localStockOnHand: 0, xeroStockSyncedAt: now.toISOString(),
+      supplierObservedAt: now.toISOString(), supplierStockStatus: 'known',
+    } },
+  ];
+  const db = { query: async (sql) => {
+    assert.match(sql, /FROM products/, 'Optional planning caches must not be queried for supported lead times.');
+    return { rows: raw };
+  } };
+  const lines = await quoteLineItems(db, raw.map(item => ({ product: item, quantity: 2 })), now);
+  assert.match(lines[0].Description, /Stock available\. Subject to prior sale\.$/);
+  assert.match(lines[1].Description, /Estimated lead time: 5-7 working days, subject to confirmation\.$/);
+});
+
 for (const path of ['../src/app/api/quotes/route.ts', '../src/app/api/account/quotes/[quoteId]/copy/route.ts']) {
   for (const status of ['DRAFT', 'SENT']) {
     test(`${path} submits explicit VAT for ${status} without calling Xero`, async () => {
@@ -38,15 +56,20 @@ for (const path of ['../src/app/api/quotes/route.ts', '../src/app/api/account/qu
       let submitted;
       let resumes = 0;
       const current = { ...product, id: 7, your_price_ex_vat: 998.4 };
+      const stock = { ...current, details: { ...current.details, localStockOnHand: 1, xeroStockSyncedAt: new Date().toISOString() } };
       const user = { id: 1, xeroContactId: 'fixture-contact', organisationName: 'Fixture', email: 'fixture@example.test', discounts: {} };
       const modules = {
         'next/server': { NextResponse: Response },
-        '@/lib/db': { query: async () => ({ rowCount: 1, rows: [{ product_id: 7, quantity: 1, updated_at: '2026-10-21' }] }) },
+        '@/lib/db': { query: async (sql) => {
+          if (sql.includes('FROM portal_cart_lines')) return { rowCount: 1, rows: [{ product_id: 7, quantity: 1, updated_at: '2026-10-21' }] };
+          if (sql.includes('FROM products')) return { rows: [stock] };
+          return { rows: [] };
+        } },
         '@/lib/catalogue': { currentCatalogue: async () => [current] },
         '@/lib/auth/server': { currentUser: async () => user },
         '@/lib/xero/oauth': { xeroAccountingFetch: () => { throw new Error('Unexpected provider call'); } },
         '@/lib/victron-fulfilment': { resolveFulfilmentProduct: async () => current, isSupplierProductAvailable: () => true },
-        '@/lib/commerce/quote-line.mjs': { quoteLineItem },
+        '@/lib/commerce/quote-line.mjs': { quoteLineItems },
         '@/lib/commerce/quote-requests.mjs': {
           QuoteRequestLimitError, validRequestId,
           resumeQuoteRequest: async () => ++resumes === 1 ? null : { quoteId: 'fixture' },
@@ -70,6 +93,7 @@ for (const path of ['../src/app/api/quotes/route.ts', '../src/app/api/account/qu
       assert.equal(submitted.Quotes[0].LineItems[0].TaxType, 'OUTPUT3');
       assert.equal(submitted.Quotes[0].LineItems[0].UnitAmount, 1664);
       assert.equal(submitted.Quotes[0].LineItems[0].DiscountRate, 40);
+      assert.equal(submitted.Quotes[0].LineItems[0].Description, `${product.name}\n\nStock available. Subject to prior sale.`);
     });
   }
 }
