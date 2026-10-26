@@ -8,7 +8,7 @@ function cors(request?: Request) {
   return { Vary: 'Origin', ...(allowedOrigins.has(origin) ? { 'Access-Control-Allow-Origin': origin } : {}) };
 }
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   try {
     return Response.json({ selection: 'popular', products: await publicFeaturedProducts() }, {
       headers: { ...cors(request), 'Cache-Control': 'public, max-age=60, s-maxage=60', 'X-Content-Type-Options': 'nosniff' },
