@@ -51,6 +51,11 @@ try {
       source_id TEXT PRIMARY KEY, last_status TEXT, source_observed_at TIMESTAMPTZ,
       last_successful_at TIMESTAMPTZ, last_error TEXT
     );
+    CREATE TABLE thanda_inventory_evidence (
+      id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+      company TEXT NOT NULL CHECK (company = 'thanda-solar'),
+      observed_at TIMESTAMPTZ NOT NULL, snapshot TEXT NOT NULL, items JSONB NOT NULL
+    );
     CREATE TABLE victron_order_sync_state (
       id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id), last_started_at TIMESTAMPTZ,
       last_completed_at TIMESTAMPTZ, last_successful_sync_at TIMESTAMPTZ, last_error TEXT
@@ -223,7 +228,66 @@ try {
   await assert.rejects(quoteLineItems(readOnlyDb,
     [{ product: { ...publicProduct(predecessor), sku: successorSku }, quantity: 1 }], now), /selected product has changed/);
   assert.deepEqual(await quoteLineItems(readOnlyDb, [], now), []);
-  console.log('PASS: real PostgreSQL stock descriptions, supplier/partial lead times, dated supply coverage, family reservations, ignored/RMA/inbound exclusions, stale/error fallback, actual fulfilled article, BIGSERIAL mapping and private metadata boundary.');
+
+  // Ordinary Renogy products have no Xero stock-import status. A complete saved
+  // Items snapshot establishes their accounting identity independently of stock.
+  const renogyIdentity = await addProduct('renogy', 'RBC50D1S-G2-SA', 0, 3,
+    { xeroStockStatus: undefined, xeroStockSyncedAt: null, localStockOnHand: null });
+  const renogySelections = [selection(renogyIdentity, 2)];
+  const [withoutInventory] = await quoteLineItems(readOnlyDb, renogySelections, now);
+  assert.equal(Object.hasOwn(renogyIdentity.details, 'xeroStockStatus'), false);
+  assert.equal(Object.hasOwn(withoutInventory, 'ItemCode'), false, 'Missing evidence retains the legacy omission.');
+  assert.deepEqual(withoutInventory, {
+    Description: `${renogyIdentity.name}\n\n${lead('2-4')}`,
+    Quantity: 2, UnitAmount: 1_000, DiscountRate: 30, TaxType: 'OUTPUT3',
+  });
+  const mappedItem = {
+    Code: renogyIdentity.sku, ItemID: 'synthetic-renogy-item',
+    Name: 'A different saved inventory name', IsTrackedAsInventory: true, QuantityOnHand: 100,
+  };
+  await pool.query(`INSERT INTO thanda_inventory_evidence
+    VALUES (true, 'thanda-solar', $1, 'synthetic-complete-items', $2::jsonb)`, [recent, JSON.stringify([mappedItem])]);
+  let inventoryReads = 0;
+  const identityReadDb = { query: (sql, values) => {
+    if (sql.includes('FROM thanda_inventory_evidence')) inventoryReads++;
+    return readOnlyDb.query(sql, values);
+  } };
+  const [withInventory] = await quoteLineItems(identityReadDb, renogySelections, now);
+  assert.equal(inventoryReads, 1, 'Item identities are resolved with one saved snapshot query.');
+  assert.deepEqual(withInventory, { ItemCode: renogyIdentity.sku, ...withoutInventory },
+    'Identity mapping changes only ItemCode, preserving the selected description, quantity, price, discount and VAT.');
+  assert.deepEqual(renogySelections, [selection(renogyIdentity, 2)], 'Mapping must not mutate selected catalogue products.');
+  await pool.query('UPDATE thanda_inventory_evidence SET observed_at = $1', ['2026-10-26T07:59:00Z']);
+  assert.deepEqual((await quoteLineItems(readOnlyDb, renogySelections, now))[0], withoutInventory,
+    'A stale snapshot cannot introduce an item identity and retains the legacy fallback.');
+
+  // The raw store-managed ItemID is authoritative even though the public DTO
+  // omits it. Reused codes and renamed original items must not change ownership.
+  const managed = await addProduct('enertec', 'STORE-MANAGED-ITEM', 0, 0,
+    { storeManaged: true, xeroItemId: 'synthetic-original-item' });
+  const managedSelection = selection(managed);
+  assert.equal(Object.hasOwn(managedSelection.product.details, 'xeroItemId'), false);
+  const managedExpected = {
+    Description: `${managed.name}\n\n${enquiry}`,
+    Quantity: 1, UnitAmount: 1_000, DiscountRate: 30, TaxType: 'OUTPUT3',
+  };
+  await pool.query(`UPDATE thanda_inventory_evidence SET observed_at = $1, items = $2::jsonb`, [recent, JSON.stringify([
+    mappedItem,
+    { Code: managed.sku, ItemID: 'synthetic-new-owner' },
+    { Code: 'RENAMED-ORIGINAL-ITEM', ItemID: 'synthetic-original-item' },
+  ])]);
+  inventoryReads = 0;
+  const mappedBatch = await quoteLineItems(identityReadDb, [renogySelections[0], managedSelection], now);
+  assert.equal(inventoryReads, 1, 'Multiple suppliers share one complete Items snapshot query.');
+  assert.deepEqual(mappedBatch[0], withInventory);
+  assert.deepEqual(mappedBatch[1], managedExpected,
+    'Fresh reliable identity mismatch must withhold ItemCode despite legacy tracked stock status.');
+  await pool.query('UPDATE thanda_inventory_evidence SET items = $1::jsonb', [JSON.stringify([
+    mappedItem, { Code: managed.sku, ItemID: 'synthetic-original-item' },
+  ])]);
+  assert.deepEqual((await quoteLineItems(readOnlyDb, [managedSelection], now))[0],
+    { ItemCode: managed.sku, ...managedExpected }, 'Matching unchanged store-managed code and ItemID may map.');
+  console.log('PASS: real PostgreSQL stock descriptions, supplier/partial lead times, dated supply coverage, family reservations, ignored/RMA/inbound exclusions, stale/error fallback, actual fulfilled article, BIGSERIAL mapping, private metadata boundary and complete-snapshot item identity mapping.');
 } finally {
   globalThis.fetch = originalFetch;
   if (pool) await pool.end();

@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Store-generated quotes now resolve Xero article codes from the complete saved Items list for every supplier. Ordinary Renogy products no longer lose an existing item code merely because they are outside the Thanda stock importer's scope. Exact article and saved ItemID checks prevent borrowing a replacement or reused code. Prices, VAT, lead-time wording and existing submitted requests are preserved; the lookup adds no Hub, Xero or supplier calls.
+
 - The shared portal header now identifies the current login by email and company, including on mobile with the navigation closed. Accounts and Admin show the same identity; customer impersonation still distinguishes the customer from the acting administrator. Header, catalogue and impersonation banner share one local session lookup rather than making duplicate requests. Failed identity checks show a retry action instead of a guessed user. Public enquiry and sign-in pages retain their existing layouts, with no new supplier or Xero calls.
 
 - Corrected the public featured-products route's request type to match Next.js's build requirements. Product selection, responses and allowed website origins are unchanged.

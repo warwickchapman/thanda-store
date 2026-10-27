@@ -1,10 +1,14 @@
 import { quoteAvailability, quoteNeedsBackorderEstimate } from './quote-availability.mjs';
 import { quoteBackorders } from './quote-backorders.mjs';
+import { quoteItemIdentities } from './quote-item-identity.mjs';
 
 // Portal prices exclude VAT; Xero must receive an explicit standard sales tax code.
-export function quoteLineItem(product, quantity, { stock = product, now = new Date(), backorders = [] } = {}) {
+export function quoteLineItem(product, quantity, {
+  stock = product, now = new Date(), backorders = [],
+  itemCode = product.details?.xeroStockStatus && product.details.xeroStockStatus !== 'missing' ? product.sku : null,
+} = {}) {
   return {
-    ...(product.details?.xeroStockStatus && product.details.xeroStockStatus !== 'missing' ? { ItemCode: product.sku } : {}),
+    ...(itemCode ? { ItemCode: itemCode } : {}),
     Description: `${product.name}\n\n${quoteAvailability(stock, quantity, { now, backorders })}`,
     Quantity: quantity,
     UnitAmount: product.recommended_retail_ex_vat,
@@ -31,9 +35,13 @@ export async function quoteLineItems(db, selections, now = new Date()) {
     }
     return stock;
   });
+  // A product's stock-sync marker is not an accounting identity: the stock
+  // importer does not target every supplier. The complete saved Items list does.
+  const identities = await quoteItemIdentities(db, selectedStocks, now);
   const needsEstimate = selectedStocks.some((stock, index) => quoteNeedsBackorderEstimate(stock, selections[index].quantity, now));
   const backorders = needsEstimate ? await quoteBackorders(db, selectedStocks, now) : [];
   return selections.map(({ product, quantity }, index) => quoteLineItem(product, quantity, {
     stock: selectedStocks[index], now, backorders,
+    ...(identities === null ? {} : { itemCode: identities.get(Number(product.id)) ?? null }),
   }));
 }

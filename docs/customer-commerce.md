@@ -18,6 +18,16 @@ resolution and quantity merging, using the actual article being quoted. Copies
 use today's saved evidence; retries of an existing request retain the original
 description and stock assessment with the rest of its frozen request body.
 
+Accounting item codes come from the complete saved Thanda Xero Items snapshot
+for every supplier. A stock-sync marker alone does not establish whether an
+item exists: ordinary Renogy products are outside the local stock importer's
+target scope. Codes match the actual quoted article exactly, and Store-managed
+products must also match their saved Xero ItemID. No replacement or retail
+packaging code is borrowed. This adds one local snapshot read and no Hub,
+supplier or Xero request. If that snapshot is unavailable or overdue, the
+previous stock-marker behaviour remains; a reliable missing identity is kept
+distinct from an unavailable snapshot. Existing frozen requests are not rewritten.
+
 - Enough observed Thanda stock for the full line: **Stock available. Subject to prior sale.**
 - Partial Thanda stock: state the quantity available, subject to prior sale, then describe availability for the balance.
 - Enough Renogy supplier stock for the balance: **Estimated lead time: 2-4 working days, subject to confirmation.**
@@ -64,7 +74,7 @@ Validation from `thanda-store/`:
 
 ```bash
 node --test --test-isolation=none test/quote-availability.test.mjs \
-  test/quote-backorders.test.mjs test/quote-vat.test.mjs \
+  test/quote-backorders.test.mjs test/quote-item-identity.test.mjs test/quote-vat.test.mjs \
   test/sku-quote-copy.test.mjs test/catalogue-stock-families.test.mjs
 RUN_QUOTE_AVAILABILITY_DB_TESTS=1 node test/quote-availability.integration.mjs
 ```

@@ -39,6 +39,7 @@ test('quotes supported by local or ZA stock never depend on optional backorder c
     } },
   ];
   const db = { query: async (sql) => {
+    if (sql.includes('FROM thanda_inventory_evidence')) return { rows: [] };
     assert.match(sql, /FROM products/, 'Optional planning caches must not be queried for supported lead times.');
     return { rows: raw };
   } };
