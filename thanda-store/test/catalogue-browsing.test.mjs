@@ -56,6 +56,7 @@ function storefront(initialQuery = '', catalogue = products) {
     '@/components/product-details': { ProductDetails: () => null },
     '@/components/cart-drawer': { CartDrawer: () => null },
     '@/components/store-search': { useStoreSearch: () => ({ query, setQuery: value => { query = typeof value === 'function' ? value(query) : value; } }) },
+    '@/components/store-session': { useStoreSession: () => ({ user: null, status: 'signed-out' }) },
     '@/components/catalogue-filters': { CatalogueFilters },
     '@/lib/catalogue-classification.mjs': classification,
     '@/lib/catalogue-succession.mjs': succession,

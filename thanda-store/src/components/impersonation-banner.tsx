@@ -1,21 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
-type CustomerView = { email: string; organisationName: string; impersonatedBy?: { email: string } | null };
+import { useState } from 'react';
+import { useStoreSession } from '@/components/store-session';
 
 export function ImpersonationBanner() {
-  const [user, setUser] = useState<CustomerView | null>(null);
+  const { user } = useStoreSession();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    async function load() {
-      const response = await fetch('/api/session', { cache: 'no-store' });
-      if (response.ok) setUser((await response.json()).user);
-    }
-    void load().catch(() => {});
-  }, []);
 
   if (!user?.impersonatedBy) return null;
   async function stop() {

@@ -3,6 +3,7 @@ import "./globals.css";
 import { ImpersonationBanner } from '@/components/impersonation-banner';
 import { StoreHeader, StoreSearchProvider } from '@/components/store-search';
 import { SupplierAuthBanner } from '@/components/supplier-auth-banner';
+import { StoreSessionProvider } from '@/components/store-session';
 
 export const metadata: Metadata = {
   title: "Thanda Store",
@@ -16,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col"><ImpersonationBanner /><StoreSearchProvider><StoreHeader /><SupplierAuthBanner />{children}</StoreSearchProvider></body>
+      <body className="min-h-full flex flex-col"><StoreSessionProvider><ImpersonationBanner /><StoreSearchProvider><StoreHeader /><SupplierAuthBanner />{children}</StoreSearchProvider></StoreSessionProvider></body>
     </html>
   );
 }

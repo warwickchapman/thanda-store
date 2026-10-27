@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ProductDetails } from '@/components/product-details';
 import { CartDrawer } from '@/components/cart-drawer';
 import { useStoreSearch } from '@/components/store-search';
+import { useStoreSession } from '@/components/store-session';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { catalogueProductMatchesQuery } from '@/lib/catalogue-succession.mjs';
@@ -27,13 +28,6 @@ interface Product {
   stock_on_hand: number | null;
   catalogue_attributes: Record<string, string[]>;
   details: Record<string, string | number | boolean | string[] | null>;
-}
-
-interface SessionUser {
-  id: number;
-  apiEnabled: boolean;
-  role: string;
-  organisationName: string;
 }
 
 type Cart = { lines: Array<{ quantity: number; product: { id: number; name: string; sku: string; your_price_ex_vat: number | null } }>; itemCount: number; subtotalExVat: number };
@@ -182,7 +176,7 @@ export default function Home() {
   const [cart, setCart] = useState<Cart>(emptyCart);
   const [cartOpen, setCartOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product|null>(null);
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const { user: sessionUser } = useStoreSession();
   const [showDetailsHint, setShowDetailsHint] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -212,24 +206,22 @@ export default function Home() {
   }, [mobileMenuOpen]);
 
   useEffect(() => {
-    fetch('/api/session')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.user) {
-          setSessionUser(data.user);
-          try {
-            setShowDetailsHint(localStorage.getItem(`thanda-product-details-hint:${data.user.id}`) !== 'seen');
-          } catch {
-            setShowDetailsHint(true);
-          }
-        }
-      })
-      .catch(() => {});
-
     fetch('/api/cart').then((res) => res.ok ? res.json() : null).then((data) => {
       if (data) setCart(data);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!sessionUser) return;
+    const frame = requestAnimationFrame(() => {
+      try {
+        setShowDetailsHint(localStorage.getItem(`thanda-product-details-hint:${sessionUser.id}`) !== 'seen');
+      } catch {
+        setShowDetailsHint(true);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [sessionUser]);
 
   function dismissDetailsHint() {
     setShowDetailsHint(false);
@@ -408,11 +400,6 @@ export default function Home() {
             {mobileMenuOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
           </button>
           <nav id="store-navigation" aria-label="Main navigation" onClick={event => { if ((event.target as Element).closest('a, button')) setMobileMenuOpen(false); }} className={`${mobileMenuOpen ? 'flex' : 'hidden'} max-h-[calc(100dvh-8rem)] w-full flex-col gap-2 overflow-y-auto border-t border-zinc-200 pt-3 sm:flex sm:w-auto sm:max-h-none sm:flex-row sm:flex-wrap sm:overflow-visible sm:border-0 sm:pt-0`}>
-              {sessionUser && (
-                <div className="flex h-11 shrink-0 items-center sm:h-9 rounded-lg border border-zinc-200 px-3 text-xs font-semibold text-zinc-600">
-                  {sessionUser.organisationName}
-                </div>
-              )}
               {sessionUser && (
                 <Link href="/accounts" className="flex h-11 shrink-0 items-center sm:h-9 gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium transition-colors hover:bg-zinc-50">
                   <ReceiptText className="h-4 w-4" />

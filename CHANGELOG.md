@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- The shared portal header now identifies the current login by email and company, including on mobile with the navigation closed. Accounts and Admin show the same identity; customer impersonation still distinguishes the customer from the acting administrator. Header, catalogue and impersonation banner share one local session lookup rather than making duplicate requests. Failed identity checks show a retry action instead of a guessed user. Public enquiry and sign-in pages retain their existing layouts, with no new supplier or Xero calls.
+
 - Corrected the public featured-products route's request type to match Next.js's build requirements. Product selection, responses and allowed website origins are unchanged.
 
 - Store-generated quotes now include stock availability and estimated lead times inside each product description, including partial-stock quantities. Available Thanda stock is subject to prior sale; supplier estimates use 2-4 working days for Renogy and 5-7 for Victron ZA stock. Later Victron dates use current saved E-Order evidence with explicit confirmation and timing caveats. Unknown or unsupported availability remains on enquiry. Copied quotes reassess current evidence, while retries preserve the original request. The change adds no supplier or Xero calls.

@@ -1105,7 +1105,9 @@ uses availability on enquiry. See [quote availability rules and API budget](docs
 
 ### Mobile navigation
 
-Below 640 px, the storefront header shows the brand, a labelled hamburger button and product search. The expandable navigation contains the same company, account, API, admin, cart and logout controls as desktop, with the same permission checks. Selecting an action, focusing search, clicking outside or pressing Escape closes it; Escape returns focus to the trigger. Opening the menu performs no additional API requests.
+The shared signed-in header always shows the current login email and company, including on Accounts and Admin. On mobile, identity remains visible when the navigation is closed; long names and addresses wrap rather than being hidden. During customer impersonation the header identifies the customer being viewed, and the existing banner also names the acting administrator. One in-memory session provider shares the existing `GET /api/session` result across the header, catalogue and impersonation banner, with no local/session storage of identity, polling, or supplier/Xero calls. A failed or timed-out check shows **Sign-in details unavailable** and an explicit retry; a confirmed expired session offers **Sign in**. Public sign-in, recovery and quote-enquiry pages do not load this identity or change their layouts.
+
+Below 640 px, the storefront header shows the brand, login identity, a labelled hamburger button and product search. The expandable navigation contains the same account, API, admin, cart and logout controls as desktop, with the same permission checks. Selecting an action, focusing search, clicking outside or pressing Escape closes it; Escape returns focus to the trigger. Opening the menu performs no additional API requests.
 
 ### Daily Victron catalogue and Xero cost review
 
