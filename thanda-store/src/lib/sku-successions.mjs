@@ -137,7 +137,12 @@ export function chooseFulfilmentProduct(requested, products, successions, { allo
   const predecessors = new Set(edges.map((row) => normalizeSku(supplier, row.predecessor_sku)));
   const nearest = (left, right) => (depths.get(normalizeSku(supplier, left.sku)) ?? Infinity)
     - (depths.get(normalizeSku(supplier, right.sku)) ?? Infinity) || left.sku.localeCompare(right.sku);
-  return rows.filter((row) => predecessors.has(normalizeSku(supplier, row.sku)) && productHasStock(row)).sort(nearest)[0]
+  const owned = rows.filter((row) => Number(localStockObservation(row).quantity) > 0);
+  // Sell owned predecessors first, then other owned family stock. A supplier
+  // balance on an older code must not displace an article already held here.
+  return owned.filter((row) => predecessors.has(normalizeSku(supplier, row.sku))).sort(nearest)[0]
+    || owned.sort(nearest)[0]
+    || rows.filter((row) => predecessors.has(normalizeSku(supplier, row.sku)) && productHasStock(row)).sort(nearest)[0]
     || rows.filter((row) => !predecessors.has(normalizeSku(supplier, row.sku))).sort(nearest)[0]
     || requested;
 }

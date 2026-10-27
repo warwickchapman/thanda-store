@@ -59,6 +59,24 @@ test('actual fulfiller retains stocked PMP482305010 packaging when ordering PMP4
   assert.equal(h.isSupplierProductAvailable(selected), true);
 });
 
+test('actual fulfiller selects owned Cerbo successor from both an older cart row and the current listing', async () => {
+  const local = quantity => ({ ...observation, localStockOnHand: quantity,
+    xeroStockStatus: 'tracked', xeroStockSyncedAt: observation.supplierObservedAt });
+  const old = { id: 2894691, supplier: 'victron', sku: 'BPP900451100', stock_on_hand: 243, details: local(0) };
+  const current = { id: 17009, supplier: 'victron', sku: 'BPP900450110', stock_on_hand: 979, details: local(12) };
+  const relations = [{ supplier: 'victron', predecessor_sku: old.sku, successor_sku: current.sku }];
+  for (const requested of [old, current]) {
+    const h = harness(requested, [old, current], relations);
+    const selected = await h.resolveFulfilmentProduct(requested.id);
+    assert.equal(selected.id, current.id);
+    assert.equal(selected.sku, current.sku);
+    assert.equal(selected.hasStock, true);
+    assert.equal(selected.substituted, requested.id !== current.id);
+    const familyQuery = h.queries.find(query => query.parameters?.[0] === 'victron');
+    assert.deepEqual(Array.from(familyQuery.parameters[1]), [current.sku, old.sku]);
+  }
+});
+
 test('actual fulfiller preserves a separate Renogy R article and never traverses Victron relations', async () => {
   const requested = { id: 1, supplier: 'renogy', sku: `${oldSku}R`, stock_on_hand: 2, details: observation };
   const unrelated = { id: 2, supplier: 'victron', sku: oldSku, stock_on_hand: 9, details: observation };
@@ -74,7 +92,8 @@ test('actual fulfiller allocates hidden predecessor stock only through an access
   const old = { id: 1, supplier: 'victron', sku: 'PMP482305010', stock_on_hand: 0,
     details: { ...observation, hidden: true, cataloguePresent: false, localStockOnHand: 3,
       xeroStockStatus: 'tracked', xeroStockSyncedAt: observation.supplierObservedAt } };
-  const current = { id: 2, supplier: 'victron', sku: 'PMP482305012', stock_on_hand: 0, details: observation };
+  const current = { id: 2, supplier: 'victron', sku: 'PMP482305012', stock_on_hand: 0,
+    details: { ...observation, localStockOnHand: 12, xeroStockStatus: 'tracked', xeroStockSyncedAt: observation.supplierObservedAt } };
   const relations = [{ supplier: 'victron', predecessor_sku: old.sku, successor_sku: current.sku }];
   for (const requested of [old, current]) {
     const h = harness(requested, [old, current], relations);

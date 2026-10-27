@@ -53,6 +53,48 @@ test('reliably stocked predecessors fulfil under their original SKU and price', 
   }
 });
 
+test('owned Cerbo successor stock wins over supplier-only predecessor stock from either requested article', () => {
+  const relation = [{ supplier: 'victron', predecessor_sku: 'BPP900451100', successor_sku: 'BPP900450110' }];
+  const local = quantity => ({ localStockOnHand: quantity, xeroStockStatus: 'tracked', xeroStockSyncedAt: observedAt });
+  const old = product(2894691, 'victron', 'BPP900451100', 243, local(0));
+  const current = product(17009, 'victron', 'BPP900450110', 979, local(12));
+  const before = structuredClone([old, current]);
+  for (const requested of [old, current]) {
+    assert.equal(chooseFulfilmentProduct(requested, [old, current], relation), current);
+  }
+  assert.deepEqual([old, current], before, 'choosing owned stock preserves every article identity, stock and price');
+});
+
+test('owned predecessors sell through before owned successors, then defer when their owned balance reaches zero', () => {
+  for (const relation of successions) {
+    const local = quantity => ({ localStockOnHand: quantity, xeroStockStatus: 'tracked', xeroStockSyncedAt: observedAt });
+    const old = product(1, relation.supplier, relation.predecessor_sku, 243, local(2));
+    const current = product(2, relation.supplier, relation.successor_sku, 979, local(12));
+    for (const requested of [old, current]) {
+      assert.equal(chooseFulfilmentProduct(requested, [old, current], successions), old);
+    }
+    old.details.localStockOnHand = 0;
+    for (const requested of [old, current]) {
+      assert.equal(chooseFulfilmentProduct(requested, [old, current], successions), current);
+    }
+    old.details.localStockOnHand = 2;
+    old.details.xeroStockSyncedAt = null;
+    assert.equal(chooseFulfilmentProduct(current, [old, current], successions), current,
+      'an unobserved local quantity cannot displace observed owned stock');
+  }
+});
+
+test('owned family preference retains hidden-stock permissions', () => {
+  const local = { localStockOnHand: 12, xeroStockStatus: 'tracked', xeroStockSyncedAt: observedAt };
+  const old = product(1, 'victron', 'PMP482305010', 243);
+  const current = product(2, 'victron', 'PMP482305012', 979, { ...local, hidden: true });
+  assert.equal(chooseFulfilmentProduct(old, [old, current], successions), old);
+  const options = { allowHiddenFamilyStock: true };
+  assert.equal(chooseFulfilmentProduct(old, [old, current], successions, options), current);
+  const hiddenOld = { ...old, details: { ...old.details, hidden: true } };
+  assert.equal(chooseFulfilmentProduct(hiddenOld, [hiddenOld, current], successions, options), null);
+});
+
 test('fulfilment cannot use another supplier or treat a literal Renogy R suffix as packaging', () => {
   const old = product(1, 'renogy', oldRenogy, 0);
   const current = product(2, 'renogy', newRenogy, 0);
