@@ -14,6 +14,19 @@ export function quoteNotificationPayloads(quote, context) {
       text:`${context.actingAdminEmail ? 'Thanda staff created a quote request on behalf of a customer' : 'A customer submitted a quote request'} from ${context.source === 'cart' ? 'their cart' : 'a copied quote'}.\n\n${common}\nPortal user: ${context.buyerEmail}${context.actingAdminEmail ? `\nActing administrator: ${context.actingAdminEmail}` : ''}\nXero status: ${quote.Status}\n\nReview the quote in Xero and contact the customer.\nNotification status: ${context.baseUrl}/admin/quote-requests` },
   };
 }
+// Call inside the request's local transaction. Missing audiences are mandatory;
+// existing jobs retain their payload, delivery state and provider history.
+export async function ensureQuoteNotifications(db, id, quote, context) {
+  for (const [audience,payload] of Object.entries(quoteNotificationPayloads(quote,context))) {
+    await db.query(`INSERT INTO portal_quote_notifications(request_id,audience,email_payload)
+      VALUES($1,$2,$3::jsonb) ON CONFLICT(request_id,audience) DO NOTHING`,[id,audience,JSON.stringify(payload)]);
+  }
+}
+function confirmedQuote(quote, contactId, expectedId) {
+  return typeof quote?.QuoteID === 'string' && Boolean(quote.QuoteID) && quote.QuoteID === expectedId
+    && quote.Contact?.ContactID === contactId && !quote.HasErrors && Array.isArray(quote.LineItems)
+    && (!quote.ValidationErrors || (Array.isArray(quote.ValidationErrors) && quote.ValidationErrors.length === 0));
+}
 export async function recordQuoteRequest(pool, user, id, payload, context) {
   if (!validRequestId(id)) throw new Error('A valid quote request ID is required.');
   const client = await pool.connect();
@@ -56,7 +69,17 @@ export async function resumeQuoteRequest(pool, user, id, hubFetch) {
     const row = found.rows[0];
     if (!row) return null;
     if (Number(row.user_id) !== user.id || row.contact_id !== user.xeroContactId) throw new Error('Quote request not found for your account.');
-    if (row.completed_at) return quoteResult(row.quote_payload, id);
+    if (row.completed_at) {
+      if (!confirmedQuote(row.quote_payload,row.contact_id,row.quote_id)) throw new Error('The saved quote needs review before notifications can be queued. Contact sales with the request reference.');
+      // Reconcile missing jobs without repeating a Hub command, cart changes,
+      // cache publication or activity events from the completed request.
+      await client.query('BEGIN');
+      try {
+        await ensureQuoteNotifications(client,id,row.quote_payload,row.context);
+        await client.query('COMMIT');
+      } catch(error) { await client.query('ROLLBACK'); throw error; }
+      return quoteResult(row.quote_payload, id);
+    }
     let quote;
     try {
       const response = await hubFetch('/Quotes', {
@@ -71,7 +94,7 @@ export async function resumeQuoteRequest(pool, user, id, hubFetch) {
       }
       const payload = await response.json();
       quote = payload.Quotes?.[0];
-      if (!quote?.QuoteID || quote.Contact?.ContactID !== user.xeroContactId || quote.HasErrors || !Array.isArray(quote.LineItems)) throw new Error('The Hub has not confirmed a valid quote. Contact sales with the request reference.');
+      if (!confirmedQuote(quote,user.xeroContactId,quote?.QuoteID)) throw new Error('The Hub has not confirmed a valid quote. Contact sales with the request reference.');
     } catch(error) {
       await client.query('UPDATE portal_quote_requests SET last_error=$2 WHERE id=$1',[id,error instanceof Error ? error.message : 'Hub outcome unconfirmed']);
       throw error;
@@ -80,9 +103,7 @@ export async function resumeQuoteRequest(pool, user, id, hubFetch) {
     try {
       await client.query(`UPDATE portal_quote_requests SET quote_id=$2,quote_payload=$3::jsonb,completed_at=now(),last_error=NULL WHERE id=$1`,[id,quote.QuoteID,JSON.stringify(quote)]);
       await cacheCreatedQuote(client,user.xeroContactId,quote);
-      for (const [audience,payload] of Object.entries(quoteNotificationPayloads(quote,row.context))) {
-        await client.query(`INSERT INTO portal_quote_notifications(request_id,audience,email_payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING`,[id,audience,JSON.stringify(payload)]);
-      }
+      await ensureQuoteNotifications(client,id,quote,row.context);
       // A concurrent cart edit must survive completing an earlier checkout.
       for (const line of row.context.cart || []) await client.query(`DELETE FROM portal_cart_lines WHERE user_id=$1 AND product_id=$2 AND quantity=$3 AND updated_at=$4`,[user.id,line.product_id,line.quantity,line.updated_at]);
       await client.query(`INSERT INTO portal_activity_log(user_id,organisation_id,action,resource_type,resource_id,metadata)
