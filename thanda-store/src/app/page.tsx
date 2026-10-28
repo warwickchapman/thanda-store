@@ -10,6 +10,7 @@ import { useStoreSession } from '@/components/store-session';
 import { CatalogueFilters, type SelectedFilters } from '@/components/catalogue-filters';
 import { isStorefrontProduct } from '@/lib/catalogue-classification.mjs';
 import { catalogueProductMatchesQuery } from '@/lib/catalogue-succession.mjs';
+import { sortSearchProducts } from '@/lib/catalogue-search-order.mjs';
 import { availabilityOptions, catalogueFacets, filterDefinitions, matchesCatalogueFilters, productAvailability } from '@/lib/catalogue-filters.mjs';
 
 interface Product {
@@ -172,7 +173,7 @@ export default function Home() {
   const [availability, setAvailability] = useState<string[]>([]);
   const [homeTab, setHomeTab] = useState<'mine' | 'thanda'>('mine');
   const [showUnavailable, setShowUnavailable] = useState(false);
-  const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[] }>({ mine: [], thanda: [] });
+  const [favourites, setFavourites] = useState<{ mine: Product[]; thanda: Product[]; popularProductIds: number[] }>({ mine: [], thanda: [], popularProductIds: [] });
   const [cart, setCart] = useState<Cart>(emptyCart);
   const [cartOpen, setCartOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product|null>(null);
@@ -262,7 +263,8 @@ export default function Home() {
       return res.json();
     }).then((data) => {
       if (!Array.isArray(data.mine) || !Array.isArray(data.thanda)) throw new Error('Unable to load favourites.');
-      setFavourites(data);
+      setFavourites({ mine: data.mine, thanda: data.thanda,
+        popularProductIds: Array.isArray(data.popularProductIds) ? data.popularProductIds.filter((id: unknown) => Number.isSafeInteger(id)) : [] });
     }).catch((err) => { if (err.name !== 'AbortError') setFavouritesError('Unable to load favourites and popular products. Browse a brand or try again.'); });
     return () => controller.abort();
   }, [loadAttempt]);
@@ -334,7 +336,8 @@ export default function Home() {
 
   const catalogueProducts = products.filter(isStorefrontProduct);
   const visibleProducts = catalogueProducts;
-  const filteredProducts = visibleProducts.filter(product => catalogueProductMatchesQuery(product, query));
+  const searchMatches = visibleProducts.filter(product => catalogueProductMatchesQuery(product, query));
+  const filteredProducts = query.trim() ? sortSearchProducts(searchMatches, favourites.popularProductIds) : searchMatches;
   const supplierProducts = filteredProducts.reduce<Record<string, Product[]>>((groups, product) => {
     const supplier = product.supplier || 'unknown';
     groups[supplier] = groups[supplier] || [];

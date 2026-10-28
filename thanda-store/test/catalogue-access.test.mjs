@@ -184,10 +184,11 @@ test('search and favourites use the effective buyer and never create public prev
     const searchResults = await searchResponse.json();
     assert.equal(searchResults.length, email === 'preview.one@example.test' ? 1 : 0);
     const favourites = evaluate('app/api/favourites/route.ts', {
-      ...base, '@/lib/sku-successions.mjs': relations, '@/lib/favourite-products.mjs': { favouritesWindowStart: () => '2025-10-24', rankedFavouriteProducts: (_history, products) => products },
+      ...base, '@/lib/sku-successions.mjs': relations, '@/lib/favourite-products.mjs': { favouritesWindowStart: () => '2025-10-24', rankedFavouriteProducts: (_history, products) => products, popularSearchProductIds: (_history, products) => products.map(product => product.id) },
     });
     const favouriteResults = await (await favourites.GET()).json();
     assert.equal(favouriteResults.thanda.some(product => product.supplier === 'enertec'), email === 'preview.one@example.test');
+    assert.equal(favouriteResults.popularProductIds.includes(preview.id), email === 'preview.one@example.test');
   }
 });
 

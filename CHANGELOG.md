@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Search results now put the best-selling matches first, using net units sold across Thanda over the last 12 months. Credits reduce sales and confirmed replacement SKUs share demand. Ties and items without positive net sales sort A–Z by product name. The complete catalogue can be ranked, not just Home's top 20, while normal browsing and Home rankings stay unchanged. The existing favourites response carries only relative product order, with no new requests or supplier/Xero calls; name ordering remains available if sales data cannot be loaded.
+
 - Carts and new quotes now use observed Thanda-owned stock before supplier-only stock within a confirmed replacement family. This fixes Cerbo GX MK2 changing from the listed `BPP900450110` (12 owned units) to the superseded `BPP900451100` solely because the old supplier record still has stock. Real owned predecessor stock still sells through first; selected articles retain their own prices, identities and availability wording. Existing submitted requests and later cart edits are preserved, with no additional provider calls.
 
 - Store-generated quotes now resolve Xero article codes from the complete saved Items list for every supplier. Ordinary Renogy products no longer lose an existing item code merely because they are outside the Thanda stock importer's scope. Exact article and saved ItemID checks prevent borrowing a replacement or reused code. Prices, VAT, lead-time wording and existing submitted requests are preserved; the lookup adds no Hub, Xero or supplier calls.

@@ -1,4 +1,5 @@
 import { normalizeSku, replacementContext, skuFamilyResolver } from './sku-successions.mjs';
+import { compareProductNames } from './catalogue-search-order.mjs';
 
 const literalSku = (value) => String(value || '').trim().toUpperCase();
 const supplierName = (value) => String(value || '').trim().toLowerCase();
@@ -13,7 +14,7 @@ export function favouritesWindowStart(now = Date.now()) {
 
 // Invoice history has an ItemCode but no supplier. Ambiguous cross-brand codes
 // cannot safely be attributed to a replacement family, so they are omitted.
-export function rankedFavouriteProducts(history, products, successions, rankedByFrequency, now = Date.now(), limit = 20, identityProducts = products) {
+function salesByFamily(history, identityProducts, successions, now) {
   const familyFor = skuFamilyResolver(successions);
   // Public eligibility can narrow representatives without erasing a known
   // cross-brand ItemCode collision from the source catalogue.
@@ -27,13 +28,6 @@ export function rankedFavouriteProducts(history, products, successions, rankedBy
     suppliers.add(candidate.supplier);
     suppliersBySku.set(sku, suppliers);
     if (candidate.supplier === 'victron') victronArticles.add(normalizeSku('victron', sku));
-  }
-  const families = new Map();
-  for (const product of products) {
-    const family = familyFor(product.supplier, product.sku);
-    const members = families.get(family) || [];
-    members.push(product);
-    families.set(family, members);
   }
   const groups = new Map();
   for (const row of history) {
@@ -54,6 +48,30 @@ export function rankedFavouriteProducts(history, products, successions, rankedBy
     if (ageDays <= 90) group.recent90 = true;
     if (ageDays <= 180) group.recent180 = true;
     groups.set(family, group);
+  }
+  return groups;
+}
+
+// Only relative order leaves the server, never customer history or unit totals.
+export function popularSearchProductIds(history, products, successions, now = Date.now()) {
+  const familyFor = skuFamilyResolver(successions);
+  const groups = salesByFamily(history, products, successions, now);
+  // History quantities are NUMERIC(14,3); do not rank floating-point residue as a sale.
+  const units = product => Math.round((groups.get(familyFor(product.supplier, product.sku))?.units || 0) * 1000) / 1000;
+  return products.filter(product => units(product) > 0)
+    .sort((left, right) => units(right) - units(left) || compareProductNames(left, right))
+    .map(product => product.id);
+}
+
+export function rankedFavouriteProducts(history, products, successions, rankedByFrequency, now = Date.now(), limit = 20, identityProducts = products) {
+  const familyFor = skuFamilyResolver(successions);
+  const groups = salesByFamily(history, identityProducts, successions, now);
+  const families = new Map();
+  for (const product of products) {
+    const family = familyFor(product.supplier, product.sku);
+    const members = families.get(family) || [];
+    members.push(product);
+    families.set(family, members);
   }
   return [...groups.entries()].flatMap(([family, group]) => {
     const members = [...(families.get(family) || [])].sort((left, right) => {

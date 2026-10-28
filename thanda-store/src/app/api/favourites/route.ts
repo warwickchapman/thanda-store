@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { currentCatalogue } from '@/lib/catalogue';
 import { currentUser } from '@/lib/auth/server';
 import { loadSkuSuccessions } from '@/lib/sku-successions.mjs';
-import { favouritesWindowStart, rankedFavouriteProducts } from '@/lib/favourite-products.mjs';
+import { favouritesWindowStart, rankedFavouriteProducts, popularSearchProductIds } from '@/lib/favourite-products.mjs';
 
 type InvoiceHistoryRow = {
   invoice_id: string;
@@ -35,8 +35,9 @@ export async function GET() {
     return NextResponse.json({
       mine: rankedFavouriteProducts(mine.rows, products, successions, true),
       thanda: rankedFavouriteProducts(thanda.rows, products, successions, false),
+      popularProductIds: popularSearchProductIds(thanda.rows, products, successions),
       windowStart: start,
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     console.error('Favourites API error:', error);
     return NextResponse.json({ error: 'Unable to load favourites' }, { status: 500 });

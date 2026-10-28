@@ -7,6 +7,7 @@ import * as jsx from 'react/jsx-runtime';
 import * as classification from '../src/lib/catalogue-classification.mjs';
 import * as succession from '../src/lib/catalogue-succession.mjs';
 import * as filters from '../src/lib/catalogue-filters.mjs';
+import * as searchOrder from '../src/lib/catalogue-search-order.mjs';
 
 const product = (id, supplier, name, stock = 2) => ({
   id, supplier, name, sku: `TEST-${id}`, category: 'Battery',
@@ -35,7 +36,7 @@ function text(node) {
   return node && typeof node === 'object' ? text(node.props?.children) : String(node ?? '');
 }
 const brandLabel = node => text(Array.isArray(node.props.children) ? node.props.children[0] : node.props.children);
-function storefront(initialQuery = '', catalogue = products) {
+function storefront(initialQuery = '', catalogue = products, popularProductIds = []) {
   let cursor = 0;
   let query = initialQuery;
   const state = [];
@@ -45,7 +46,7 @@ function storefront(initialQuery = '', catalogue = products) {
       useState(initial) {
         const index = cursor++;
         if (!(index in state)) state[index] = index === 0 ? catalogue : index === 1 ? false
-          : initial?.mine ? { mine: [catalogue[0]], thanda: [catalogue[1]] } : initial;
+          : initial?.mine ? { mine: [catalogue[0]], thanda: [catalogue[1]], popularProductIds } : initial;
         return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
       },
       useEffect() {}, useRef: () => ({ current: null }),
@@ -60,6 +61,7 @@ function storefront(initialQuery = '', catalogue = products) {
     '@/components/catalogue-filters': { CatalogueFilters },
     '@/lib/catalogue-classification.mjs': classification,
     '@/lib/catalogue-succession.mjs': succession,
+    '@/lib/catalogue-search-order.mjs': searchOrder,
     '@/lib/catalogue-filters.mjs': filters,
   };
   const exports = {};
@@ -91,9 +93,9 @@ test('All is the default between Home and the dynamic supplier tabs', () => {
 
 test('search starts across all brands and only explicit supplier choices restrict it', () => {
   const page = storefront('300ah');
-  assert.deepEqual(page.names(), ['Victron 300Ah battery', 'Renogy 300Ah battery', 'Unknown 300Ah battery']);
+  assert.deepEqual(page.names(), ['Renogy 300Ah battery', 'Unknown 300Ah battery', 'Victron 300Ah battery']);
   page.select('Victron');
-  assert.deepEqual(page.names(), ['Victron 300Ah battery', 'Unknown 300Ah battery']);
+  assert.deepEqual(page.names(), ['Unknown 300Ah battery', 'Victron 300Ah battery']);
   page.search('Renogy');
   assert.equal(page.active(), 'Victron');
   assert.deepEqual(page.names(), []);
@@ -113,6 +115,19 @@ test('empty search results retain brand navigation and do not silently change se
   assert.equal(page.active(), 'Renogy');
   page.search('');
   assert.deepEqual(page.names(), ['Renogy 300Ah battery']);
+});
+
+test('search uses complete popularity order across brands and filters without reordering ordinary browsing or Home', () => {
+  const page = storefront('', products, [1, 5, 2]);
+  assert.deepEqual(page.names(), ['Victron 300Ah battery', 'Renogy 300Ah battery', 'Hubble 200Ah battery', 'Unknown 300Ah battery']);
+  page.search('300ah');
+  assert.deepEqual(page.names(), ['Victron 300Ah battery', 'Unknown 300Ah battery', 'Renogy 300Ah battery']);
+  page.select('Victron');
+  assert.deepEqual(page.names(), ['Victron 300Ah battery', 'Unknown 300Ah battery']);
+  page.sidebar().onAvailability(['unknown']);
+  assert.deepEqual(page.names(), ['Unknown 300Ah battery']);
+  page.select('Home');
+  assert.deepEqual(page.names(), ['Victron 300Ah battery']);
 });
 
 test('All retains category, availability and unavailable controls', () => {
