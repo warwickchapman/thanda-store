@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Restored direct production Next.js startup after the database naming cutover exposed an old PM2 launch definition. Removed internal PM2 metadata from its saved environment so it cannot override the executable, interpreter or file-watching settings; verified login, CSS and saved startup configuration. Documented the cause and safe configuration format.
+
 - Renamed the production database and application login to `thanda_store` and `thanda_user` in place, preserving data, object identities and grants. Updated runtime and scheduled-job connections, PM2 recovery settings, off-site backup naming, and both ends of Fleet monitoring. Removed the unused CSV importer and trigger plus archived obsolete production source/configuration copies. Historical archives retain their original labels; legitimate Renogy supplier integrations are unchanged. Added the naming and recovery runbook.
 
 - Completed Store quote requests now restore missing buyer and sales email jobs when resumed, using the same mandatory queue step as new quotes. Both jobs are saved together; existing recipients, delivery history and failed or unconfirmed outcomes are preserved without duplicate sends. Saved quote identity and customer validation precede repair, which makes no Hub, Xero or supplier calls. Live test notifications use explicitly approved test recipients through the normal worker; there is no notification-suppression option.

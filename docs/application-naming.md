@@ -26,6 +26,20 @@ old application path, and the importer could replace the complete product table.
 The supported supplier synchronization commands are documented in the root
 README.
 
+## PM2 startup configuration
+
+Keep `/etc/thanda-store-hub.json` as a minimal launch definition: the direct Next.js
+executable, `start` arguments, the nested application directory, Node interpreter,
+and boolean `watch: false`. Its `env` object must contain application environment
+variables, never an exported PM2 process object. Internal fields such as
+`pm_exec_path`, `exec_interpreter`, `status` and `watch` can override the launch
+definition when PM2 merges the environment.
+
+The naming cutover exposed an older saved definition containing those fields.
+The approved recovery removed that metadata, restored direct `next start`, and
+verified the live process plus both saved PM2 dumps before guarded deployment.
+Use the normal guarded deployment command for subsequent releases.
+
 ## Database maintenance
 
 Rename the existing database and login role in place. PostgreSQL retains their
