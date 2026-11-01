@@ -4,6 +4,8 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Renamed the production database and application login to `thanda_store` and `thanda_user` in place, preserving data, object identities and grants. Updated runtime and scheduled-job connections, PM2 recovery settings, off-site backup naming, and both ends of Fleet monitoring. Removed the unused CSV importer and trigger plus archived obsolete production source/configuration copies. Historical archives retain their original labels; legitimate Renogy supplier integrations are unchanged. Added the naming and recovery runbook.
+
 - Completed Store quote requests now restore missing buyer and sales email jobs when resumed, using the same mandatory queue step as new quotes. Both jobs are saved together; existing recipients, delivery history and failed or unconfirmed outcomes are preserved without duplicate sends. Saved quote identity and customer validation precede repair, which makes no Hub, Xero or supplier calls. Live test notifications use explicitly approved test recipients through the normal worker; there is no notification-suppression option.
 
 - Search results now put the best-selling matches first, using net units sold across Thanda over the last 12 months. Credits reduce sales and confirmed replacement SKUs share demand. Ties and items without positive net sales sort A–Z by product name. The complete catalogue can be ranked, not just Home's top 20, while normal browsing and Home rankings stay unchanged. The existing favourites response carries only relative product order, with no new requests or supplier/Xero calls; name ordering remains available if sales data cannot be loaded.
