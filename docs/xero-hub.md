@@ -1,6 +1,8 @@
-# Shared Xero Hub
+# Shared Sensible Lake
 
-All outbound Xero requests and token refreshes now belong to [Xero Hub](https://github.com/Sensible-Solar/xero-hub). Configure XERO_HUB_URL and XERO_HUB_TOKEN in the app and existing scheduled-job environment. On app-01 the URL is http://127.0.0.1:8010. Keep the existing Xero webhook signing key to verify and forward signed deliveries; it is not an API credential.
+All outbound Xero requests and token refreshes belong to [Sensible Lake](https://github.com/Sensible-Solar/xero-hub), formerly Xero Hub. Configure `XERO_HUB_URL=https://lake.sensible.co.za` and the existing `XERO_HUB_TOKEN` for the app and scheduled jobs. The URL is a server-side setting; continue to verify HTTPS certificates and never expose the token to the browser. Keep the separate Xero webhook signing key to verify and forward signed deliveries; it is not an API credential.
+
+**Cutover status, 10 November 2026:** the live app-01 Store process and scheduled jobs still use `http://127.0.0.1:8010`, a temporary proxy to Lake. The direct URL above is the target configuration, not a claim that production has already changed. Coordinate the Store launch definition, saved and running PM2 environment, and `/etc/thanda-store-xero.env`, then verify the app, signed webhook forwarding and scheduled jobs against Lake before removing that proxy. Other Cloud and public-route consumers must be migrated separately. Follow the guarded production deployment procedure; this documentation change does not deploy or restart anything.
 
 ## Live admin contact lookup
 
