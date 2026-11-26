@@ -7,6 +7,7 @@ import * as jsx from 'react/jsx-runtime';
 import { linkedCatalogueItem } from '../src/lib/victron-catalogue-navigation.mjs';
 import { catalogueCounts } from '../src/lib/victron-catalogue-review.mjs';
 import { catalogueReviewUrl } from '../src/lib/stock-review-view.mjs';
+import { archiveReadiness, archiveReadyRows } from '../src/lib/victron-archive-review.mjs';
 
 const source = fs.readFileSync(new URL('../src/app/admin/victron-catalogue/page.tsx', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: {
@@ -42,6 +43,7 @@ async function mount(rows, search, refreshedRows = rows) {
   const modules = { react, 'react/jsx-runtime': jsx,
     '@/components/admin/admin-menu': { AdminMenu: () => null },
     '@/lib/victron-catalogue-navigation.mjs': { linkedCatalogueItem },
+    '@/lib/victron-archive-review.mjs': { archiveReadiness, archiveReadyRows },
   };
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: name => {
@@ -123,4 +125,60 @@ test('an explicit comparison reveals a newly available linked proposal, while ma
   await refresh(manual);
   assert.equal(category(manual).props.value, 'archive');
   assert.match(text(manual.tree), /saved proposal is in New products/);
+});
+
+test('category links open all archive candidates for the requested company without requiring a SKU', async () => {
+  const rows = [
+    row('thanda-solar', 'BPP900400100', { kind: 'archive', stock: 0, eligibleForArchiveReview: true }),
+    row('thanda-solar', 'SCC145120510', { kind: 'archive', stock: 0, eligibleForArchiveReview: true }),
+    row('sensible-solar', 'PIN482122500', { kind: 'archive', stock: 0, eligibleForArchiveReview: true }),
+  ];
+  assert.deepEqual(linkedCatalogueItem('?company=thanda-solar&kind=archive', rows), {
+    company: 'thanda-solar', sku: '', kind: 'archive',
+  });
+  assert.equal(linkedCatalogueItem('?company=thanda-solar&kind=not-a-category', rows), null);
+  assert.equal(linkedCatalogueItem('?company=thanda-solar&kind=archive&sku=%3Cscript%3E', rows), null);
+  const h = await mount(rows, '?company=thanda-solar&kind=archive');
+  let all = nodes(h.tree);
+  assert.equal(all.find(node => node.props?.['aria-label'] === 'Company').props.value, 'thanda-solar');
+  assert.equal(all.find(node => node.props?.['aria-label'] === 'Change type').props.value, 'archive');
+  assert.equal(all.find(node => node.props?.['aria-label'] === 'Find product').props.value, '');
+  const body = text(all.find(node => node.type === 'tbody'));
+  assert.match(body, /BPP900400100/);
+  assert.match(body, /SCC145120510/);
+  assert.ok(!body.includes('PIN482122500'));
+  assert.ok(!text(h.tree).includes('Opened from the missing-item link'));
+  assert.deepEqual(h.calls, [{ url: '/api/admin/victron-catalogue', method: 'GET' }]);
+  await all.find(node => node.type === 'button' && text(node) === 'Compare saved records').props.onClick();
+  all = nodes(h.tree);
+  assert.equal(all.find(node => node.props?.['aria-label'] === 'Change type').props.value, 'archive');
+  all.find(node => node.props?.['aria-label'] === 'Change type').props.onChange({ target: { value: 'new' } });
+  await nodes(h.tree).find(node => node.type === 'button' && text(node) === 'Compare saved records').props.onClick();
+  assert.equal(nodes(h.tree).find(node => node.props?.['aria-label'] === 'Change type').props.value, 'new');
+});
+
+test('archive work stays discoverable when active company totals and the selected category are zero', async () => {
+  const h = await mount([
+    row('thanda-solar', 'BPP900400100', { kind: 'archive', stock: 0, eligibleForArchiveReview: true }),
+  ], '');
+  let all = nodes(h.tree);
+  assert.match(text(all.find(node => node.props?.['aria-label'] === 'Company')), /Thanda \(0\)/);
+  assert.match(text(h.tree), /Archive candidates are separate from the company total above/);
+  const archive = all.find(node => node.type === 'button' && text(node) === 'Review archive candidates (1)');
+  assert.ok(archive);
+  archive.props.onClick();
+  all = nodes(h.tree);
+  assert.equal(all.find(node => node.props?.['aria-label'] === 'Change type').props.value, 'archive');
+  assert.match(text(all.find(node => node.type === 'tbody')), /BPP900400100/);
+  assert.deepEqual(h.calls, [{ url: '/api/admin/victron-catalogue', method: 'GET' }]);
+});
+
+test('changing a linked SKU search prevents later comparisons from switching the manual category', async () => {
+  const h = await mount([], '?company=thanda-solar&sku=PMP482305012', [
+    row('thanda-solar', 'PMP482305012', { kind: 'new', reason: null }),
+  ]);
+  nodes(h.tree).find(node => node.props?.['aria-label'] === 'Find product').props.onChange({ target: { value: 'BPP' } });
+  await nodes(h.tree).find(node => node.type === 'button' && text(node) === 'Compare saved records').props.onClick();
+  assert.equal(nodes(h.tree).find(node => node.props?.['aria-label'] === 'Find product').props.value, 'BPP');
+  assert.equal(nodes(h.tree).find(node => node.props?.['aria-label'] === 'Change type').props.value, 'review');
 });

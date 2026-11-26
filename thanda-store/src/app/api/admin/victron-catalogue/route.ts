@@ -7,6 +7,7 @@ import { submitCatalogueCommand } from '@/lib/victron-catalogue-command.mjs';
 import { ensureReviewSchema, needsAttention, catalogueCounts, recordReviewDecision } from '@/lib/victron-catalogue-review.mjs';
 import { stockSku } from '@/lib/victron-sku-family.mjs';
 import { requestLocalStockRefresh } from '@/lib/local-stock-refresh.mjs';
+import { archiveReadiness } from '@/lib/victron-archive-review.mjs';
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 async function admin() { const user = await currentUser(); return user?.role === 'admin' && !user.impersonatedBy ? user : null; }
@@ -33,7 +34,12 @@ export async function GET(request: Request) {
   try {
     await ensureReviewSchema(pool);
     const state = (await pool.query('SELECT * FROM victron_catalogue_review WHERE id=true')).rows[0];
-    const overdue = !state.checked_at || Date.now() - new Date(state.checked_at).getTime() > 26 * 3600000;
+    const staleTime = (value: unknown, age: number) => {
+      const time = typeof value === 'string' || value instanceof Date ? new Date(value).getTime() : NaN;
+      return !Number.isFinite(time) || Date.now() - time > age || time > Date.now() + 300000;
+    };
+    const overdue = staleTime(state.checked_at, 26 * 3600000) || staleTime(state.observed_at, 24 * 3600000)
+      || state.rows.some((row: { xeroObservedAt?: string }) => staleTime(row.xeroObservedAt, 24 * 3600000));
     const counts = catalogueCounts(state.rows);
     const attention = Object.values(counts).some(company => company.total > 0);
     if (new URL(request.url).searchParams.get('summary') === '1') return NextResponse.json({ attention, counts });
@@ -45,7 +51,7 @@ export async function POST(request: Request) {
   const user = await admin();
   if (!user || !validCustomerViewOrigin(request, { portalBaseUrl: process.env.PORTAL_BASE_URL, nodeEnv: process.env.NODE_ENV })) return NextResponse.json({ error: 'Same-origin administrator access required' }, { status: 403 });
   const body = await request.json().catch(() => null);
-  if (!body || !['refresh','acknowledge','apply','apply-batch','apply-create-batch','quarterly','archive-reviewed','resolve-review','ignore-review','unignore-review'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  if (!body || !['refresh','acknowledge','apply','apply-selling','apply-batch','apply-selling-batch','apply-create-batch','quarterly','archive-reviewed','resolve-review','ignore-review','unignore-review'].includes(body.action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   try {
     await ensureReviewSchema(pool);
     if (body.action === 'refresh') {
@@ -63,13 +69,15 @@ export async function POST(request: Request) {
     }
     // Rebuild from current saved evidence before every approval. No upstream Xero GET here.
     const fresh = await refreshReview(pool);
-    if (body.action === 'apply-batch' || body.action === 'apply-create-batch') {
+    if (['apply-batch','apply-selling-batch','apply-create-batch'].includes(body.action)) {
       const creating = body.action === 'apply-create-batch';
-      const selectionName = creating ? 'new products' : 'cost changes';
+      const selling = body.action === 'apply-selling-batch';
+      const selectionName = creating ? 'new products' : selling ? 'selling-price changes' : 'cost changes';
       if (!Array.isArray(body.fingerprints) || !body.fingerprints.length || body.fingerprints.length > 50 || body.fingerprints.some((value: unknown) => typeof value !== 'string') || new Set(body.fingerprints).size !== body.fingerprints.length) return NextResponse.json({ error: `Select 1–50 distinct ${selectionName}.` }, { status: 400 });
       const selected = fresh.rows.filter(r => body.fingerprints.includes(r.fingerprint));
       if (selected.length !== body.fingerprints.length) return NextResponse.json({ code: 'STALE_SELECTION', error: `${body.fingerprints.length - selected.length} of ${body.fingerprints.length} selected proposals changed or are no longer available. No Xero changes were made. Review the latest comparison and select the ${creating ? 'products' : 'costs'} again.` }, { status: 409 });
-      if (selected.some(r => r.kind !== (creating ? 'new' : 'price'))) return NextResponse.json({ code: 'STALE_SELECTION', error: `This selection includes products that are not ${selectionName}. No Xero changes were made. Select ${selectionName} from the latest comparison.` }, { status: 409 });
+      if (selected.some(r => r.kind !== (creating ? 'new' : selling ? 'selling' : 'price'))) return NextResponse.json({ code: 'STALE_SELECTION', error: `This selection includes products that are not ${selectionName}. No Xero changes were made. Select ${selectionName} from the latest comparison.` }, { status: 409 });
+      if (selling && (body.confirmed !== true || selected.some(r => r.reason || r.reviewBlocker))) return NextResponse.json({ code: 'INVALID_SELECTION', error: 'Confirm valid selling-price proposals before updating Xero. No Xero changes were made.' }, { status: 409 });
       if (selected.some(r => r.company !== selected[0].company)) return NextResponse.json({ code: 'INVALID_SELECTION', error: `The selection includes both Thanda and Sensible. No Xero changes were made. Select ${selectionName} for one company at a time.` }, { status: 409 });
       // Packaging variants share stock, but predecessor/successor article codes
       // remain separate definitions. Reuse the same packaging key as the review.
@@ -78,6 +86,10 @@ export async function POST(request: Request) {
     }
     const row = fresh.rows.find((r: { fingerprint: string }) => r.fingerprint === body.fingerprint);
     if (!row) return NextResponse.json({ code: 'STALE_SELECTION', error: 'This proposal changed or is no longer available. No Xero updates were made. Review the latest comparison before trying again.' }, { status: 409 });
+    if (body.action === 'apply-selling') {
+      if (row.kind !== 'selling' || row.reason || row.reviewBlocker || body.confirmed !== true) return NextResponse.json({ error: row.reason || 'Confirm one current selling-price proposal before updating Xero.' }, { status: 409 });
+      return await applyCommand(String(user.id), [row]);
+    }
     if (body.action === 'ignore-review' || body.action === 'unignore-review') {
       if (row.kind !== 'review') return NextResponse.json({ error: 'Only review candidates can be ignored.' }, { status: 409 });
       await recordReviewDecision(pool, String(user.id), row, body.action === 'ignore-review' ? 'review-ignored' : 'review-resumed');
@@ -98,7 +110,7 @@ export async function POST(request: Request) {
       return await applyCommand(String(user.id), [{ ...row, kind: row.reviewAction, reason: null }], false, row);
     }
     if (body.action === 'archive-reviewed') {
-      if (row.kind !== 'archive' || !row.eligibleForArchiveReview || row.stock !== 0 || body.confirmed !== true) return NextResponse.json({ error: 'Archive checklist requires confirmed supplier retirement evidence, known zero stock, and your confirmation that open orders were checked and archival completed in Xero.' }, { status: 409 });
+      if (!archiveReadiness(row).ready || body.confirmed !== true) return NextResponse.json({ error: 'Archive checklist requires confirmed supplier retirement evidence, known zero tracked stock, and your confirmation that open orders were checked and archival completed in Xero.' }, { status: 409 });
       await pool.query("INSERT INTO victron_catalogue_events(actor,action,company,sku,details) VALUES($1,'archive-reviewed',$2,$3,$4)", [String(user.id), row.company, row.sku, JSON.stringify(row)]);
       if (row.company === 'thanda-solar') await requestLocalStockRefresh(pool, { afterChange: true }).catch(() => {});
       await refreshReview(pool).catch(() => {});

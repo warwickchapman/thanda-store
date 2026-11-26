@@ -11,8 +11,9 @@ export async function catalogueHub(company, path, init = {}) {
     headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${token}` },
   });
 }
-export async function readItems(company, request = catalogueHub) {
+export async function readItemEvidence(company, request = catalogueHub) {
   let snapshot;
+  let observedAt;
   const items = [];
   for (let page = 1; page <= 50; page++) {
     const response = await request(company, `accounting/Items?page=${page}&pageSize=1000`, { headers: snapshot ? { 'X-Hub-Snapshot': snapshot } : {} });
@@ -21,10 +22,14 @@ export async function readItems(company, request = catalogueHub) {
     snapshot = assertHubSnapshot(body, snapshot);
     const age = Date.now() - Date.parse(body._hub.observed_at);
     if (body._hub.company !== company || body._hub.last_error || !Number.isFinite(age) || age < -300000 || age > 86400000 || !Array.isArray(body.Items)) throw new Error(`${company}: Xero item evidence is stale or incomplete.`);
+    if (!observedAt || Date.parse(body._hub.observed_at) < Date.parse(observedAt)) observedAt = body._hub.observed_at;
     items.push(...body.Items);
-    if (body.Items.length < 1000) return items;
+    if (body.Items.length < 1000) return { items, observedAt };
   }
   throw new Error('Saved Xero item collection exceeds the bounded review limit.');
+}
+export async function readItems(company, request = catalogueHub) {
+  return (await readItemEvidence(company, request)).items;
 }
 export async function refreshReview(pool, request = catalogueHub) {
   const db = await pool.connect();
@@ -39,7 +44,12 @@ export async function refreshReview(pool, request = catalogueHub) {
     const successions = (await db.query('SELECT predecessor_sku,successor_sku FROM victron_sku_successions')).rows;
     const decisions = await readReviewDecisions(db);
     const items = {};
-    for (const company of companies) items[company] = await readItems(company, request);
+    const itemObservations = {};
+    for (const company of companies) {
+      const evidence = await readItemEvidence(company, request);
+      items[company] = evidence.items;
+      itemObservations[company] = evidence.observedAt;
+    }
     const observedAt = new Date(evidence.observed_at).toISOString();
     // Count supplier observation dates, not job attempts, in the business timezone.
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg' }).format(new Date(observedAt));
@@ -49,6 +59,7 @@ export async function refreshReview(pool, request = catalogueHub) {
     }
     const history = advanceHistory(prior, evidence.products, day, successions, observedAt);
     let rows = reviewCatalogue({ catalogue: evidence.products, items, successions, history, decisions, observedAt });
+    rows = rows.map(row => ({ ...row, xeroObservedAt: itemObservations[row.company] }));
     const completed = (await db.query("SELECT company,sku,max(created_at) AS completed_at FROM victron_catalogue_events WHERE action='archive-reviewed' GROUP BY company,sku")).rows;
     rows = rows.filter(row => !archiveCompletionRecorded(row, history, completed));
     const signature = changeSignature(rows);

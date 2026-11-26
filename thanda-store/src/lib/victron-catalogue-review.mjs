@@ -6,15 +6,15 @@ import { skuReplacementContext, stockSku as article } from './victron-sku-family
 
 export const companies = ['thanda-solar', 'sensible-solar'];
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-// A cost approval concerns this exact item and before/after cost. Stock,
+// A price approval concerns this exact item and before/after amount. Stock,
 // descriptions and observation timestamps can refresh without changing it.
 // Command IDs are generated separately when an operator submits an action.
 function comparison(row) {
-  if (row.kind === 'price') {
+  if (row.kind === 'price' || row.kind === 'selling') {
     const { company, sku, kind, itemId, previous, proposed } = row;
     return { company, sku, kind, itemId, previous, proposed };
   }
-  return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'fingerprint', 'zaStock', 'ignoredUntil'].includes(key)
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !['observedAt', 'xeroObservedAt', 'fingerprint', 'zaStock', 'ignoredUntil'].includes(key)
     && !(row.kind === 'review' && key === 'stock')));
 }
 export function exclusion(product) {
@@ -37,18 +37,18 @@ export function zaWarehouseStock(product) {
   return Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
 }
 export function needsAttention(row) {
-  return row.kind === 'price' || row.kind === 'new'
+  return row.kind === 'price' || row.kind === 'selling' || row.kind === 'new'
     || (row.kind === 'review' && !row.ignoredUntil && Number.isFinite(row.zaStock) && row.zaStock > 0);
 }
 // One counting policy for the menu dot and both catalogue dropdowns. Counts are
 // literal saved rows per company, never stock/replacement-family aggregates.
 export function catalogueCounts(rows) {
   const counts = Object.fromEntries(companies.map(company => [company,
-    { price: 0, new: 0, review: 0, archive: 0, total: 0 }]));
+    { price: 0, selling: 0, new: 0, review: 0, archive: 0, total: 0 }]));
   for (const row of rows) {
     if (!Object.hasOwn(counts, row.company)) continue;
     const company = counts[row.company];
-    if (!['price', 'new', 'review', 'archive'].includes(row.kind)) continue;
+    if (!['price', 'selling', 'new', 'review', 'archive'].includes(row.kind)) continue;
     if (row.kind === 'review' && !needsAttention(row)) continue;
     company[row.kind]++;
     if (needsAttention(row)) company.total++;
@@ -59,7 +59,8 @@ export function catalogueCounts(rows) {
 // An archive completion applies only to the same company/article and the
 // current absence/retirement episode. Reappearance must permit a new review.
 export function archiveCompletionRecorded(row, history = {}, completed = []) {
-  if (row.kind !== 'archive') return false;
+  if (row.kind !== 'archive' || !row.eligibleForArchiveReview || row.stockTracked !== true || row.stock !== 0
+    || typeof row.itemId !== 'string' || !row.itemId.trim()) return false;
   const episode = history[row.sku]?.absentSince || history[row.sku]?.retiredSince;
   return Boolean(episode && completed.some(event => event.company === row.company && event.sku === row.sku
     && new Date(event.completed_at).getTime() >= Date.parse(episode)));
@@ -67,6 +68,23 @@ export function archiveCompletionRecorded(row, history = {}, completed = []) {
 /** @returns {{reviewAction: 'new'|'price'|'keep'|null, approvalReason: string|null, reviewBlocker: string|null, ignoredUntil: string|null}} */
 function reviewFields() {
   return { reviewAction: null, approvalReason: null, reviewBlocker: null, ignoredUntil: null };
+}
+
+function literalStock(item) {
+  const value = item?.QuantityOnHand;
+  const valid = typeof value === 'number' || typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value.trim());
+  return {
+    stock: valid && Number.isFinite(Number(value)) ? Number(value) : null,
+    stockTracked: typeof item?.IsTrackedAsInventory === 'boolean' ? item.IsTrackedAsInventory : null,
+  };
+}
+
+function sellingPrice(item) {
+  const value = item?.SalesDetails?.UnitPrice;
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(String(value).trim())) return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 && amount < 10_000_000 ? amount : null;
 }
 export function reviewCatalogue({ catalogue, items, successions = [], history = {}, decisions = [], observedAt, now = Date.now() }) {
   const age = now - Date.parse(observedAt);
@@ -94,7 +112,7 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const base = { company, sku, name: product.description || sku, ...relationships, observedAt,
         listSource: pricing.listSource ?? null, cost: pricing.cost ?? null, list: pricing.list ?? null, proposed: target ?? null,
         itemId: item?.ItemID ?? null, previous: item?.PurchaseDetails?.UnitPrice ?? null,
-        stock: item?.QuantityOnHand ?? null, zaStock: zaWarehouseStock(product), eligibleForArchiveReview: false,
+        ...literalStock(item), zaStock: zaWarehouseStock(product), eligibleForArchiveReview: false,
         ...reviewFields() };
       let kind = !item ? 'new' : 'price';
       let blocker = (excluded && !advisory ? excluded : null) || pricing.error || (!target ? 'No verified E-Order ZAR list price; Sensible cost cannot be calculated.' : null);
@@ -114,9 +132,26 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       }
       const retired = item && retirementReason({ name: product.description }, product, relationships.replacedBy[0]);
       if (retired) { kind = 'archive'; reason = retired + ' Check remaining stock and open orders before archiving in Xero.'; base.eligibleForArchiveReview = true; }
-      if (!reason && currentCost) continue;
-      const row = { ...base, kind, reason };
-      rows.push({ ...row, fingerprint: fingerprint(comparison(row)) });
+      if (reason || !currentCost) {
+        const row = { ...base, kind, reason };
+        rows.push({ ...row, fingerprint: fingerprint(comparison(row)) });
+      }
+      if (item && kind !== 'archive') {
+        const previous = sellingPrice(item);
+        const proposed = pricing.list ?? null;
+        const identity = typeof item.ItemID === 'string' && item.ItemID.trim();
+        const sellingBlocker = (excluded && !advisory ? excluded : null) || pricing.error
+          || (advisory && decision?.approvedReason !== advisory ? advisory : null)
+          || (!identity ? 'Xero item identity is unavailable; verify it before changing the selling price.' : null)
+          || (item.IsSold === false ? 'Selling is disabled in Xero; review manually.'
+            : item.IsSold !== true ? 'Xero selling status is unknown; verify it before changing the selling price.' : null)
+          || (previous === null ? 'The current Xero selling price is unavailable or invalid; review it before proceeding.' : null);
+        if (sellingBlocker || Math.round(previous * 100) !== Math.round(proposed * 100)) {
+          const row = { ...base, ...reviewFields(), kind: 'selling', previous, proposed,
+            expectedSalesPrice: previous, reason: sellingBlocker, reviewBlocker: sellingBlocker };
+          rows.push({ ...row, fingerprint: fingerprint(comparison(row)) });
+        }
+      }
     }
     // Literal SKU prices must not migrate to a successor. Relationships are context,
     // while retail aliases suppress accidental duplicate creation above.
@@ -126,7 +161,7 @@ export function reviewCatalogue({ catalogue, items, successions = [], history = 
       const h = history[sku];
       const reason = h?.absentDays >= 2 ? 'Absent on at least two complete daily E-Order observations. Check remaining stock and open orders in Xero before archiving.' : 'Missing from E-Order; awaiting a second complete daily observation.';
       const base = { company, sku, name: item.Name || sku, kind: 'archive', reason, observedAt,
-        ...skuReplacementContext(successions, sku), stock: item.QuantityOnHand ?? null,
+        ...skuReplacementContext(successions, sku), ...literalStock(item),
         cost: null, list: null, proposed: null, eligibleForArchiveReview: Boolean(h?.absentDays >= 2), itemId: item.ItemID, previous: item.PurchaseDetails?.UnitPrice ?? null,
         ...reviewFields() };
       rows.push({ ...base, fingerprint: fingerprint(comparison(base)) });

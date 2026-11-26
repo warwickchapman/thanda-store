@@ -4,6 +4,10 @@ All notable production-facing changes are recorded here. This project does not y
 
 ## Unreleased
 
+- Catalogue review now compares Xero selling prices as well as purchase costs. Selling-price differences remain visible when the cost already matches, with the current Xero amount, catalogue list price and difference shown separately. Administrators can approve one correction or a batch of up to 50 for one company. The Hub changes only the selling amount, preserves live account/tax and stock fields, and confirms every result before reporting success; changed or uncertain items cannot be silently retried.
+
+- Added a direct **Retired items with zero stock** list to catalogue review. It requires confirmed retirement evidence, an exact Xero item and known zero tracked stock in the selected company; untracked, unknown, positive and stale balances remain held with clear reasons. Archival stays a manual Xero checklist, and a previous completion cannot hide stock that subsequently becomes positive or unknown.
+
 - Restored direct production Next.js startup after the database naming cutover exposed an old PM2 launch definition. Removed internal PM2 metadata from its saved environment so it cannot override the executable, interpreter or file-watching settings; verified login, CSS and saved startup configuration. Documented the cause and safe configuration format.
 
 - Renamed the production database and application login to `thanda_store` and `thanda_user` in place, preserving data, object identities and grants. Updated runtime and scheduled-job connections, PM2 recovery settings, off-site backup naming, and both ends of Fleet monitoring. Removed the unused CSV importer and trigger plus archived obsolete production source/configuration copies. Historical archives retain their original labels; legitimate Renogy supplier integrations are unchanged. Added the naming and recovery runbook.

@@ -7,6 +7,7 @@ import { submitCatalogueCommand } from '../src/lib/victron-catalogue-command.mjs
 import { validCustomerViewOrigin } from '../src/lib/auth/impersonation-origin.mjs';
 import { stockSku } from '../src/lib/victron-sku-family.mjs';
 import { needsAttention, catalogueCounts, recordReviewDecision } from '../src/lib/victron-catalogue-review.mjs';
+import { archiveReadiness } from '../src/lib/victron-archive-review.mjs';
 
 // Exercise the actual Next route with real Web Request/Response objects. Only
 // auth, stored evidence and I/O are replaced; command/audit handling is real.
@@ -25,10 +26,15 @@ function harness(options = {}) {
   let refreshes = 0, schemaCalls = 0;
   const pool = { query: async (sql, args) => {
     if (sql.startsWith('SELECT * FROM victron_catalogue_review')) return { rows: [{
-      rows, checked_at: new Date().toISOString(), signature: 'current', acknowledged_signature: 'previous', ...options.state,
+      rows: rows.map(row => ({ ...row, xeroObservedAt: new Date().toISOString() })),
+      checked_at: new Date().toISOString(), observed_at: new Date().toISOString(), signature: 'current', acknowledged_signature: 'previous', ...options.state,
     }] };
     if (sql.startsWith('SELECT created_at,actor,action,company,sku,details')) return { rows: [] };
     if (sql.startsWith('INSERT INTO victron_catalogue_events')) {
+      if (sql.includes("'archive-reviewed'")) {
+        audit.push({ action: 'archive-reviewed', company: args[1], sku: args[2], details: JSON.parse(args[3]) });
+        return { rows: [{ id: 42 }] };
+      }
       if (options.failAttempt) throw new Error('database internal failure');
       if (options.failDecision && String(args[1]).startsWith('review-')) throw new Error('database internal failure');
       audit.push({ action: args[1], company: args[2], sku: args[3], details: JSON.parse(args[4]) });
@@ -49,7 +55,7 @@ function harness(options = {}) {
     assert.equal(init.headers['X-Hub-Actor'], '7');
     calls.push({ company, path, payload });
     if (options.respond) return options.respond();
-    return Response.json({ Items: rows.map(row => ({ Code: row.sku, ItemID: row.itemId || `new-item-${row.sku}`, PurchaseDetails: { UnitPrice: row.proposed }, SalesDetails: { UnitPrice: row.list } })) });
+    return Response.json({ Items: rows.map(row => ({ Code: row.sku, ItemID: row.itemId || `new-item-${row.sku}`, IsSold: true, PurchaseDetails: { UnitPrice: row.proposed }, SalesDetails: { UnitPrice: row.list } })) });
   };
   const modules = {
     'next/server': { NextResponse: Response },
@@ -64,6 +70,7 @@ function harness(options = {}) {
     '@/lib/victron-catalogue-command.mjs': { submitCatalogueCommand: (db, command) => submitCatalogueCommand(db, command, request) },
     '@/lib/victron-catalogue-review.mjs': { ensureReviewSchema: async () => { schemaCalls++; }, needsAttention, catalogueCounts, recordReviewDecision },
     '@/lib/victron-sku-family.mjs': { stockSku },
+    '@/lib/victron-archive-review.mjs': { archiveReadiness },
     '@/lib/local-stock-refresh.mjs': { requestLocalStockRefresh: async (db, settings) => {
       assert.equal(db, pool);
       stockRequests.push(settings);
@@ -199,8 +206,8 @@ test('full and summary GET use identical company counts, regardless of acknowled
   assert.equal(full.attention,true);
   assert.deepEqual(summary.counts,full.counts);
   assert.deepEqual(full.counts,{
-    'thanda-solar':{price:1,new:1,review:1,archive:1,total:3},
-    'sensible-solar':{price:0,new:1,review:0,archive:0,total:1},
+    'thanda-solar':{price:1,selling:0,new:1,review:1,archive:1,total:3},
+    'sensible-solar':{price:0,selling:0,new:1,review:0,archive:0,total:1},
   });
   assert.equal(h.calls.length,0);
 });
@@ -478,4 +485,119 @@ for (const [name, options] of [
   assert.equal((await h.post()).status, 403);
   assert.equal(h.schemaCalls(), 0);
   assert.equal(h.calls.length, 0);
+});
+
+const sellingRow = { ...product, kind: 'selling', fingerprint: 'selling-fingerprint',
+  sku: 'ORI121236120', itemId: 'df7a82a0-dfa4-4ec3-9b23-ca72f889b0fa',
+  cost: 2265.38, list: 4315, previous: 4795.01, proposed: 4315, reason: null, reviewBlocker: null };
+const sellingAction = { action: 'apply-selling', fingerprint: sellingRow.fingerprint, confirmed: true };
+
+test('confirmed selling-price approval persists the exact sales precondition and confirms SalesDetails, not cost', async () => {
+  const h = harness({ rows: [sellingRow] });
+  const result = await h.post({ ...sellingAction, previous: 1, proposed: 2, company: 'forged' });
+  assert.equal(result.status, 200);
+  assert.match(result.body.message, /selling price update/);
+  assert.equal(h.calls[0].path, 'commands/victron-items');
+  assert.equal(h.calls[0].payload.action, 'selling');
+  assert.equal(h.calls[0].payload.expectedSalesPrice, 4795.01);
+  assert.equal(h.calls[0].payload.expectedItemId, sellingRow.itemId);
+  assert.equal(h.calls[0].payload.list, 4315);
+  assert.ok(!('expectedCost' in h.calls[0].payload));
+  assert.equal(h.audit[0].details.changes[0].priceType, 'selling');
+  assert.deepEqual(h.audit.map(event => event.action), ['pending', 'applied']);
+});
+
+test('selling approvals reject unconfirmed, stale, blocked and wrong-kind proposals before sending', async () => {
+  for (const [row, action] of [
+    [sellingRow, { ...sellingAction, confirmed: false }],
+    [sellingRow, { ...sellingAction, fingerprint: 'old' }],
+    [{ ...sellingRow, reason: 'Selling disabled' }, sellingAction],
+    [{ ...sellingRow, reviewBlocker: 'Missing current price' }, sellingAction],
+    [{ ...sellingRow, kind: 'price' }, sellingAction],
+    [sellingRow, { action: 'apply', fingerprint: sellingRow.fingerprint }],
+  ]) {
+    const h = harness({ rows: [row] });
+    assert.equal((await h.post(action)).status, 409);
+    assert.equal(h.calls.length, 0);
+    assert.equal(h.audit.length, 0);
+  }
+});
+
+test('selling batch uses one homogeneous audited command and rejects mixed companies/kinds', async () => {
+  const rows = [sellingRow, { ...sellingRow, sku: 'ORI121236140', itemId: 'other-id', fingerprint: 'second' }];
+  const action = { action: 'apply-selling-batch', fingerprints: rows.map(row => row.fingerprint), confirmed: true };
+  const h = harness({ rows });
+  assert.equal((await h.post(action)).status, 200);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].path, 'commands/victron-selling');
+  assert.ok(h.calls[0].payload.proposals.every(proposal => proposal.action === 'selling' && proposal.expectedSalesPrice === 4795.01));
+  for (const fields of [{ company: 'sensible-solar' }, { kind: 'price' }, { reason: 'Selling disabled' }]) {
+    const blocked = harness({ rows: [rows[0], { ...rows[1], ...fields }] });
+    assert.equal((await blocked.post(action)).status, 409);
+    assert.equal(blocked.calls.length, 0);
+  }
+  assert.equal((await harness({ rows }).post({ ...action, confirmed: false })).status, 409);
+});
+
+test('a wrong/missing Xero sales amount or identity is uncertain rather than a successful update', async () => {
+  for (const fields of [{ SalesDetails: { UnitPrice: 4795.01 } }, { SalesDetails: null },
+    { ItemID: 'changed-id' }, { IsSold: false }, { HasErrors: true }]) {
+    const h = harness({ rows: [sellingRow], respond: () => Response.json({ Items: [{
+      Code: sellingRow.sku, ItemID: sellingRow.itemId, IsSold: true,
+      PurchaseDetails: { UnitPrice: sellingRow.proposed }, SalesDetails: { UnitPrice: sellingRow.proposed }, ...fields,
+    }] }) });
+    const result = await h.post(sellingAction);
+    assert.equal(result.status, 503);
+    assert.equal(result.body.code, 'UNKNOWN_OUTCOME');
+    assert.deepEqual(h.audit.map(event => event.action), ['pending', 'unknown']);
+  }
+});
+
+test('selling action preserves authentication/origin restrictions and deferred quota feedback', async () => {
+  for (const options of [{ user: null }, { user: { id: 7, role: 'customer' } },
+    { user: { id: 7, role: 'admin', impersonatedBy: 9 } }, { origin: 'https://elsewhere.invalid' }]) {
+    const h = harness({ rows: [sellingRow], ...options });
+    assert.equal((await h.post(sellingAction)).status, 403);
+    assert.equal(h.calls.length, 0);
+  }
+  const deferred = harness({ rows: [sellingRow], respond: () => Response.json({ code: 'DEFERRED', detail: 'Protected reserve; wait.' }, { status: 503, headers: { 'Retry-After': '60' } }) });
+  const response = await deferred.post(sellingAction);
+  assert.equal(response.body.code, 'DEFERRED');
+  assert.equal(response.headers.get('Retry-After'), '60');
+});
+
+test('archive completion cannot be recorded from untracked, unknown, positive or unconfirmed stock', async () => {
+  const archive = { ...product, kind: 'archive', eligibleForArchiveReview: true, stockTracked: true, stock: 0 };
+  for (const fields of [{ stockTracked: false }, { stockTracked: null }, { stock: null }, { stock: 1 },
+    { stock: '0' }, { itemId: null }, { eligibleForArchiveReview: false }]) {
+    const h = harness({ rows: [{ ...archive, ...fields }] });
+    assert.equal((await h.post({ action: 'archive-reviewed', fingerprint: product.fingerprint, confirmed: true })).status, 409);
+    assert.equal(h.calls.length, 0);
+    assert.equal(h.audit.length, 0);
+  }
+});
+
+test('a recent comparison cannot make old supplier or Xero stock evidence appear current', async () => {
+  const old = new Date(Date.now() - 25 * 3600000).toISOString();
+  for (const state of [{ observed_at: old }, { rows: [{ ...sellingRow, xeroObservedAt: old }] },
+    { rows: [{ ...sellingRow, xeroObservedAt: undefined }] }, { observed_at: null }]) {
+    const result = await harness({ rows: [sellingRow], state }).get();
+    assert.equal(result.status, 200);
+    assert.equal(result.body.overdue, true);
+  }
+  assert.equal((await harness({ rows: [sellingRow] }).get()).body.overdue, false);
+});
+
+test('recording a confirmed tracked-zero manual archive is local and retains the literal company/SKU', async () => {
+  for (const company of ['thanda-solar', 'sensible-solar']) {
+    const row = { ...product, company, kind: 'archive', eligibleForArchiveReview: true, stockTracked: true, stock: 0 };
+    const h = harness({ rows: [row] });
+    const result = await h.post({ action: 'archive-reviewed', fingerprint: product.fingerprint, confirmed: true });
+    assert.equal(result.status, 200);
+    assert.equal(h.calls.length, 0, 'the completion record cannot archive or delete a Xero item');
+    assert.equal(h.audit[0].action, 'archive-reviewed');
+    assert.equal(h.audit[0].company, company);
+    assert.equal(h.audit[0].sku, row.sku);
+    assert.equal(h.stockRequests.length, company === 'thanda-solar' ? 1 : 0);
+  }
 });

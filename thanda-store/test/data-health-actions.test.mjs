@@ -85,7 +85,8 @@ test('only recent confirmed Thanda creation newer than complete saved inventory 
 });
 test('supplier removal information counts only existing Thanda archive decisions as work', () => {
   const lifecycleItems = Array.from({ length: 11 }, (_, index) => ({ sku: `REMOVED${index}` }));
-  const rows = lifecycleItems.slice(0, 5).map(item => ({ ...item, company: 'thanda-solar', kind: 'archive' }));
+  const rows = lifecycleItems.slice(0, 5).map(item => ({ ...item, company: 'thanda-solar', kind: 'archive',
+    eligibleForArchiveReview: true, stockTracked: true, stock: 0, itemId: `item-${item.sku}` }));
   const history = Object.fromEntries(rows.map(row => [row.sku, { absentSince: '2026-09-27' }]));
   const review = { checked_at: now.toISOString(), observed_at: now.toISOString(), rows: [
     ...rows, { sku: 'REMOVED6', company: 'sensible-solar', kind: 'archive' },
@@ -95,6 +96,11 @@ test('supplier removal information counts only existing Thanda archive decisions
   assert.equal(supplierLifecycleActions('victron', lifecycleItems, review, [], now).lifecycleActionCount, 5);
   const completed = [{ company: 'thanda-solar', sku: 'REMOVED0', completed_at: '2026-09-28T10:00:00Z' }];
   assert.equal(supplierLifecycleActions('victron', lifecycleItems, review, completed, now).lifecycleActionCount, 4);
+  for (const changed of [{ stock: 1 }, { stock: null }, { stockTracked: false }]) {
+    const reopened = { ...review, rows: review.rows.map(row => row.sku === 'REMOVED0' ? { ...row, ...changed } : row) };
+    assert.equal(supplierLifecycleActions('victron', lifecycleItems, reopened, completed, now).lifecycleActionCount, 5,
+      'an old completion cannot hide changed or unverified company stock');
+  }
   assert.equal(supplierLifecycleActions('victron', lifecycleItems, review,
     rows.map(row => ({ company: row.company, sku: row.sku, completed_at: '2026-09-28T10:00:00Z' })), now).lifecycleActionCount, 0);
   for (const event of [

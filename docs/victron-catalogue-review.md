@@ -85,8 +85,19 @@ parallel Victron creation preview, and existing audits are retained.
   R10,000,000 and expressible in cents. Booleans, arrays, hexadecimal/exponent
   strings and excess decimal precision are rejected. The same bounds apply to
   calculated list prices and to the Hub's independent validation.
-- Existing products: change only `PurchaseDetails.UnitPrice`, preserving the live
-  purchase accounting/tax fields and all selling/stock fields.
+- Existing products have separate **Cost changes** and **Selling prices** comparisons.
+  Cost updates change only `PurchaseDetails.UnitPrice`, preserving live purchase
+  accounting/tax fields and all selling/stock fields. Selling-price updates change
+  only `SalesDetails.UnitPrice` to the verified catalogue list price, preserving live
+  sales account/tax settings and all purchase, stock, tracking and descriptive fields.
+  Both comparisons run even when the other amount already matches. The same literal
+  SKU can therefore have a cost proposal and a separate selling-price proposal.
+- **Selling prices** shows the current Xero selling price, catalogue list price and
+  difference, all excluding VAT. **Review selling price** opens the company/SKU and
+  exact before/after amounts; **Update Xero selling price** is the explicit approval.
+  Both decreases and increases can be reviewed. A known zero existing selling price
+  can be corrected; missing, disabled or invalid selling configuration stays visible
+  with a blocker and cannot be implicitly enabled. Exact Xero item identity is required.
 - New products: reviewed tracked definitions with zero opening-balance writes and
   list selling price. Account mappings: Thanda inventory 631, COGS 311, sales 201;
   Sensible inventory 630, COGS 310, sales 200; INPUT3/OUTPUT3. Hub checks active
@@ -97,8 +108,9 @@ parallel Victron creation preview, and existing audits are retained.
   without a second confirmation. The row shows progress and the outcome.
 - Click **Add to Xero** on a new-product row to create the displayed definition.
   Its purchase cost and initial selling price are shown before adding.
-- Select up to 50 cost changes or up to 50 new products in one company and confirm
-  the batch. Additions and cost updates are separate selections. New-product
+- Select up to 50 cost changes, selling-price changes or new products in one company
+  and confirm the batch. Additions, costs and selling prices are separate selections.
+  Selling-price confirmation lists every selected SKU and its exact before/after amounts. New-product
   confirmation shows the initial cost, list selling price and zero opening balance.
   There is no automatic Xero writing in scheduled jobs.
 - Changed proposals are rejected before any Xero request, with the number of affected
@@ -107,9 +119,9 @@ parallel Victron creation preview, and existing audits are retained.
   have a separate error.
 - Applying an update refreshes the comparison from saved evidence. Supplier and Xero
   evidence must be complete and less than 24 hours old. The Hub then checks the
-  exact live item IDs and reviewed costs before dispatch. Any mismatch stops the
+  exact live item IDs and the reviewed cost or selling price before dispatch. Any mismatch stops the
   whole proposed batch before its write.
-- A price selection compares company, literal SKU, item ID and before/after costs.
+- A price selection compares company, literal SKU, item ID, price type and before/after amounts.
   Stock movement, description changes and refreshed observation timestamps do not
   invalidate an unchanged cost or repeat its alert. Creation and archive reviews
   retain their relevant descriptive, pricing and stock checks. Freshness is always
@@ -154,7 +166,7 @@ queue survives older Hub snapshots and changes made during an active import.
 
 The daily timer runs at 07:00 Africa/Johannesburg. The Admin menu orange dot is
 an outstanding-work indicator: it appears only when either company's **Cost
-changes**, **New products** or counted **Needs review** queue has entries. Archive
+changes**, **Selling prices**, **New products** or counted **Needs review** queue has entries. Archive
 candidates, comparison errors and overdue runs do not independently light the
 dot. Errors and overdue warnings remain visible on the catalogue page. The dot
 clears when the counted work is resolved or ignored; acknowledgement cannot
@@ -162,9 +174,9 @@ hide outstanding work, so the acknowledgement button is no longer shown.
 No email delivery or recipient configuration is included.
 
 The company dropdown shows **Thanda (N)** and **Sensible (N)**, where each total
-is that company's cost changes + new products + counted review candidates.
-The change-type dropdown order is **Cost changes**, **New products**, **Needs
-review**, then **Archive candidates**. Its counts and company totals come from
+includes that company's cost changes, selling-price differences, new products and counted review candidates.
+The change-type dropdown order is **Cost changes**, **Selling prices**,
+**New products**, **Needs review**, then **Archive candidates**. Its counts and company totals come from
 the same server calculation as the menu dot, before search or archive-status
 filtering. Archive rows remain available but never contribute to a company total.
 Counts refer to individual saved proposals, not replacement-family stock totals.
@@ -219,23 +231,53 @@ Stock zero alone does not establish discontinuation. An explicit replacement or
 for the manual archive checklist. Xero archival is a **manual
 checklist**, not API deletion or disabling purchase/sale fields. The operator must
 check outstanding orders and complete archival in Xero. Recording completion
-requires known zero stock and is audited. The record hides that absence episode
-from the checklist; renewed availability resets the episode.
+requires confirmed retirement, a valid item identity and a fresh saved comparison
+with tracked stock exactly zero for that literal SKU in the selected company.
+It is audited. The record hides only that company's current retirement/absence
+episode while those retirement and tracked-zero conditions remain verified.
+Positive or unknown stock, or unverified inventory tracking, returns the item to
+the checklist. Renewed supplier availability resets the retirement episode.
 
 **Archive candidates** has an **Archive status** filter, defaulting to **All pending
 checks**. Its counts cover the selected company's archive rows before the SKU/name
-search. The three groups are mutually exclusive:
+search. The five groups are mutually exclusive:
 
-- **Ready for final checks:** supplier retirement/absence evidence is sufficient
-  and saved stock in this Xero company is exactly zero.
+- **Ready to archive in Xero:** supplier retirement/absence evidence is sufficient,
+  the exact Xero item identity is available, inventory tracking is confirmed and
+  the saved literal quantity in this company is numeric zero. The comparison must
+  be fresh and have no error. This is the list for manual final checks; it does not
+  confirm physical stock, outstanding orders or completed archival.
 - **Waiting for supplier evidence:** retirement/absence evidence is not yet
-  sufficient, regardless of the saved company stock.
-- **Stock needs checking:** supplier evidence is sufficient but company stock is
-  non-zero or unknown. Unknown stock never counts as zero.
+  sufficient. A zero company quantity does not bypass that requirement.
+- **Non-zero stock:** supplier retirement is confirmed but this tracked SKU has
+  positive or negative stock. Positive balances show **Stock remains**; negative
+  balances show **Stock needs checking** and must be resolved. A successor's zero
+  balance never clears a predecessor's remaining stock.
+- **Stock or item needs checking:** the exact Xero item identity, tracked status
+  or quantity is missing or invalid. Rows explain **Xero item needs checking**,
+  **Stock needs checking** or **Stock unknown**. Untracked zero is not verified
+  stock zero, and missing/invalid quantities are never converted to zero.
+- **Refresh saved comparison:** the comparison is overdue or has an error.
+  Previously saved candidates remain visible, but none can be treated as ready
+  until **Compare saved records** succeeds with current complete evidence.
+
+Direct links can select the archive list without a SKU:
+`/admin/victron-catalogue?company=thanda-solar&kind=archive`. Non-archive views
+show a separate **Review archive candidates (N)** button whenever work remains,
+alongside **Retired items with zero stock (N)**. The latter opens the selected
+company's **Ready to archive in Xero** list directly; its count uses the same
+identity, tracked-zero, retirement and freshness checks as each row. This is a
+human-readable list in the existing page, with exact SKU, company and replacement
+context; it does not group stock across a replacement family or create an export.
+The company total and orange menu dot cover cost changes, selling-price differences, new products
+and active Needs review candidates. **Thanda (0)** and **Cost changes (0)** do not
+mean archive work is complete. Completion comes from the operator's recorded
+archive confirmation for the same company and absence episode.
 
 Changing the company, change type, archive status or search resets the visible
-page size and any open completion confirmation. Rows show company stock, status
-and the reason. The staff checklist requires checking current physical/Xero stock,
+page size and any open completion confirmation. Rows show company stock,
+**Tracked in Xero**, **Untracked in Xero** or **Tracking unknown**, status and the
+specific blocker. The staff checklist requires checking current physical/Xero stock,
 stock value discrepancies, open orders, inbound deliveries, unfinished/repeating
 transactions and the correct replacement SKU. Complete archival in the same Xero
 company before recording completion here; the page does not verify orders or
@@ -286,6 +328,15 @@ or instructions to archive. PDF price extraction/comparison remains a manual che
    The Admin menu indicates counted catalogue work; use the audit history to review
    approvals and quarterly checks.
 
+For the selling-price review release, deploy the Hub command support before the
+Store controls. Run **Compare saved records** once after deployment to populate
+selling-price rows, inventory-tracking evidence and each company's Xero observation
+time. Legacy saved archive rows without that evidence remain held. A recent local
+comparison cannot make old supplier or Xero observations current: the source
+observations must remain within 24 hours as well as the existing comparison-age
+limit. This release alone does not change Xero prices, existing quotes or archives;
+each price correction still needs explicit approval in catalogue review.
+
 ## API budget and failure behaviour
 
 Official contract checked against Xero OpenAPI `xero_accounting.yaml` and the
@@ -307,11 +358,25 @@ marks requested permissions as granted before Xero actually returns them.
 | Scheduled missing-media repair | 0–5 extended E-Order requests within the shared 20-request run cap | 0–30 additional at six runs/day; no new timer |
 | Compare saved Items | Up to 50 local Hub pages per company, 1,000 items/page; **0 Xero** | 0 Xero |
 | Confirm 1–50 cost updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
+| Confirm 1–50 selling-price updates | 1 `GET /Items` + 1 `POST /Items` batch | Only on approval |
+| Confirm one selling-price update | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
 | Click Update for one cost change | 1 filtered `GET /Items?where=Code=="…"` + 1 `POST /Items/{ItemID}` | Only on approval |
 | Create one item | 1 filtered `GET /Items` + 1 create-only `PUT /Items` | Only on approval |
 | Confirm 1–50 new products | 1 `GET /Items` + 1 create-only `PUT /Items` batch | Only on approval |
 | Archive / quarterly record | 0 | 0 |
 | Operator reconciliation of one uncertain item | 1 filtered `GET /Items`; no write | Only on explicit investigation |
+
+Selling-price approvals share the existing item-command budget: one approved
+item or a batch of 1–50 items uses two Xero calls, one Items preflight and one
+write. The official OpenAPI contract verified on 26 November 2026 supports
+`POST /Items/{ItemID}` for a single update and `POST /Items` for an Items array,
+with the reviewed amount in `SalesDetails.UnitPrice`. These actions remain within
+the shared gate of 100 item-command requests per tenant per UTC day, the protected
+150-call tenant reserve and at least 15 seconds between commands. Returned
+allowances and `Retry-After` pauses are honoured. Scheduled jobs and page loads
+never write selling prices, and paused, stale or uncertain actions are never
+automatically resubmitted. The ready archive list adds zero Xero or supplier calls
+and introduces no archive/delete request.
 
 At the current 1,174 E-Order products and 250 rows/page, the complete basic
 catalogue costs five supplier requests/run or 30/day. Including bounded media
@@ -394,7 +459,7 @@ and a `reconciled` event was added to the Store audit.
 
 ## Verification
 
-- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/victron-catalogue-lifecycle.test.mjs test/data-health-review-routes.test.mjs test/data-health-review-scope.test.mjs test/stock-review-view.test.mjs test/stock-item-review-ui.test.mjs test/victron-catalogue-navigation.test.mjs test/data-health-actions.test.mjs`
+- `node --test test/victron-catalogue-review.test.mjs test/victron-catalogue-route.test.mjs test/victron-pricing.test.mjs test/victron-sku-family.test.mjs test/victron-catalogue-lifecycle.test.mjs test/victron-archive-review.test.mjs test/victron-catalogue-selling-ui.test.mjs test/data-health-review-routes.test.mjs test/data-health-review-scope.test.mjs test/stock-review-view.test.mjs test/stock-item-review-ui.test.mjs test/victron-catalogue-navigation.test.mjs test/data-health-actions.test.mjs`
   includes the actual Store route boundary with plain-text errors, lost connections,
   audit failures, deferrals, stable selections and separate operation identifiers,
   plus 50-product creation batches for both companies, packaging conflicts,

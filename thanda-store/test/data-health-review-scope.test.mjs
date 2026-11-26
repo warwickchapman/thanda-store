@@ -133,7 +133,8 @@ test('eleven retained supplier removals mirror five canonical Xero archive decis
   const products = Array.from({ length: 11 }, (_, index) => product(`REMOVED${index}`, 'tracked', 0, {
     cataloguePresent: false, catalogueObservedAt: now,
   }));
-  const rows = products.slice(0, 5).map(row => ({ company: 'thanda-solar', sku: row.sku, kind: 'archive' }));
+  const rows = products.slice(0, 5).map(row => ({ company: 'thanda-solar', sku: row.sku, kind: 'archive',
+    eligibleForArchiveReview: true, stockTracked: true, stock: 0, itemId: `item-${row.sku}` }));
   const history = Object.fromEntries(rows.map(row => [row.sku, { absentSince: '2026-09-27' }]));
   const catalogueReview = { checked_at: now, observed_at: now, rows, history };
   const options = { products, scope: scopeFor(products), catalogueReview,

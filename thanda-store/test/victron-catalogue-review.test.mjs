@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature, zaWarehouseStock, needsAttention, catalogueCounts } from '../src/lib/victron-catalogue-review.mjs';
+import { prices, exclusion, reviewCatalogue, advanceHistory, changeSignature, zaWarehouseStock, needsAttention, catalogueCounts, archiveCompletionRecorded } from '../src/lib/victron-catalogue-review.mjs';
 import { readItems } from '../src/lib/victron-catalogue-service.mjs';
 const now = Date.now(), observedAt = new Date(now).toISOString();
 const p = { sku:'PMP482305012', description:'MultiPlus II', currency:'ZAR', price:525, enduser_price_zar:{price:1000}, price_break_price:400 };
@@ -64,7 +64,7 @@ test('review priority does not borrow successor, retail sibling or Xero stock', 
   assert.equal(old.stock,20); assert.equal(old.zaStock,null); assert.equal(needsAttention(old),false);
   assert.deepEqual(old.replacedBy,[p.sku]);
   assert.equal(rows.find(row => row.sku === p.sku+'R').zaStock,null);
-  assert.ok(rows.filter(needsAttention).every(row => row.sku === p.sku));
+  assert.ok(rows.filter(row => row.kind === 'review' && needsAttention(row)).every(row => row.sku === p.sku));
 });
 
 test('silenced review rows do not alert; return to ZA stock alerts without quantity churn', () => {
@@ -124,7 +124,7 @@ test('approval accepts only the same advisory, company and literal SKU, never su
   const rows=run({catalogue:[advisoryProduct],decisions:[approval]});
   assert.equal(rows.find(row=>row.company==='thanda-solar').kind,'new');
   assert.equal(rows.find(row=>row.company==='sensible-solar').kind,'review');
-  assert.equal(run({catalogue:[advisoryProduct],items:xeroAdvisory(525),decisions:[approval]}).filter(row=>row.company==='thanda-solar').length,0);
+  assert.equal(run({catalogue:[advisoryProduct],items:xeroAdvisory(525),decisions:[approval]}).filter(row=>row.company==='thanda-solar' && row.kind!=='selling').length,0);
   for (const sku of ['PMP482305010',p.sku+'R']) {
     const row=run({catalogue:[{...advisoryProduct,sku}],decisions:[approval],successions:[{predecessor_sku:'PMP482305010',successor_sku:p.sku}]}).find(row=>row.company==='thanda-solar');
     assert.equal(row.kind,'review');
@@ -167,6 +167,7 @@ test('company totals count update work, not archives, silenced reviews or replac
   const row = (company, sku, kind, fields = {}) => ({ company, sku, kind, ...fields });
   const rows = [
     row('thanda-solar','PMP482305010','price'),
+    row('thanda-solar','ORI121236120','selling'),
     row('thanda-solar','PMP482305012','new'),
     row('thanda-solar','PMP482305012R','review',{zaStock:1}),
     row('thanda-solar','IGNORED','review',{zaStock:5,ignoredUntil:'2027-01-01'}),
@@ -178,12 +179,12 @@ test('company totals count update work, not archives, silenced reviews or replac
     row('other-company','OTHER','price'),
   ];
   assert.deepEqual(catalogueCounts(rows), {
-    'thanda-solar':{price:1,new:1,review:1,archive:1,total:3},
-    'sensible-solar':{price:0,new:1,review:0,archive:1,total:1},
+    'thanda-solar':{price:1,selling:1,new:1,review:1,archive:1,total:4},
+    'sensible-solar':{price:0,selling:0,new:1,review:0,archive:1,total:1},
   });
   assert.deepEqual(catalogueCounts([]), {
-    'thanda-solar':{price:0,new:0,review:0,archive:0,total:0},
-    'sensible-solar':{price:0,new:0,review:0,archive:0,total:0},
+    'thanda-solar':{price:0,selling:0,new:0,review:0,archive:0,total:0},
+    'sensible-solar':{price:0,selling:0,new:0,review:0,archive:0,total:0},
   });
   assert.equal(changeSignature(rows.filter(r=>r.kind==='archive')),changeSignature([]));
 });
@@ -214,7 +215,7 @@ test('unchanged proposals do not repeat alerts when observations refresh', () =>
 });
 test('cost parity skips proposals but missing Xero cost is not zero', () => {
   const existing={...items,'thanda-solar':[{Code:p.sku,ItemID:'x',IsPurchased:true,PurchaseDetails:{UnitPrice:525}}]};
-  assert.equal(run({items:existing}).filter(r=>r.company==='thanda-solar').length,0);
+  assert.equal(run({items:existing}).filter(r=>r.company==='thanda-solar' && r.kind!=='selling').length,0);
 });
 test('Hub reads reject cross-tenant and incomplete evidence', async () => {
   const request=async()=>Response.json({Items:[],_hub:{complete:true,snapshot:'1',observed_at:observedAt,company:'sensible-solar'}});
@@ -226,7 +227,7 @@ test('explicit successor with confirmed supplier zero stock qualifies for retire
   const existing={...items,'thanda-solar':[{Code:p.sku,ItemID:'x',IsPurchased:true,PurchaseDetails:{UnitPrice:525},QuantityOnHand:0}]};
   const row=run({items:existing,successions,catalogue:[{...p,stock_quantity:0}]}).find(r=>r.company==='thanda-solar');
   assert.equal(row.kind,'archive'); assert.equal(row.eligibleForArchiveReview,true);
-  assert.equal(run({items:existing,successions}).filter(r=>r.company==='thanda-solar').length,0);
+  assert.equal(run({items:existing,successions}).filter(r=>r.company==='thanda-solar' && r.kind!=='selling').length,0);
 });
 
 test('missing list uses normal cost / 0.525 for both companies and new products', () => {
@@ -279,4 +280,130 @@ test('archive approvals still depend on stock and new-item approvals on selling 
   const after = run({ ...options, items: { ...existing, 'thanda-solar': [{ ...existing['thanda-solar'][0], QuantityOnHand: 1 }] } }).find(r => r.company === 'thanda-solar');
   assert.notEqual(before.fingerprint, after.fingerprint);
   assert.notEqual(run()[0].fingerprint, run({ catalogue: [{ ...p, enduser_price_zar: { price: 1010 } }] })[0].fingerprint);
+});
+
+const soldItem = (company, sku = p.sku, cost = company === 'thanda-solar' ? 525 : 600, selling = 1000, changes = {}) => ({
+  Code: sku, ItemID: `${company}-${sku}`, IsPurchased: true, IsSold: true, IsTrackedAsInventory: true,
+  QuantityOnHand: 0, PurchaseDetails: { UnitPrice: cost }, SalesDetails: { UnitPrice: selling }, ...changes,
+});
+const sellingRows = options => run(options).filter(row => row.kind === 'selling');
+
+test('Orion sales-price drift remains actionable for both companies when purchase costs are already correct', () => {
+  const orion = { ...p, sku: 'ORI121236120', description: 'Orion-Tr isolated converter', price: 2265.38,
+    enduser_price_zar: { price: 4315 } };
+  const existing = Object.fromEntries(Object.keys(items).map(company => [company,
+    [soldItem(company, orion.sku, company === 'thanda-solar' ? 2265.38 : 2589, 4795.01)]]));
+  const before = structuredClone(existing);
+  const rows = run({ catalogue: [orion], items: existing });
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.kind, 'selling');
+    assert.equal(row.previous, 4795.01);
+    assert.equal(row.expectedSalesPrice, 4795.01);
+    assert.equal(row.proposed, 4315, 'explicit supplier list wins over cost / 0.525 rounding');
+    assert.equal(row.listSource, 'eorder');
+    assert.equal(row.reviewBlocker, null);
+    assert.equal(row.reason, null);
+    assert.equal(needsAttention(row), true);
+  }
+  assert.deepEqual(existing, before, 'comparison does not update Xero prices or stock');
+});
+
+test('selling comparisons show increases, decreases and known zero independently from cost changes', () => {
+  for (const previous of [900, 1100, 0]) {
+    const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 400, previous)] };
+    const rows = run({ items: existing }).filter(row => row.company === 'thanda-solar');
+    assert.deepEqual(rows.map(row => row.kind), ['price', 'selling']);
+    assert.equal(rows[0].previous, 400);
+    assert.equal(rows[0].proposed, 525);
+    assert.equal(rows[1].previous, previous);
+    assert.equal(rows[1].proposed, 1000);
+    assert.equal(rows[1].reviewBlocker, null);
+    assert.notEqual(rows[0].fingerprint, rows[1].fingerprint);
+  }
+  const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar')] };
+  assert.deepEqual(sellingRows({ items: existing }), []);
+});
+
+test('selling comparison rejects unknown configuration without inferring zero or enabling sales', () => {
+  for (const change of [{ IsSold: false }, { IsSold: null }, { IsSold: undefined }, { ItemID: null }, { ItemID: ' ' }]) {
+    const rows = sellingRows({ items: { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 525, 1100, change)] } });
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].reviewBlocker);
+    assert.equal(rows[0].reason, rows[0].reviewBlocker);
+  }
+  for (const previous of [undefined, null, '', ' ', true, false, [], {}, NaN, Infinity, -1, '1e3', '0x10', '12.1234', '12.12345', 10_000_000]) {
+    const row = sellingRows({ items: { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 525, 1000, { SalesDetails: { UnitPrice: previous } })] } })[0];
+    assert.equal(row.previous, null, String(previous));
+    assert.equal(row.expectedSalesPrice, null);
+    assert.match(row.reviewBlocker, /selling price is unavailable or invalid/);
+  }
+  for (const supplied of [0, -1, 'invalid', true]) {
+    const row = sellingRows({ catalogue: [{ ...p, enduser_price_zar: { price: supplied } }],
+      items: { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 525, 1100)] } })[0];
+    assert.equal(row.proposed, null);
+    assert.ok(row.reviewBlocker);
+  }
+});
+
+test('selling approvals bind only to company, literal SKU, item identity and reviewed before/after prices', () => {
+  const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 400, 1100)] };
+  const before = sellingRows({ items: existing })[0];
+  const refreshed = sellingRows({ items: { ...existing, 'thanda-solar': [{ ...existing['thanda-solar'][0],
+    QuantityOnHand: 8, PurchaseDetails: { UnitPrice: 401 } }] },
+  catalogue: [{ ...p, description: 'Updated description', price: 526, all_stock_by_warehouse: { af_sa_inzuzo: 9 } }],
+  successions: [{ predecessor_sku: 'PMP482305010', successor_sku: p.sku }],
+  observedAt: new Date(now + 1000).toISOString() })[0];
+  assert.equal(before.fingerprint, refreshed.fingerprint);
+  assert.equal(changeSignature([before]), changeSignature([refreshed]));
+  for (const patch of [{ ItemID: 'another-item' }, { SalesDetails: { UnitPrice: 1101 } }]) {
+    const changed = sellingRows({ items: { ...existing, 'thanda-solar': [{ ...existing['thanda-solar'][0], ...patch }] } })[0];
+    assert.notEqual(before.fingerprint, changed.fingerprint);
+  }
+  assert.notEqual(before.fingerprint, sellingRows({ items: existing,
+    catalogue: [{ ...p, enduser_price_zar: { price: 1001 } }] })[0].fingerprint);
+  const otherCompany = sellingRows({ items: { ...items, 'sensible-solar': [soldItem('sensible-solar', p.sku, 600, 1100)] } })[0];
+  assert.notEqual(before.fingerprint, otherCompany.fingerprint);
+});
+
+test('selling prices never migrate from a predecessor or retail alias and retired rows have no selling update', () => {
+  const old = 'PMP482305010';
+  const retail = `${p.sku}R`;
+  const successions = [{ predecessor_sku: old, successor_sku: p.sku }];
+  const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar', old, 525, 3000),
+    soldItem('thanda-solar', p.sku, 525, 1100), soldItem('thanda-solar', retail, 525, 1200)] };
+  const rows = run({ items: existing, successions, catalogue: [{ ...p, sku: old, stock_quantity: 0 }, p, { ...p, sku: retail }] });
+  assert.equal(rows.find(row => row.company === 'thanda-solar' && row.sku === old).kind, 'archive');
+  assert.deepEqual(rows.filter(row => row.kind === 'selling').map(row => [row.sku, row.previous]), [[p.sku, 1100], [retail, 1200]]);
+  const aliasOnly = { ...items, 'thanda-solar': [soldItem('thanda-solar', retail, 525, 1200)] };
+  assert.deepEqual(sellingRows({ items: aliasOnly }), []);
+});
+
+test('literal company stock is numeric and its inventory-tracking status stays separate', () => {
+  for (const [raw, expected] of [[0, 0], ['0', 0], ['0.0000', 0], [1.5, 1.5], [-1, -1], [false, null], [true, null], ['', null], [' ', null], [null, null], [undefined, null], ['0x0', null], ['0e0', null]]) {
+    const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 400, 1000, { QuantityOnHand: raw })] };
+    const row = run({ items: existing }).find(candidate => candidate.company === 'thanda-solar');
+    assert.equal(row.stock, expected, String(raw));
+    assert.equal(row.stockTracked, true);
+  }
+  for (const [raw, expected] of [[true, true], [false, false], [null, null], [undefined, null], ['true', null]]) {
+    const existing = { ...items, 'thanda-solar': [soldItem('thanda-solar', p.sku, 400, 1000, { IsTrackedAsInventory: raw })] };
+    const row = run({ items: existing }).find(candidate => candidate.company === 'thanda-solar');
+    assert.equal(row.stock, 0);
+    assert.equal(row.stockTracked, expected);
+  }
+});
+
+test('a completed archive review cannot hide later positive, unknown or untracked stock', () => {
+  const row = { kind: 'archive', company: 'thanda-solar', sku: 'PMP482305010', eligibleForArchiveReview: true,
+    itemId: 'original-item', stock: 0, stockTracked: true };
+  const history = { [row.sku]: { retiredSince: '2026-11-25T08:00:00Z' } };
+  const completed = [{ company: row.company, sku: row.sku, completed_at: '2026-11-26T08:00:00Z' }];
+  assert.equal(archiveCompletionRecorded(row, history, completed), true);
+  for (const change of [{ stock: 1 }, { stock: null }, { stock: -1 }, { stock: '0' }, { stockTracked: false },
+    { stockTracked: null }, { eligibleForArchiveReview: false }, { itemId: null }]) {
+    assert.equal(archiveCompletionRecorded({ ...row, ...change }, history, completed), false);
+  }
+  assert.equal(archiveCompletionRecorded(row, { [row.sku]: {} }, completed), false);
+  assert.equal(archiveCompletionRecorded({ ...row, company: 'sensible-solar' }, history, completed), false);
 });
